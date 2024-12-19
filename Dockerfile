@@ -1,4 +1,4 @@
-FROM tdlib:latest AS builder
+FROM acrnetcus.azurecr.io/tdlib:latest AS builder
 
 RUN apk add --no-cache g++ make cmake git linux-headers binutils go
 
@@ -20,7 +20,7 @@ COPY . .
 RUN CGO_ENABLED=1 go build -o main .
 
 # Stage 2: Minimal runtime image
-FROM tdlib:latest
+FROM acrnetcus.azurecr.io/tdlib:latest
 
 # Set the working directory
 WORKDIR /app
