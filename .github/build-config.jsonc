@@ -8,7 +8,8 @@
         {
             "image_name": "tdlib",
             "context": ".",
-            "dockerfile": "Dockerfile.tdlib"
+            "dockerfile": "Dockerfile.tdlib",
+            "tag_override": "latest"
         }
     ],
     "deploy_patches": [
