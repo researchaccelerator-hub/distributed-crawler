@@ -4,12 +4,18 @@
     "app_name": "tdlib-scraper",
     "resource_group": "rg-net-aks",
     "acr_name": "acrnetcus",
+    "sequential_build": true,
     "builds": [
         {
             "image_name": "tdlib",
             "context": ".",
             "dockerfile": "Dockerfile.tdlib",
             "tag_override": "latest"
+        },
+        {
+            "image_name": "td-scraper",
+            "context": ".",
+            "dockerfile": "Dockerfile"
         }
     ],
     "deploy_patches": [
