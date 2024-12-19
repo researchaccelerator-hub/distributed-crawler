@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	log.Info().Msg("Starting scraper")
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	list, err := state.SeedSetup(parseSeedList())
 	// Load progress
