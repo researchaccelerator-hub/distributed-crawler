@@ -1,0 +1,20 @@
+{
+    "subscription_id": "c78f2aab-2705-48b8-b9c1-71322823b243",
+    "deploy_type": "K8S",
+    "app_name": "tdlib-scraper",
+    "resource_group": "rg-net-aks",
+    "acr_name": "acrnetcus",
+    "builds": [
+        {
+            "image_name": "tdlib",
+            "context": ".",
+            "dockerfile": "Dockerfile.tdlib"
+        }
+    ],
+    "deploy_patches": [
+        // {
+        //     "path": ".[0].value",
+        //     "value": "acrnetcus.azurecr.io/unchained-frontend:%IMAGE_TAG%"
+        // }
+    ]
+}
