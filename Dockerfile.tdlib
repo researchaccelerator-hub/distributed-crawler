@@ -1,0 +1,28 @@
+FROM alpine:3.21
+
+WORKDIR /
+
+RUN apk add --no-cache \
+        ca-certificates
+
+RUN apk add --no-cache --virtual .build-deps \
+        g++ \
+        make \
+        cmake \
+        git \
+        gperf \
+        libressl-dev \
+        zlib-dev \
+        zlib-static \
+        linux-headers;
+
+RUN apk update &&\
+    apk upgrade &&\
+    apk add alpine-sdk linux-headers git zlib-dev gperf php cmake &&\
+    git clone https://github.com/tdlib/td.git &&\
+    cd td &&\
+    rm -rf build &&\
+    mkdir build &&\
+    cd build &&\
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=/usr/local .. &&\
+    cmake --build . --target install
