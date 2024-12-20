@@ -14,7 +14,7 @@ import (
 // It sets the necessary TDLib parameters, including API ID and hash,
 // database and file directories, and logging verbosity level. The function
 // returns the connected client instance or an error if the connection fails.
-func TdConnect() (*client.Client, error) {
+func TdConnect(storageprefix string) (*client.Client, error) {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
 
@@ -25,8 +25,8 @@ func TdConnect() (*client.Client, error) {
 
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(".tdlib", "database"),
-		FilesDirectory:      filepath.Join(".tdlib", "files"),
+		DatabaseDirectory:   filepath.Join(storageprefix, ".tdlib", "database"),
+		FilesDirectory:      filepath.Join(storageprefix, ".tdlib", "files"),
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
 		UseMessageDatabase:  true,

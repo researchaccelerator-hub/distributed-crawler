@@ -29,7 +29,7 @@ func main() {
 		item := list[i]
 		log.Info().Msgf("Processing item: %s", item)
 
-		if err = run(item, crawlid, *sm); err != nil {
+		if err = run(item, storageRoot, *sm); err != nil {
 			log.Error().Stack().Err(err).Msgf("Error processing item %s", item)
 		}
 
@@ -79,8 +79,8 @@ func generateCrawlID() string {
 // errors during connection, file operations, and message parsing, ensuring
 // resources are properly closed. The function returns an error if any operation
 // fails.
-func run(channelUsername string, crawlid string, sm state.StateManager) error {
-	tdlibClient, err := telegramhelper.TdConnect()
+func run(channelUsername string, storageprefix string, sm state.StateManager) error {
+	tdlibClient, err := telegramhelper.TdConnect(storageprefix)
 	// Ensure tdlibClient is closed after the function finishes
 	defer func() {
 		if tdlibClient != nil {

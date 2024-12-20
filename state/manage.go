@@ -2,8 +2,11 @@ package state
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/rs/zerolog/log"
 	"os"
 	"path/filepath"
@@ -154,17 +157,41 @@ func (sm *StateManager) SaveProgress(index int) error {
 // Returns:
 //   - An error if there is a failure in creating the file or writing the post to it.
 func (sm *StateManager) StoreData(channelname string, post model.Post) error {
-	// Construct the file path
+	// Check if environment variables for Azure Blob Storage are set
+	containerName := os.Getenv("CONTAINER_NAME")
+	blobName := os.Getenv("BLOB_NAME")
+	accountUrl := os.Getenv("AZURE_STORAGE_ACCOUNT_URL")
+	// If both containerName and blobName are set, upload to Azure Blob Storage
+	if containerName != "" && blobName != "" {
+		// Create an Azure Blob Storage client
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			return fmt.Errorf("failed to create Azure credential: %w", err)
+		}
+		client, err := azblob.NewClient(accountUrl, cred, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create Azure Blob Storage client: %w", err)
+		}
+
+		// Use the uploadStructToBlob function to upload the post directly
+		blobPath := filepath.Join(blobName, channelname+".jsonl")
+		err = sm.uploadStructToBlob(client, containerName, blobPath, post)
+		if err != nil {
+			return fmt.Errorf("failed to upload post to Azure Blob Storage: %w", err)
+		}
+
+		log.Info().Msgf("Post successfully uploaded to Azure Blob Storage for channel %s", channelname)
+		return nil
+	}
+
+	// If Azure Blob Storage variables are not set, fall back to local storage
 	channelDir := filepath.Join(sm.storageRoot, "crawls", sm.crawlid, channelname)
 	if err := os.MkdirAll(channelDir, os.ModePerm); err != nil {
 		log.Error().Err(err).Msg("Failed to create channel directory")
 		return fmt.Errorf("failed to create directory for channel %s: %w", channelname, err)
 	}
 
-	// Define the JSONL file path
 	jsonlFile := filepath.Join(channelDir, "data.jsonl")
-
-	// Open the file in append mode, create it if it does not exist
 	file, err := os.OpenFile(jsonlFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to open JSONL file")
@@ -172,20 +199,62 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 	}
 	defer file.Close()
 
-	// Marshal the post to JSON
 	postData, err := json.Marshal(post)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to marshal post to JSON")
 		return fmt.Errorf("failed to marshal post: %w", err)
 	}
 
-	// Write the JSON data to the file followed by a newline
 	_, err = file.WriteString(string(postData) + "\n")
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to write to JSONL file")
 		return fmt.Errorf("failed to write post to file %s: %w", jsonlFile, err)
 	}
 
-	log.Info().Msgf("Post successfully stored for channel %s", channelname)
+	log.Info().Msgf("Post successfully stored locally for channel %s", channelname)
+	return nil
+}
+
+func uploadBlobFileAndDelete(client *azblob.Client, filePath, containerName, blobName string) error {
+	// Open the file for reading
+	file, err := os.OpenFile(filePath, os.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	// Upload the file to the specified container with the specified blob name
+	_, err = client.UploadFile(context.TODO(), containerName, blobName, file, nil)
+	if err != nil {
+		return fmt.Errorf("failed to upload file to Azure Blob Storage: %w", err)
+	}
+
+	// Remove the local file upon successful upload
+	err = os.Remove(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to delete local file after upload: %w", err)
+	}
+
+	fmt.Println("File uploaded and deleted successfully.")
+	return nil
+}
+
+func (sm *StateManager) uploadStructToBlob(client *azblob.Client, containerName, blobName string, post model.Post) error {
+	// Serialize the post object to JSON
+	postData, err := json.Marshal(post)
+	if err != nil {
+		return fmt.Errorf("failed to marshal post to JSON: %w", err)
+	}
+
+	// Convert JSON data to an io.Reader for uploading
+	dataReader := strings.NewReader(string(postData) + "\n")
+
+	// Upload the JSON data directly to Azure Blob Storage
+	_, err = client.UploadStream(context.TODO(), containerName, blobName, dataReader, nil)
+	if err != nil {
+		return fmt.Errorf("failed to upload post to Azure Blob Storage: %w", err)
+	}
+
+	fmt.Printf("Post uploaded to Azure Blob Storage: %s/%s\n", containerName, blobName)
 	return nil
 }
