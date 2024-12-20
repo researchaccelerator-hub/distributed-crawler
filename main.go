@@ -1,13 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"os"
 	"strings"
 	"tdlib-scraper/state"
 	"tdlib-scraper/telegramhelper"
@@ -15,27 +13,29 @@ import (
 )
 
 func main() {
-	log.Info().Msg("Starting scraper")
+	crawlid := generateCrawlID()
+	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
+	storageRoot := "/Users/tombarber/scraper"
+	sm := state.NewStateManager(storageRoot, crawlid)
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	list, err := state.SeedSetup(parseSeedList())
+	list, err := sm.SeedSetup(parseSeedList())
 	// Load progress
-	progress, err := state.LoadProgress()
+	progress, err := sm.LoadProgress()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load progress")
 	}
-	crawlid := generateCrawlID()
 	// Process remaining items
 	for i := progress; i < len(list); i++ {
 		item := list[i]
 		log.Info().Msgf("Processing item: %s", item)
 
-		if err = run(item, crawlid); err != nil {
+		if err = run(item, crawlid, *sm); err != nil {
 			log.Error().Stack().Err(err).Msgf("Error processing item %s", item)
 		}
 
 		// Update progress
 		progress = i + 1
-		if err = state.SaveProgress(progress); err != nil {
+		if err = sm.SaveProgress(progress); err != nil {
 			log.Fatal().Err(err).Msgf("Failed to save progress: %v", err)
 		}
 	}
@@ -79,7 +79,7 @@ func generateCrawlID() string {
 // errors during connection, file operations, and message parsing, ensuring
 // resources are properly closed. The function returns an error if any operation
 // fails.
-func run(channelUsername string, crawlid string) error {
+func run(channelUsername string, crawlid string, sm state.StateManager) error {
 	tdlibClient, err := telegramhelper.TdConnect()
 	// Ensure tdlibClient is closed after the function finishes
 	defer func() {
@@ -93,16 +93,6 @@ func run(channelUsername string, crawlid string) error {
 			}
 		}
 	}()
-	// Define a filename based on the channel name
-	filename := fmt.Sprintf("%s_%s.jsonl", channelUsername, crawlid)
-
-	// Open the file in append mode, create it if it doesn't exist
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Error().Err(err).Stack().Msgf("failed to open or create file: %s", filename)
-		return err
-	}
-	defer file.Close()
 
 	// Search for the channel
 	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
@@ -172,19 +162,11 @@ func run(channelUsername string, crawlid string) error {
 				break
 			}
 			if post.PostUID != "" {
-				messageJSON, err := json.Marshal(post)
-				if err != nil {
-					log.Error().Err(err).Stack().Msg("error marshalling struct to JSON")
-					break
-				}
-
-				// Write the JSON object followed by a newline
-				_, err = file.WriteString(string(messageJSON) + "\n")
+				err = sm.StoreData(channelUsername, post)
 				if err != nil {
 					log.Fatal().Err(err).Stack().Msg("failed to write to file: %w")
 					return err
 				}
-				log.Info().Msgf("JSON written to file: %s\n", filename)
 			}
 		}
 		fromMessageId = chatHistory.Messages[len(chatHistory.Messages)-1].Id

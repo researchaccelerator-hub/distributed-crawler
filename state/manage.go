@@ -2,17 +2,33 @@ package state
 
 import (
 	"bufio"
+	"encoding/json"
+	"fmt"
 	"github.com/rs/zerolog/log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"tdlib-scraper/model"
 )
 
-const (
-	stateDir     = "/state"
-	listFile     = stateDir + "/list.txt"
-	progressFile = stateDir + "/progress.txt"
-)
+// StateManager encapsulates state management with a configurable storage root prefix.
+type StateManager struct {
+	storageRoot  string
+	listFile     string
+	progressFile string
+	crawlid      string
+}
+
+// NewStateManager initializes a new StateManager with the given storage root prefix.
+func NewStateManager(storageRoot string, crawlid string) *StateManager {
+	return &StateManager{
+		storageRoot:  storageRoot,
+		listFile:     storageRoot + "/list.txt",
+		progressFile: storageRoot + "/progress.txt",
+		crawlid:      crawlid,
+	}
+}
 
 // SeedSetup initializes the list file with the provided seed list if it does not exist,
 // and then loads the list from the file.
@@ -23,14 +39,14 @@ const (
 // Returns:
 //   - A slice of strings containing the loaded list from the file.
 //   - An error if there is a failure in loading the list.
-func SeedSetup(seedlist []string) ([]string, error) {
+func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 	// Seed list if needed
-	if _, err := os.Stat(listFile); os.IsNotExist(err) {
-		seedList(seedlist)
+	if _, err := os.Stat(sm.listFile); os.IsNotExist(err) {
+		sm.seedList(seedlist)
 	}
 
 	// Load list
-	list, err := loadList()
+	list, err := sm.loadList()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to load list")
 	}
@@ -45,8 +61,8 @@ func SeedSetup(seedlist []string) ([]string, error) {
 //
 // This function logs a fatal error and terminates the program if it fails to create the file
 // or write any item to the file. On successful completion, it logs an informational message.
-func seedList(items []string) {
-	file, err := os.Create(listFile)
+func (sm *StateManager) seedList(items []string) {
+	file, err := os.Create(sm.listFile)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create list file")
 	}
@@ -66,8 +82,8 @@ func seedList(items []string) {
 // Returns:
 //   - A slice of strings containing the items from the list file.
 //   - An error if there is a failure in opening the file or reading its contents.
-func loadList() ([]string, error) {
-	file, err := os.Open(listFile)
+func (sm *StateManager) loadList() ([]string, error) {
+	file, err := os.Open(sm.listFile)
 	if err != nil {
 		return nil, err
 	}
@@ -93,12 +109,12 @@ func loadList() ([]string, error) {
 //   - An error if there is a failure in reading the file or converting its contents to an integer.
 //
 // If the progress file does not exist, it returns 0 and no error, indicating to start from the beginning.
-func LoadProgress() (int, error) {
-	if _, err := os.Stat(progressFile); os.IsNotExist(err) {
+func (sm *StateManager) LoadProgress() (int, error) {
+	if _, err := os.Stat(sm.progressFile); os.IsNotExist(err) {
 		return 0, nil // Start from the beginning if no progress file
 	}
 
-	data, err := os.ReadFile(progressFile)
+	data, err := os.ReadFile(sm.progressFile)
 	if err != nil {
 		return 0, err
 	}
@@ -118,8 +134,8 @@ func LoadProgress() (int, error) {
 //
 // Returns:
 //   - An error if there is a failure in creating the file or writing the index to it.
-func SaveProgress(index int) error {
-	file, err := os.Create(progressFile)
+func (sm *StateManager) SaveProgress(index int) error {
+	file, err := os.Create(sm.progressFile)
 	if err != nil {
 		return err
 	}
@@ -127,4 +143,49 @@ func SaveProgress(index int) error {
 
 	_, err = file.WriteString(strconv.Itoa(index) + "\n")
 	return err
+}
+
+// StoreData saves a model.Post to a JSONL file under the channel's directory in storageRoot/crawls/crawlid.
+//
+// Parameters:
+//   - channelname: The name of the channel associated with the post.
+//   - post: The model.Post object to be saved.
+//
+// Returns:
+//   - An error if there is a failure in creating the file or writing the post to it.
+func (sm *StateManager) StoreData(channelname string, post model.Post) error {
+	// Construct the file path
+	channelDir := filepath.Join(sm.storageRoot, "crawls", sm.crawlid, channelname)
+	if err := os.MkdirAll(channelDir, os.ModePerm); err != nil {
+		log.Error().Err(err).Msg("Failed to create channel directory")
+		return fmt.Errorf("failed to create directory for channel %s: %w", channelname, err)
+	}
+
+	// Define the JSONL file path
+	jsonlFile := filepath.Join(channelDir, "data.jsonl")
+
+	// Open the file in append mode, create it if it does not exist
+	file, err := os.OpenFile(jsonlFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to open JSONL file")
+		return fmt.Errorf("failed to open file %s: %w", jsonlFile, err)
+	}
+	defer file.Close()
+
+	// Marshal the post to JSON
+	postData, err := json.Marshal(post)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal post to JSON")
+		return fmt.Errorf("failed to marshal post: %w", err)
+	}
+
+	// Write the JSON data to the file followed by a newline
+	_, err = file.WriteString(string(postData) + "\n")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to write to JSONL file")
+		return fmt.Errorf("failed to write post to file %s: %w", jsonlFile, err)
+	}
+
+	log.Info().Msgf("Post successfully stored for channel %s", channelname)
+	return nil
 }
