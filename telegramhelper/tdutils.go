@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"tdlib-scraper/model"
+	"tdlib-scraper/state"
 	"time"
 )
 
@@ -309,7 +310,7 @@ func processMessageSafely(mymsg *client.MessageVideo, tdlibClient *client.Client
 // Returns:
 // - post: A Post model populated with the extracted data.
 // - err: An error if the parsing fails.
-func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client.Chat, supergroup *client.Supergroup, supergroupInfo *client.SupergroupFullInfo, postcount int, viewcount int, channelName string, tdlibClient *client.Client) (post model.Post, err error) {
+func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client.Chat, supergroup *client.Supergroup, supergroupInfo *client.SupergroupFullInfo, postcount int, viewcount int, channelName string, tdlibClient *client.Client, sm state.StateManager) (post model.Post, err error) {
 	// Defer to recover from panics and ensure the crawl continues
 	defer func() {
 		if r := recover(); r != nil {
@@ -359,10 +360,20 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 	case *client.MessagePhoto:
 		description = content.Caption.Text
 		thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
+		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(path)
+		if err != nil {
+			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
+		}
 		//thumbnailPath = fetch(tdlibClient, content.Photo.Sizes[0].Photo.Remote.Id)
 	case *client.MessageAnimation:
 		description = content.Caption.Text
 		thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
+		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(path)
+		if err != nil {
+			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
+		}
 	case *client.MessageAnimatedEmoji:
 		description = content.Emoji
 	case *client.MessagePoll:
@@ -374,19 +385,44 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 	case *client.MessageSticker:
 		thumbnailPath = content.Sticker.Sticker.Remote.Id
 		thumbnailPath = Fetch(tdlibClient, content.Sticker.Sticker.Remote.Id)
+		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(path)
+		if err != nil {
+			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
+		}
 	case *client.MessageGiveawayWinners:
 		fmt.Println("This message is a giveaway winner:", content)
 	case *client.MessageGiveawayCompleted:
 		fmt.Println("This message is a giveaway completed:", content)
 	case *client.MessageVideoNote:
 		thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
+		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(path)
+		if err != nil {
+			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
+		}
 		videoPath = content.VideoNote.Video.Remote.Id
+		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(path)
+		if err != nil {
+			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
+		}
 		//thumbnailPath = fetch(tdlibClient, thumbnailPath)
 		//videoPath = fetch(tdlibClient, videoPath)
 	case *client.MessageDocument:
 		description = content.Document.FileName
 		thumbnailPath = content.Document.Thumbnail.File.Remote.Id
+		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(path)
+		if err != nil {
+			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
+		}
 		videoPath = content.Document.Document.Remote.Id
+		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(path)
+		if err != nil {
+			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
+		}
 		//thumbnailPath = fetch(tdlibClient, thumbnailPath)
 		//videoPath = fetch(tdlibClient, videoPath)
 	default:

@@ -156,6 +156,26 @@ func (sm *StateManager) SaveProgress(index int) error {
 	_, err = file.WriteString(strconv.Itoa(index) + "\n")
 	return err
 }
+func (sm *StateManager) createAZClient() (*azblob.Client, error) {
+	// Check if environment variables for Azure Blob Storage are set
+	containerName := os.Getenv("CONTAINER_NAME")
+	blobName := os.Getenv("BLOB_NAME")
+	accountUrl := os.Getenv("AZURE_STORAGE_ACCOUNT_URL")
+
+	if containerName != "" && blobName != "" {
+		// Azure Blob Storage logic
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Azure credential: %w", err)
+		}
+		client, err := azblob.NewClient(accountUrl, cred, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Azure Blob Storage client: %w", err)
+		}
+		return client, nil
+	}
+	return nil, nil
+}
 
 // StoreData saves a model.Post to a JSONL file under the channel's directory in storageRoot/crawls/crawlid.
 //
@@ -175,19 +195,10 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 	// Check if environment variables for Azure Blob Storage are set
 	containerName := os.Getenv("CONTAINER_NAME")
 	blobName := os.Getenv("BLOB_NAME")
-	accountUrl := os.Getenv("AZURE_STORAGE_ACCOUNT_URL")
 
 	if containerName != "" && blobName != "" {
 		// Azure Blob Storage logic
-		cred, err := azidentity.NewDefaultAzureCredential(nil)
-		if err != nil {
-			return fmt.Errorf("failed to create Azure credential: %w", err)
-		}
-		client, err := azblob.NewClient(accountUrl, cred, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create Azure Blob Storage client: %w", err)
-		}
-
+		client, err := sm.createAZClient()
 		// Use a function to append the data to an existing blob or create a new one if not present
 		blobPath := filepath.Join(blobName, channelname+".jsonl")
 		err = sm.appendToBlob(client, containerName, blobPath, postData)
@@ -295,4 +306,34 @@ func (sm *StateManager) appendReaderToBlob(client *azblob.Client, containerName,
 		return fmt.Errorf("failed to read data: %w", err)
 	}
 	return sm.appendToBlob(client, containerName, blobName, data)
+}
+
+func (sm *StateManager) UploadBlobFileAndDelete(filePath string) error {
+	// Open the file for reading
+	file, err := os.OpenFile(filePath, os.O_RDONLY, 0)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+	client, err := sm.createAZClient()
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to create Azure Blob Storage client")
+	}
+
+	containerName := os.Getenv("CONTAINER_NAME")
+	blobName := os.Getenv("BLOB_NAME")
+	// Upload the file to the specified container with the specified blob name
+	_, err = client.UploadFile(context.TODO(), containerName, blobName, file, nil)
+	if err != nil {
+		return fmt.Errorf("failed to upload file to Azure Blob Storage: %w", err)
+	}
+
+	// Remove the local file upon successful upload
+	err = os.Remove(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to delete local file after upload: %w", err)
+	}
+
+	fmt.Println("File uploaded and deleted successfully.")
+	return nil
 }
