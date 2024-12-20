@@ -167,7 +167,7 @@ func run(channelUsername string, storageprefix string, sm state.StateManager) er
 				log.Error().Stack().Err(err).Msg("Failed to get message link")
 			}
 
-			post, err := telegramhelper.ParseMessage(m, messageLinkResponse, chatdet, supergroup, supergroupInfo, pc3, vc, channelUsername, tdlibClient)
+			post, err := telegramhelper.ParseMessage(m, messageLinkResponse, chatdet, supergroup, supergroupInfo, pc3, vc, channelUsername, tdlibClient, sm)
 			if err != nil {
 				log.Error().Stack().Err(err).Msg("Failed to parse message")
 				break
