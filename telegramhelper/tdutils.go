@@ -12,6 +12,87 @@ import (
 	"time"
 )
 
+func GenCode() {
+	authorizer := client.ClientAuthorizer()
+
+	apiId := os.Getenv("TG_API_ID")
+	intValue, err := strconv.Atoi(apiId)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error converting string to int\n")
+
+	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Failed to get working directory: %v\n", err)
+		return
+	}
+	tempDir, err := os.MkdirTemp(workingDir, "tempdir-*")
+	log.Info().Msgf("Temporary directory: %s", tempDir)
+	defer func() {
+		err := os.RemoveAll(tempDir)
+		if err != nil {
+			fmt.Printf("Failed to remove temporary directory: %v\n", err)
+		} else {
+			fmt.Println("Temporary directory removed.")
+		}
+	}()
+	if err != nil {
+		fmt.Printf("Failed to create temporary directory: %v\n", err)
+		return
+	}
+	int32Value := int32(intValue)
+	apiHash := os.Getenv("TG_API_HASH")
+	filedir := filepath.Join(".tdlib", "files")
+	if err != nil {
+		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
+	}
+	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
+		UseTestDc:           false,
+		DatabaseDirectory:   filepath.Join(tempDir, ".tdlib", "database"),
+		FilesDirectory:      filedir,
+		UseFileDatabase:     true,
+		UseChatInfoDatabase: true,
+		UseMessageDatabase:  true,
+		UseSecretChats:      false,
+		ApiId:               int32Value,
+		ApiHash:             apiHash,
+		SystemLanguageCode:  "en",
+		DeviceModel:         "Server",
+		SystemVersion:       "1.0.0",
+		ApplicationVersion:  "1.0.0",
+	}
+
+	authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
+
+	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
+		NewVerbosityLevel: 1,
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
+	}
+	clientReady := make(chan *client.Client)
+	errChan := make(chan error)
+	go func() {
+		log.Info().Msg("Starting client initialization...")
+		tdlibClient, err := client.NewClient(authorizer)
+		if err != nil {
+			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
+			return
+		}
+		clientReady <- tdlibClient
+	}()
+
+	select {
+	case tdlibClient := <-clientReady:
+		log.Info().Msg("Client initialized successfully")
+		defer tdlibClient.Close()
+	case err := <-errChan:
+		log.Fatal().Err(err).Msg("Error initializing client")
+	case <-time.After(30 * time.Second):
+		log.Warn().Msg("Timeout reached. Exiting application.")
+	}
+}
+
 // TdConnect initializes and connects a new TDLib client instance.
 // It sets the necessary TDLib parameters, including API ID and hash,
 // database and file directories, and logging verbosity level. The function

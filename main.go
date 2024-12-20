@@ -14,12 +14,25 @@ import (
 )
 
 func main() {
+	var stringList string
+	flag.StringVar(&stringList, "seed-list", "", "Comma-separated list of seed channels")
+	genCode := flag.Bool("gen-code", false, "Generate code (default: false)")
+	// Parse the flags
+	flag.Parse()
+
+	// Check if the flag is set
+	if *genCode {
+		fmt.Println("The -gen-code flag is set!")
+		telegramhelper.GenCode()
+		os.Exit(0)
+	}
+
 	crawlid := generateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
 	storageRoot := os.Getenv("STORAGE_ROOT")
 	sm := state.NewStateManager(storageRoot, crawlid)
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	list, err := sm.SeedSetup(parseSeedList())
+	list, err := sm.SeedSetup(parseSeedList(stringList))
 	// Load progress
 	progress, err := sm.LoadProgress()
 	if err != nil {
@@ -48,10 +61,7 @@ func main() {
 // parseSeedList parses a command-line flag "seed-list" into a slice of strings.
 // The flag is expected to be a comma-separated list of seed channels.
 // If the flag is not provided, it logs an informational message and returns an empty slice.
-func parseSeedList() []string {
-	var stringList string
-	flag.StringVar(&stringList, "seed-list", "", "Comma-separated list of seed channels")
-	flag.Parse()
+func parseSeedList(stringList string) []string {
 
 	if stringList == "" {
 		log.Info().Msg("seed-list argument is not provided")
