@@ -11,13 +11,13 @@
             "context": ".",
             "dockerfile": "Dockerfile"
         }
-        // ,
-        // {
-        //     "image_name": "tdlib",
-        //     "context": ".",
-        //     "dockerfile": "Dockerfile.tdlib",
-        //     "tag_override": "latest"
-        // }
+        ,
+        {
+            "image_name": "tdlib",
+            "context": ".",
+            "dockerfile": "Dockerfile.tdlib",
+            "tag_override": "latest"
+        }
     ],
     "deploy_patches": [
         {
