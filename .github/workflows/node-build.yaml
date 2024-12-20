@@ -11,8 +11,7 @@ on:
     #   - .github/build-config.jsonc
 jobs:
   node-build:
-    uses: IRIEAccelerator/common-workflows/.github/workflows/node-reuse.yaml@feature/INFRA-103/generalizeNodeBuild
-    # uses: IRIEAccelerator/common-workflows/.github/workflows/node-reuse.yaml@main
+    uses: IRIEAccelerator/common-workflows/.github/workflows/node-reuse.yaml@main
     secrets: inherit
     with:
       config-file: .github/build-config.jsonc

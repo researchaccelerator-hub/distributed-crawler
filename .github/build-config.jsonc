@@ -20,9 +20,9 @@
         // }
     ],
     "deploy_patches": [
-        // {
-        //     "path": ".[0].value",
-        //     "value": "acrnetcus.azurecr.io/unchained-frontend:%IMAGE_TAG%"
-        // }
+        {
+             "path": ".[0].value",
+             "value": "acrnetcus.azurecr.io/tdlib-scraper:%IMAGE_TAG%"
+        }
     ]
 }
