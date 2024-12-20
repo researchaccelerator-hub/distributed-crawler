@@ -30,3 +30,4 @@ COPY --from=builder /app/main .
 
 # Set the entrypoint
 ENTRYPOINT ["./main"]
+CMD []
