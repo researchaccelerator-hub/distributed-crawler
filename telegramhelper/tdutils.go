@@ -403,8 +403,8 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	}()
 
 	publishedAt := time.Unix(int64(message.Date), 0)
-	if publishedAt.Year() != 2024 {
-		return model.Post{}, nil // Skip messages not from 2024
+	if publishedAt.Year() > 2018 {
+		return model.Post{}, nil // Skip messages not from earlier than 2018
 	}
 
 	var messageNumber string
