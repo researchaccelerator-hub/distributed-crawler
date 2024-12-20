@@ -226,45 +226,45 @@ func removeMultimedia(filedir string) error {
 // file path as a string. If an error occurs during fetching or downloading, or if
 // the local path is empty, it returns an empty string. The function recovers from
 // any panics, logging the error and ensuring an empty string is returned.
-func Fetch(tdlibClient *client.Client, downloadid string) string {
-	defer func() {
-		if r := recover(); r != nil {
-			// Log the panic and ensure an empty string is returned
-			fmt.Printf("Recovered from panic: %v\n", r)
-		}
-	}()
-
-	// Attempt to fetch the remote file
-	f, err := tdlibClient.GetRemoteFile(&client.GetRemoteFileRequest{
-		RemoteFileId: downloadid,
-	})
-	if err != nil {
-		fmt.Printf("Error fetching remote file: %v\n", err)
-		return ""
-	}
-
-	// Attempt to download the file
-	downloadedFile, err := tdlibClient.DownloadFile(&client.DownloadFileRequest{
-		FileId:      f.Id, // Use the File.Id from the GetRemoteFile response
-		Priority:    1,    // Download priority (1 = high)
-		Offset:      0,    // Start downloading from the beginning
-		Limit:       0,    // Download the entire file
-		Synchronous: true,
-	})
-	if err != nil {
-		fmt.Printf("Error downloading file: %v\n", err)
-		return ""
-	}
-
-	// Check if the local path exists
-	if downloadedFile.Local.Path == "" {
-		fmt.Println("Downloaded file path is empty")
-		return ""
-	}
-
-	fmt.Printf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
-	return downloadedFile.Local.Path
-}
+//func Fetch(tdlibClient *client.Client, downloadid string) string {
+//	defer func() {
+//		if r := recover(); r != nil {
+//			// Log the panic and ensure an empty string is returned
+//			fmt.Printf("Recovered from panic: %v\n", r)
+//		}
+//	}()
+//
+//	// Attempt to fetch the remote file
+//	f, err := tdlibClient.GetRemoteFile(&client.GetRemoteFileRequest{
+//		RemoteFileId: downloadid,
+//	})
+//	if err != nil {
+//		fmt.Printf("Error fetching remote file: %v\n", err)
+//		return ""
+//	}
+//
+//	// Attempt to download the file
+//	downloadedFile, err := tdlibClient.DownloadFile(&client.DownloadFileRequest{
+//		FileId:      f.Id, // Use the File.Id from the GetRemoteFile response
+//		Priority:    1,    // Download priority (1 = high)
+//		Offset:      0,    // Start downloading from the beginning
+//		Limit:       0,    // Download the entire file
+//		Synchronous: true,
+//	})
+//	if err != nil {
+//		fmt.Printf("Error downloading file: %v\n", err)
+//		return ""
+//	}
+//
+//	// Check if the local path exists
+//	if downloadedFile.Local.Path == "" {
+//		fmt.Println("Downloaded file path is empty")
+//		return ""
+//	}
+//
+//	fmt.Printf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
+//	return downloadedFile.Local.Path
+//}
 
 // processMessageSafely extracts and returns the thumbnail path, video path, and description
 // from a given Telegram video message. It ensures the message structure is valid and not corrupt.
@@ -384,7 +384,7 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 		description = content.Caption.Text
 	case *client.MessageSticker:
 		thumbnailPath = content.Sticker.Sticker.Remote.Id
-		thumbnailPath = Fetch(tdlibClient, content.Sticker.Sticker.Remote.Id)
+		//thumbnailPath = Fetch(tdlibClient, content.Sticker.Sticker.Remote.Id)
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
 		err = sm.UploadBlobFileAndDelete(path)
 		if err != nil {
@@ -499,4 +499,42 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 		Reactions: reactions,
 	}
 	return post, nil
+}
+func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Recovered from panic: %v\n", r)
+		}
+	}()
+
+	// Fetch the remote file
+	f, err := tdlibClient.GetRemoteFile(&client.GetRemoteFileRequest{
+		RemoteFileId: downloadid,
+	})
+	if err != nil {
+		fmt.Printf("Error fetching remote file: %v\n", err)
+		return ""
+	}
+
+	// Download the file
+	downloadedFile, err := tdlibClient.DownloadFile(&client.DownloadFileRequest{
+		FileId:      f.Id,
+		Priority:    1,
+		Offset:      0,
+		Limit:       0,
+		Synchronous: true,
+	})
+	if err != nil {
+		fmt.Printf("Error downloading file: %v\n", err)
+		return ""
+	}
+
+	// Ensure the file path is valid
+	if downloadedFile.Local.Path == "" {
+		fmt.Println("Downloaded file path is empty.")
+		return ""
+	}
+
+	fmt.Printf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
+	return downloadedFile.Local.Path
 }
