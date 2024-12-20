@@ -43,7 +43,7 @@ func main() {
 		item := list[i]
 		log.Info().Msgf("Processing item: %s", item)
 
-		if err = run(item, storageRoot, *sm); err != nil {
+		if err = run(crawlid, item, storageRoot, *sm); err != nil {
 			log.Error().Stack().Err(err).Msgf("Error processing item %s", item)
 		}
 
@@ -90,7 +90,7 @@ func generateCrawlID() string {
 // errors during connection, file operations, and message parsing, ensuring
 // resources are properly closed. The function returns an error if any operation
 // fails.
-func run(channelUsername string, storageprefix string, sm state.StateManager) error {
+func run(crawlid, channelUsername string, storageprefix string, sm state.StateManager) error {
 	tdlibClient, err := telegramhelper.TdConnect(storageprefix)
 	// Ensure tdlibClient is closed after the function finishes
 	defer func() {
@@ -167,17 +167,10 @@ func run(channelUsername string, storageprefix string, sm state.StateManager) er
 				log.Error().Stack().Err(err).Msg("Failed to get message link")
 			}
 
-			post, err := telegramhelper.ParseMessage(m, messageLinkResponse, chatdet, supergroup, supergroupInfo, pc3, vc, channelUsername, tdlibClient, sm)
+			_, err = telegramhelper.ParseMessage(crawlid, m, messageLinkResponse, chatdet, supergroup, supergroupInfo, pc3, vc, channelUsername, tdlibClient, sm)
 			if err != nil {
 				log.Error().Stack().Err(err).Msg("Failed to parse message")
 				break
-			}
-			if post.PostUID != "" {
-				err = sm.StoreData(channelUsername, post)
-				if err != nil {
-					log.Fatal().Err(err).Stack().Msg("failed to write to file: %w")
-					return err
-				}
 			}
 		}
 		fromMessageId = chatHistory.Messages[len(chatHistory.Messages)-1].Id

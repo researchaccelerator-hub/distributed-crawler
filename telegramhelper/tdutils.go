@@ -310,7 +310,7 @@ func processMessageSafely(mymsg *client.MessageVideo, tdlibClient *client.Client
 // Returns:
 // - post: A Post model populated with the extracted data.
 // - err: An error if the parsing fails.
-func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client.Chat, supergroup *client.Supergroup, supergroupInfo *client.SupergroupFullInfo, postcount int, viewcount int, channelName string, tdlibClient *client.Client, sm state.StateManager) (post model.Post, err error) {
+func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLink, chat *client.Chat, supergroup *client.Supergroup, supergroupInfo *client.SupergroupFullInfo, postcount int, viewcount int, channelName string, tdlibClient *client.Client, sm state.StateManager) (post model.Post, err error) {
 	// Defer to recover from panics and ensure the crawl continues
 	defer func() {
 		if r := recover(); r != nil {
@@ -361,7 +361,7 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 		description = content.Caption.Text
 		thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(path)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		if err != nil {
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
 		}
@@ -370,7 +370,7 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 		description = content.Caption.Text
 		thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(path)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		if err != nil {
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
 		}
@@ -386,7 +386,7 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 		thumbnailPath = content.Sticker.Sticker.Remote.Id
 		//thumbnailPath = Fetch(tdlibClient, content.Sticker.Sticker.Remote.Id)
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(path)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		if err != nil {
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
 		}
@@ -397,13 +397,13 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 	case *client.MessageVideoNote:
 		thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(path)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		if err != nil {
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
 		}
 		videoPath = content.VideoNote.Video.Remote.Id
 		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(path)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		if err != nil {
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
 		}
@@ -413,13 +413,13 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 		description = content.Document.FileName
 		thumbnailPath = content.Document.Thumbnail.File.Remote.Id
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(path)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		if err != nil {
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
 		}
 		videoPath = content.Document.Document.Remote.Id
 		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(path)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		if err != nil {
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
 		}
@@ -498,6 +498,8 @@ func ParseMessage(message *client.Message, mlr *client.MessageLink, chat *client
 		Comments:  comments,
 		Reactions: reactions,
 	}
+	err = sm.StoreData(crawlid, channelName, post)
+
 	return post, nil
 }
 func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string {

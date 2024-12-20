@@ -10,6 +10,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/rs/zerolog/log"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,13 +25,6 @@ type StateManager struct {
 	progressFile string
 	crawlid      string
 }
-type readSeekCloserWrapper struct {
-	*bytes.Reader
-}
-
-func (r readSeekCloserWrapper) Close() error {
-	return nil
-}
 
 // NewStateManager initializes a new StateManager with the given storage root prefix.
 func NewStateManager(storageRoot string, crawlid string) *StateManager {
@@ -40,6 +34,14 @@ func NewStateManager(storageRoot string, crawlid string) *StateManager {
 		progressFile: storageRoot + "/progress.txt",
 		crawlid:      crawlid,
 	}
+}
+
+type readSeekCloserWrapper struct {
+	*bytes.Reader
+}
+
+func (r readSeekCloserWrapper) Close() error {
+	return nil
 }
 
 // SeedSetup initializes the list file with the provided seed list if it does not exist,
@@ -185,7 +187,7 @@ func (sm *StateManager) createAZClient() (*azblob.Client, error) {
 //
 // Returns:
 //   - An error if there is a failure in creating the file or writing the post to it.
-func (sm *StateManager) StoreData(channelname string, post model.Post) error {
+func (sm *StateManager) StoreData(crawlid, channelname string, post model.Post) error {
 	postData, err := json.Marshal(post)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to marshal post to JSON")
@@ -200,7 +202,7 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 		// Azure Blob Storage logic
 		client, err := sm.createAZClient()
 		// Use a function to append the data to an existing blob or create a new one if not present
-		blobPath := filepath.Join(blobName, channelname+".jsonl")
+		blobPath := filepath.Join(blobName, crawlid, channelname+".jsonl")
 		err = sm.appendToBlob(client, containerName, blobPath, postData)
 		if err != nil {
 			return fmt.Errorf("failed to upload post to Azure Blob Storage: %w", err)
@@ -308,7 +310,7 @@ func (sm *StateManager) appendReaderToBlob(client *azblob.Client, containerName,
 	return sm.appendToBlob(client, containerName, blobName, data)
 }
 
-func (sm *StateManager) UploadBlobFileAndDelete(filePath string) error {
+func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, filePath string) error {
 	// Open the file for reading
 	file, err := os.OpenFile(filePath, os.O_RDONLY, 0)
 	if err != nil {
@@ -321,7 +323,8 @@ func (sm *StateManager) UploadBlobFileAndDelete(filePath string) error {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
+	fp, _ := sm.urlToBlobPath(rawURL)
+	blobName := os.Getenv("BLOB_NAME") + "/" + crawlid + "/media/" + channelid + "/" + fp
 	// Upload the file to the specified container with the specified blob name
 	_, err = client.UploadFile(context.TODO(), containerName, blobName, file, nil)
 	if err != nil {
@@ -336,4 +339,19 @@ func (sm *StateManager) UploadBlobFileAndDelete(filePath string) error {
 
 	fmt.Println("File uploaded and deleted successfully.")
 	return nil
+}
+func (sm *StateManager) urlToBlobPath(rawURL string) (string, error) {
+	// Parse the URL
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	// Get the path and remove the leading slash
+	path := strings.TrimPrefix(parsedURL.Path, "/")
+
+	// Replace slashes with a desired separator, like underscores or keep them
+	blobPath := strings.ReplaceAll(path, "/", "/") // Keeps slashes for folder structure
+
+	return blobPath, nil
 }
