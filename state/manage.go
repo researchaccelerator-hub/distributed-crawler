@@ -324,6 +324,8 @@ func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, file
 
 	containerName := os.Getenv("CONTAINER_NAME")
 	fp, _ := sm.urlToBlobPath(rawURL)
+	filename := filepath.Base(filePath)
+	fp = fp + "_" + filename
 	blobName := os.Getenv("BLOB_NAME") + "/" + crawlid + "/media/" + channelid + "/" + fp
 	// Upload the file to the specified container with the specified blob name
 	_, err = client.UploadFile(context.TODO(), containerName, blobName, file, nil)

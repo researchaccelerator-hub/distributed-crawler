@@ -439,6 +439,10 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 		description = content.Text.Text
 	case *client.MessageVideo:
 		thumbnailPath, videoPath, description, _ = processMessageSafely(content, tdlibClient)
+		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
+		path = fetchfilefromtelegram(tdlibClient, videoPath)
+		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 	case *client.MessagePhoto:
 		description = content.Caption.Text
 		thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
