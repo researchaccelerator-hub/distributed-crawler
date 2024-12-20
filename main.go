@@ -20,7 +20,7 @@ func main() {
 	// Parse the flags
 	flag.Parse()
 
-	// Check if the flag is set
+	// Check if the gencode flag is set
 	if *genCode {
 		fmt.Println("The -gen-code flag is set!")
 		telegramhelper.GenCode()
