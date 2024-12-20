@@ -87,9 +87,9 @@ If Azure Blob Storage is enabled via environment variables (CONTAINER_NAME, BLOB
 If Azure Blob Storage is not configured, data will be saved locally in the storage directory under a folder named with the generated crawl ID.
 
 ## Key Files and Functions
-•   main.go: Entry point for the application, managing scraping and progress tracking.
-•	telegramhelper/: Handles TDLib client connections and Telegram API interactions.
-•	state/: Manages progress, seed list setup, and storage (local and Azure Blob).
+* main.go: Entry point for the application, managing scraping and progress tracking.
+* telegramhelper/: Handles TDLib client connections and Telegram API interactions.
+* state/: Manages progress, seed list setup, and storage (local and Azure Blob).
 
 
 ## Example
