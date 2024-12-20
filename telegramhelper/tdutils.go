@@ -134,6 +134,9 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 	}
 
 	authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
+	if os.Getenv("TG_PHONE_CODE") == "" {
+		log.Fatal().Msg("TG_PHONE_CODE environment variable is not set")
+	}
 	authorizer.Code <- os.Getenv("TG_PHONE_CODE")
 
 	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
@@ -143,6 +146,7 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
 	}
 
+	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM IF YOUR TG_PHONE_CODE IS NOT VALID, YOU WILL NEED TO RE-RUN THE PROGRAM WITH A VALID TG_PHONE_CODE. THIS WILL HANG WHILST IT TRIES TO CONNECT")
 	tdlibClient, err := client.NewClient(authorizer)
 	if err != nil {
 		log.Fatal().Err(err).Msg("NewClient error")
