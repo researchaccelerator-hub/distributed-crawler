@@ -6,6 +6,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"os"
 	"strings"
 	"tdlib-scraper/state"
 	"tdlib-scraper/telegramhelper"
@@ -15,7 +16,7 @@ import (
 func main() {
 	crawlid := generateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
-	storageRoot := "/Users/tombarber/scraper"
+	storageRoot := os.Getenv("STORAGE_ROOT")
 	sm := state.NewStateManager(storageRoot, crawlid)
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	list, err := sm.SeedSetup(parseSeedList())
