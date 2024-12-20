@@ -2,9 +2,11 @@ package telegramhelper
 
 import (
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"log"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"tdlib-scraper/model"
 	"time"
@@ -16,22 +18,33 @@ import (
 // returns the connected client instance or an error if the connection fails.
 func TdConnect(storageprefix string) (*client.Client, error) {
 	authorizer := client.ClientAuthorizer()
-	go client.CliInteractor(authorizer)
 
-	const (
-		apiId   = 26120733
-		apiHash = "a2c2eabafa983f16d0a9304bc91d272c"
-	)
+	//go client.CliInteractor(authorizer)
 
+	apiId := os.Getenv("TG_API_ID")
+	intValue, err := strconv.Atoi(apiId)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error converting string to int\n")
+
+	}
+
+	// Cast int to int32
+	int32Value := int32(intValue)
+	apiHash := os.Getenv("TG_API_HASH")
+	filedir := filepath.Join(storageprefix, ".tdlib", "files")
+	err = removeMultimedia(filedir)
+	if err != nil {
+		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
+	}
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
 		DatabaseDirectory:   filepath.Join(storageprefix, ".tdlib", "database"),
-		FilesDirectory:      filepath.Join(storageprefix, ".tdlib", "files"),
+		FilesDirectory:      filedir,
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
 		UseMessageDatabase:  true,
 		UseSecretChats:      false,
-		ApiId:               apiId,
+		ApiId:               int32Value,
 		ApiHash:             apiHash,
 		SystemLanguageCode:  "en",
 		DeviceModel:         "Server",
@@ -39,35 +52,87 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 		ApplicationVersion:  "1.0.0",
 	}
 
-	_, err := client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
+	authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
+	authorizer.Code <- os.Getenv("TG_PHONE_CODE")
+
+	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
 		NewVerbosityLevel: 1,
 	})
 	if err != nil {
-		log.Fatalf("SetLogVerbosityLevel error: %s", err)
+		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
 	}
 
 	tdlibClient, err := client.NewClient(authorizer)
 	if err != nil {
-		log.Fatalf("NewClient error: %s", err)
+		log.Fatal().Err(err).Msg("NewClient error")
 	}
 
 	optionValue, err := client.GetOption(&client.GetOptionRequest{
 		Name: "version",
 	})
 	if err != nil {
-		log.Fatalf("GetOption error: %s", err)
+		log.Fatal().Err(err).Msg("GetOption error")
 	}
 
 	log.Printf("TDLib version: %s", optionValue.(*client.OptionValueString).Value)
 
 	me, err := tdlibClient.GetMe()
 	if err != nil {
-		log.Fatalf("GetMe error: %s", err)
+		log.Fatal().Err(err).Msg("GetMe error: %s")
 	}
 
-	log.Printf("Me: %s %s", me.FirstName, me.LastName)
+	log.Info().Msgf("Logged in as: %s %s", me.FirstName, me.LastName)
 
 	return tdlibClient, err
+}
+
+// removeMultimedia removes all files and subdirectories in the specified directory.
+// If the directory does not exist, it does nothing.
+//
+// Parameters:
+//   - filedir: The path to the directory whose contents are to be removed.
+//
+// Returns:
+//   - An error if there is a failure during removal; otherwise, nil.
+func removeMultimedia(filedir string) error {
+	// Check if the directory exists
+	info, err := os.Stat(filedir)
+	if os.IsNotExist(err) {
+		// Directory does not exist, nothing to do
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to access directory: %w", err)
+	}
+
+	// Ensure it is a directory
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", filedir)
+	}
+
+	// Remove contents of the directory
+	err = filepath.Walk(filedir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("error walking through %s: %w", path, err)
+		}
+
+		// Skip the root directory itself
+		if path == filedir {
+			return nil
+		}
+
+		// Remove files and subdirectories
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("failed to remove %s: %w", path, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to clean directory: %w", err)
+	}
+
+	fmt.Printf("Contents of directory %s removed successfully.\n", filedir)
+	return nil
 }
 
 // Fetch retrieves and downloads a remote file using the provided tdlib client.
