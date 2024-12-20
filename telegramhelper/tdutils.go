@@ -1,9 +1,13 @@
 package telegramhelper
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +19,7 @@ import (
 
 func GenCode() {
 	authorizer := client.ClientAuthorizer()
+	go client.CliInteractor(authorizer)
 
 	apiId := os.Getenv("TG_API_ID")
 	intValue, err := strconv.Atoi(apiId)
@@ -29,14 +34,7 @@ func GenCode() {
 	}
 	tempDir, err := os.MkdirTemp(workingDir, "tempdir-*")
 	log.Info().Msgf("Temporary directory: %s", tempDir)
-	defer func() {
-		err := os.RemoveAll(tempDir)
-		if err != nil {
-			fmt.Printf("Failed to remove temporary directory: %v\n", err)
-		} else {
-			fmt.Println("Temporary directory removed.")
-		}
-	}()
+
 	if err != nil {
 		fmt.Printf("Failed to create temporary directory: %v\n", err)
 		return
@@ -63,11 +61,12 @@ func GenCode() {
 		ApplicationVersion:  "1.0.0",
 	}
 
-	authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
+	//authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
 
 	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
-		NewVerbosityLevel: 1,
+		NewVerbosityLevel: 5,
 	})
+
 	if err != nil {
 		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
 	}
@@ -101,8 +100,16 @@ func GenCode() {
 func TdConnect(storageprefix string) (*client.Client, error) {
 	authorizer := client.ClientAuthorizer()
 
-	//go client.CliInteractor(authorizer)
+	go client.CliInteractor(authorizer)
+	fn := "https://tomb218.sg-host.com/tdlib.tgz"
+	targetDir := storageprefix + "/state"
 
+	err := downloadAndExtractTarball(fn, targetDir)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+	} else {
+		fmt.Println("Extraction completed successfully!")
+	}
 	apiId := os.Getenv("TG_API_ID")
 	intValue, err := strconv.Atoi(apiId)
 	if err != nil {
@@ -113,14 +120,14 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 	// Cast int to int32
 	int32Value := int32(intValue)
 	apiHash := os.Getenv("TG_API_HASH")
-	filedir := filepath.Join(storageprefix, ".tdlib", "files")
+	filedir := filepath.Join(storageprefix+"/state", ".tdlib", "files")
 	err = removeMultimedia(filedir)
 	if err != nil {
 		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
 	}
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(storageprefix, ".tdlib", "database"),
+		DatabaseDirectory:   filepath.Join(storageprefix+"/state", ".tdlib", "database"),
 		FilesDirectory:      filedir,
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
@@ -134,11 +141,11 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 		ApplicationVersion:  "1.0.0",
 	}
 
-	authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
-	if os.Getenv("TG_PHONE_CODE") == "" {
-		log.Fatal().Msg("TG_PHONE_CODE environment variable is not set")
-	}
-	authorizer.Code <- os.Getenv("TG_PHONE_CODE")
+	//authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
+	//if os.Getenv("TG_PHONE_CODE") == "" {
+	//	log.Fatal().Msg("TG_PHONE_CODE environment variable is not set")
+	//}
+	//authorizer.Code <- os.Getenv("TG_PHONE_CODE")
 
 	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
 		NewVerbosityLevel: 1,
@@ -170,6 +177,81 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 	log.Info().Msgf("Logged in as: %s %s", me.FirstName, me.LastName)
 
 	return tdlibClient, err
+}
+func downloadAndExtractTarball(url, targetDir string) error {
+	// Step 1: Download the tarball
+	req, err := http.NewRequest("GET", url, nil)
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to download tarball: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download tarball: HTTP %d", resp.StatusCode)
+	}
+
+	// Step 2: Decompress the gzip file
+	gzReader, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzReader.Close()
+
+	// Step 3: Read the tarball contents
+	tarReader := tar.NewReader(gzReader)
+
+	// Step 4: Extract files
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break // End of tar archive
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tarball: %w", err)
+		}
+
+		// Determine target file path
+		targetPath := filepath.Join(targetDir, header.Name)
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			// Create directory
+			err := os.MkdirAll(targetPath, os.ModePerm)
+			if err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
+			}
+		case tar.TypeReg:
+			// Create file
+			err := os.MkdirAll(filepath.Dir(targetPath), os.ModePerm)
+			if err != nil {
+				return fmt.Errorf("failed to create parent directories for %s: %w", targetPath, err)
+			}
+			file, err := os.Create(targetPath)
+			if err != nil {
+				return fmt.Errorf("failed to create file %s: %w", targetPath, err)
+			}
+			defer file.Close()
+
+			// Copy file contents
+			_, err = io.Copy(file, tarReader)
+			if err != nil {
+				return fmt.Errorf("failed to write file %s: %w", targetPath, err)
+			}
+		default:
+			fmt.Printf("Ignoring unknown file type: %s\n", header.Name)
+		}
+	}
+
+	return nil
 }
 
 // removeMultimedia removes all files and subdirectories in the specified directory.
