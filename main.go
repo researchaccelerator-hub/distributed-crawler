@@ -43,9 +43,18 @@ func main() {
 		item := list[i]
 		log.Info().Msgf("Processing item: %s", item)
 
-		if err = run(crawlid, item, storageRoot, *sm); err != nil {
-			log.Error().Stack().Err(err).Msgf("Error processing item %s", item)
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", item, r)
+					// Continue to the next item
+				}
+			}()
+
+			if err = run(crawlid, item, storageRoot, *sm); err != nil {
+				log.Error().Stack().Err(err).Msgf("Error processing item %s", item)
+			}
+		}()
 
 		// Update progress
 		progress = i + 1
