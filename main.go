@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
@@ -22,7 +21,7 @@ func main() {
 
 	// Check if the gencode flag is set
 	if *genCode {
-		fmt.Println("The -gen-code flag is set!")
+		log.Debug().Msg("The -gen-code flag is set!")
 		telegramhelper.GenCode()
 		os.Exit(0)
 	}
@@ -104,7 +103,7 @@ func run(crawlid, channelUsername string, storageprefix string, sm state.StateMa
 	// Ensure tdlibClient is closed after the function finishes
 	defer func() {
 		if tdlibClient != nil {
-			fmt.Println("Closing tdlibClient...")
+			log.Debug().Msg("Closing tdlibClient...")
 			_, err := tdlibClient.Close()
 			if err != nil {
 				log.Printf("Error closing tdlibClient: %v", err)

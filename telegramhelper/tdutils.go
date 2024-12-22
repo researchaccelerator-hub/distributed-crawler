@@ -29,14 +29,14 @@ func GenCode() {
 	}
 	workingDir, err := os.Getwd()
 	if err != nil {
-		fmt.Printf("Failed to get working directory: %v\n", err)
+		log.Error().Err(err).Stack().Msg("Failed to get working directory")
 		return
 	}
 	tempDir, err := os.MkdirTemp(workingDir, "tempdir-*")
 	log.Info().Msgf("Temporary directory: %s", tempDir)
 
 	if err != nil {
-		fmt.Printf("Failed to create temporary directory: %v\n", err)
+		log.Error().Err(err).Stack().Msg("Failed to create temporary directory")
 		return
 	}
 	int32Value := int32(intValue)
@@ -86,7 +86,7 @@ func GenCode() {
 	case tdlibClient := <-clientReady:
 		log.Info().Msg("Client initialized successfully")
 		defer tdlibClient.Close()
-	case err := <-errChan:
+	case err = <-errChan:
 		log.Fatal().Err(err).Msg("Error initializing client")
 	case <-time.After(30 * time.Second):
 		log.Warn().Msg("Timeout reached. Exiting application.")
@@ -106,9 +106,9 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 
 	err := downloadAndExtractTarball(fn, targetDir)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		log.Error().Err(err).Stack().Msg("Error extracting tarball")
 	} else {
-		fmt.Println("Extraction completed successfully!")
+		log.Info().Msg("Extraction completed successfully!")
 	}
 	apiId := os.Getenv("TG_API_ID")
 	intValue, err := strconv.Atoi(apiId)
@@ -186,23 +186,23 @@ func downloadAndExtractTarball(url, targetDir string) error {
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to download tarball: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download tarball: HTTP %d", resp.StatusCode)
+		return err
 	}
 
 	// Step 2: Decompress the gzip file
 	gzReader, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to create gzip reader: %w", err)
+		return err
 	}
 	defer gzReader.Close()
 
@@ -216,7 +216,7 @@ func downloadAndExtractTarball(url, targetDir string) error {
 			break // End of tar archive
 		}
 		if err != nil {
-			return fmt.Errorf("failed to read tarball: %w", err)
+			return err
 		}
 
 		// Determine target file path
@@ -227,27 +227,27 @@ func downloadAndExtractTarball(url, targetDir string) error {
 			// Create directory
 			err := os.MkdirAll(targetPath, os.ModePerm)
 			if err != nil {
-				return fmt.Errorf("failed to create directory %s: %w", targetPath, err)
+				return err
 			}
 		case tar.TypeReg:
 			// Create file
 			err := os.MkdirAll(filepath.Dir(targetPath), os.ModePerm)
 			if err != nil {
-				return fmt.Errorf("failed to create parent directories for %s: %w", targetPath, err)
+				return err
 			}
 			file, err := os.Create(targetPath)
 			if err != nil {
-				return fmt.Errorf("failed to create file %s: %w", targetPath, err)
+				return err
 			}
 			defer file.Close()
 
 			// Copy file contents
 			_, err = io.Copy(file, tarReader)
 			if err != nil {
-				return fmt.Errorf("failed to write file %s: %w", targetPath, err)
+				return err
 			}
 		default:
-			fmt.Printf("Ignoring unknown file type: %s\n", header.Name)
+			log.Debug().Msgf("Ignoring unknown file type: %s\n", header.Name)
 		}
 	}
 
@@ -270,18 +270,18 @@ func removeMultimedia(filedir string) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("failed to access directory: %w", err)
+		return err
 	}
 
 	// Ensure it is a directory
 	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", filedir)
+		return err
 	}
 
 	// Remove contents of the directory
 	err = filepath.Walk(filedir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return fmt.Errorf("error walking through %s: %w", path, err)
+			return err
 		}
 
 		// Skip the root directory itself
@@ -291,15 +291,15 @@ func removeMultimedia(filedir string) error {
 
 		// Remove files and subdirectories
 		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", path, err)
+			return err
 		}
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to clean directory: %w", err)
+		return err
 	}
 
-	fmt.Printf("Contents of directory %s removed successfully.\n", filedir)
+	log.Info().Msgf("Contents of directory %s removed successfully.\n", filedir)
 	return nil
 }
 
@@ -352,7 +352,7 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	defer func() {
 		if r := recover(); r != nil {
 			// Log the panic and set a default error
-			fmt.Printf("Recovered from panic while parsing message for channel %s: %v\n", channelName, r)
+			log.Info().Msgf("Recovered from panic while parsing message for channel %s: %v\n", channelName, r)
 			err = fmt.Errorf("failed to parse message")
 		}
 	}()
@@ -374,14 +374,13 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Recovered from panic while fetching comments for channel %s: %v\n", channelName, r)
+				log.Info().Msgf("Recovered from panic while fetching comments for channel %s: %v\n", channelName, r)
 			}
 		}()
 		if message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
-			var err error
 			comments, err = GetMessageComments(tdlibClient, chat.Id, message.Id, channelName)
 			if err != nil {
-				fmt.Printf("Fetch message error: %s\n", err)
+				log.Error().Stack().Err(err).Msg("Fetch message error")
 			}
 		}
 	}
@@ -432,9 +431,9 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
 		}
 	case *client.MessageGiveawayWinners:
-		fmt.Println("This message is a giveaway winner:", content)
+		log.Debug().Msgf("This message is a giveaway winner:", content)
 	case *client.MessageGiveawayCompleted:
-		fmt.Println("This message is a giveaway completed:", content)
+		log.Debug().Msgf("This message is a giveaway completed:", content)
 	case *client.MessageVideoNote:
 		thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
@@ -467,14 +466,14 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 		//thumbnailPath = fetch(tdlibClient, thumbnailPath)
 		//videoPath = fetch(tdlibClient, videoPath)
 	default:
-		fmt.Println("Unknown message content type")
+		log.Debug().Msg("Unknown message content type")
 	}
 
 	reactions := make(map[string]int)
 	if message.InteractionInfo != nil && message.InteractionInfo.Reactions != nil && len(message.InteractionInfo.Reactions.Reactions) > 0 {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Recovered from panic while processing reactions: %v\n", r)
+				log.Info().Msgf("Recovered from panic while processing reactions: %v\n", r)
 			}
 		}()
 		for _, reaction := range message.InteractionInfo.Reactions.Reactions {
@@ -546,7 +545,7 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("Recovered from panic: %v\n", r)
+			log.Info().Msgf("Recovered from panic: %v\n", r)
 		}
 	}()
 
@@ -555,7 +554,7 @@ func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string
 		RemoteFileId: downloadid,
 	})
 	if err != nil {
-		fmt.Printf("Error fetching remote file: %v\n", err)
+		log.Error().Err(err).Stack().Msgf("Error fetching remote file: %v\n", downloadid)
 		return ""
 	}
 
@@ -568,16 +567,16 @@ func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string
 		Synchronous: true,
 	})
 	if err != nil {
-		fmt.Printf("Error downloading file: %v\n", err)
+		log.Error().Stack().Err(err).Msgf("Error downloading file: %v\n", f.Id)
 		return ""
 	}
 
 	// Ensure the file path is valid
 	if downloadedFile.Local.Path == "" {
-		fmt.Println("Downloaded file path is empty.")
+		log.Debug().Msg("Downloaded file path is empty.")
 		return ""
 	}
 
-	fmt.Printf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
+	log.Info().Msgf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
 	return downloadedFile.Local.Path
 }

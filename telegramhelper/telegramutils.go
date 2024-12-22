@@ -1,7 +1,6 @@
 package telegramhelper
 
 import (
-	"fmt"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
 	"tdlib-scraper/model"
@@ -36,7 +35,7 @@ func GetMessageCount(tdlibClient *client.Client, chatID int64, channelname strin
 		})
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", channelname, err)
-			return 0, fmt.Errorf("failed to get chat history: %w", err)
+			return 0, err
 		}
 
 		// Increment the message count
@@ -76,7 +75,7 @@ func GetMessageShareCount(tdlibClient *client.Client, chatID, messageID int64, c
 		MessageId: messageID,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("failed to get message for channel %s: %w", channelname, err)
+		return 0, err
 	}
 
 	// Check if InteractionInfo is available
@@ -112,7 +111,7 @@ func GetTotalChannelViews(tdlibClient *client.Client, channelID int64, channelna
 		})
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to get chat history %s: %v", channelname, err)
-			return 0, fmt.Errorf("failed to get chat history: %w", err)
+			return 0, err
 		}
 
 		// Stop if no more messages are returned
@@ -173,7 +172,7 @@ func GetMessageComments(tdlibClient *client.Client, chatID, messageID int64, cha
 		})
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to get message thread history for channel %s: %v", channelname, err)
-			return comments, fmt.Errorf("failed to get message thread history: %w", err)
+			return comments, err
 		}
 
 		// Stop if no more comments are returned
