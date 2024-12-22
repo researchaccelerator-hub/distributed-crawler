@@ -35,7 +35,7 @@ func main() {
 	// Load progress
 	progress, err := sm.LoadProgress()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load progress")
+		log.Error().Err(err).Msg("Failed to load progress")
 	}
 	// Process remaining items
 	for i := progress; i < len(list); i++ {

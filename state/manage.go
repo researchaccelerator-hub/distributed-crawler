@@ -86,7 +86,7 @@ func (sm *StateManager) loadListFromBlob() ([]string, error) {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
+	blobName := os.Getenv("BLOB_NAME") + "/list.txt"
 
 	// Create temporary file to download the blob
 	tmpFile, err := os.CreateTemp("", "progress-*.txt")
