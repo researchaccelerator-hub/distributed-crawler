@@ -339,7 +339,7 @@ func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, file
 		return fmt.Errorf("failed to delete local file after upload: %w", err)
 	}
 
-	fmt.Println("File uploaded and deleted successfully.")
+	log.Info().Msg("File uploaded and deleted successfully.")
 	return nil
 }
 func (sm *StateManager) urlToBlobPath(rawURL string) (string, error) {

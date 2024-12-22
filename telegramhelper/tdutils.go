@@ -539,7 +539,9 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 		Reactions: reactions,
 	}
 	err = sm.StoreData(crawlid, channelName, post)
-
+	if err != nil {
+		log.Error().Err(err).Msg("StoreData error")
+	}
 	return post, nil
 }
 func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string {
