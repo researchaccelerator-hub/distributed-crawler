@@ -55,7 +55,8 @@ func (r readSeekCloserWrapper) Close() error {
 //   - An error if there is a failure in loading the list.
 func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
+	blobName := os.Getenv("BLO" +
+		"B_NAME")
 	accountUrl := os.Getenv("AZURE_STORAGE_ACCOUNT_URL")
 
 	// Seed list if needed
@@ -105,7 +106,7 @@ func (sm *StateManager) seedList(items []string) {
 func (sm *StateManager) seedListToBlob(items []string) error {
 	containerName := os.Getenv("CONTAINER_NAME")
 	blobName := os.Getenv("BLOB_NAME")
-
+	blobName = os.Getenv("BLOB_NAME") + "/list.txt"
 	client, err := sm.createAZClient()
 	if err != nil {
 		return fmt.Errorf("failed to create Azure Blob Storage client: %w", err)
@@ -231,7 +232,7 @@ func (sm *StateManager) loadProgressFromBlob() (int, error) {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
+	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
 
 	// Create a temporary file to download the blob
 	tmpFile, err := os.CreateTemp("", "progress-*.txt")
@@ -271,7 +272,7 @@ func (sm *StateManager) saveProgressToBlob(index int) error {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
+	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
 
 	// Write progress to an in-memory buffer
 	data := []byte(strconv.Itoa(index) + "\n")
