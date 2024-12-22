@@ -303,51 +303,6 @@ func removeMultimedia(filedir string) error {
 	return nil
 }
 
-// Fetch retrieves and downloads a remote file using the provided tdlib client.
-// It takes a tdlib client and a download ID as parameters, and returns the local
-// file path as a string. If an error occurs during fetching or downloading, or if
-// the local path is empty, it returns an empty string. The function recovers from
-// any panics, logging the error and ensuring an empty string is returned.
-//func Fetch(tdlibClient *client.Client, downloadid string) string {
-//	defer func() {
-//		if r := recover(); r != nil {
-//			// Log the panic and ensure an empty string is returned
-//			fmt.Printf("Recovered from panic: %v\n", r)
-//		}
-//	}()
-//
-//	// Attempt to fetch the remote file
-//	f, err := tdlibClient.GetRemoteFile(&client.GetRemoteFileRequest{
-//		RemoteFileId: downloadid,
-//	})
-//	if err != nil {
-//		fmt.Printf("Error fetching remote file: %v\n", err)
-//		return ""
-//	}
-//
-//	// Attempt to download the file
-//	downloadedFile, err := tdlibClient.DownloadFile(&client.DownloadFileRequest{
-//		FileId:      f.Id, // Use the File.Id from the GetRemoteFile response
-//		Priority:    1,    // Download priority (1 = high)
-//		Offset:      0,    // Start downloading from the beginning
-//		Limit:       0,    // Download the entire file
-//		Synchronous: true,
-//	})
-//	if err != nil {
-//		fmt.Printf("Error downloading file: %v\n", err)
-//		return ""
-//	}
-//
-//	// Check if the local path exists
-//	if downloadedFile.Local.Path == "" {
-//		fmt.Println("Downloaded file path is empty")
-//		return ""
-//	}
-//
-//	fmt.Printf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
-//	return downloadedFile.Local.Path
-//}
-
 // processMessageSafely extracts and returns the thumbnail path, video path, and description
 // from a given Telegram video message. It ensures the message structure is valid and not corrupt.
 //
@@ -397,13 +352,13 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	defer func() {
 		if r := recover(); r != nil {
 			// Log the panic and set a default error
-			fmt.Printf("Recovered from panic while parsing message: %v\n", r)
+			fmt.Printf("Recovered from panic while parsing message for channel %s: %v\n", channelName, r)
 			err = fmt.Errorf("failed to parse message")
 		}
 	}()
 
 	publishedAt := time.Unix(int64(message.Date), 0)
-	if publishedAt.Year() > 2018 {
+	if publishedAt.Year() < 2018 {
 		return model.Post{}, nil // Skip messages not from earlier than 2018
 	}
 
@@ -419,12 +374,12 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("Recovered from panic while fetching comments: %v\n", r)
+				fmt.Printf("Recovered from panic while fetching comments for channel %s: %v\n", channelName, r)
 			}
 		}()
 		if message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
 			var err error
-			comments, err = GetMessageComments(tdlibClient, chat.Id, message.Id)
+			comments, err = GetMessageComments(tdlibClient, chat.Id, message.Id, channelName)
 			if err != nil {
 				fmt.Printf("Fetch message error: %s\n", err)
 			}
@@ -533,9 +488,9 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 
 	posttype := []string{message.Content.MessageContentType()}
 	createdAt := time.Unix(int64(message.EditDate), 0)
-	vc := GetViewCount(message)
+	vc := GetViewCount(message, channelName)
 	postUid := fmt.Sprintf("%s-%s", messageNumber, channelName)
-	sharecount, _ := GetMessageShareCount(tdlibClient, chat.Id, message.Id)
+	sharecount, _ := GetMessageShareCount(tdlibClient, chat.Id, message.Id, channelName)
 
 	post = model.Post{
 		PostLink:       mlr.Link,

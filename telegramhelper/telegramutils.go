@@ -21,21 +21,21 @@ import (
 //
 //	An integer representing the total number of messages in the chat, or an error if the
 //	operation fails.
-func GetMessageCount(tdlibClient *client.Client, chatID int64) (int, error) {
-	log.Info().Msg("Getting message count")
+func GetMessageCount(tdlibClient *client.Client, chatID int64, channelname string) (int, error) {
+	log.Info().Msgf("Getting message count for channel %s", channelname)
 	messageCount := 0
 	var fromMessageId int64 = 0 // Start from the latest message (ID = 0)
 
 	for {
 		// Fetch a batch of messages
-		log.Info().Msgf("Getting message count for batch %d", fromMessageId)
+		log.Info().Msgf("Getting message count for channel %s and batch %d", channelname, fromMessageId)
 		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 			ChatId:        chatID,
 			FromMessageId: fromMessageId, // Continue from the last message ID
 			Limit:         100,           // Fetch up to 100 messages at a time
 		})
 		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get chat history: %v", err)
+			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", channelname, err)
 			return 0, fmt.Errorf("failed to get chat history: %w", err)
 		}
 
@@ -56,8 +56,8 @@ func GetMessageCount(tdlibClient *client.Client, chatID int64) (int, error) {
 
 // GetViewCount retrieves the view count from a given message's InteractionInfo.
 // If InteractionInfo is nil, it returns 0 as the default view count.
-func GetViewCount(message *client.Message) int {
-	log.Info().Msg("Getting view count")
+func GetViewCount(message *client.Message, channelname string) int {
+	log.Info().Msgf("Getting view count for channel %s", channelname)
 	if message.InteractionInfo != nil {
 		return int(message.InteractionInfo.ViewCount)
 	}
@@ -68,15 +68,15 @@ func GetViewCount(message *client.Message) int {
 // It uses the provided tdlibClient to fetch message details from Telegram.
 // If the message's InteractionInfo is available, it returns the ForwardCount as the share count.
 // If InteractionInfo is nil or an error occurs, it returns 0 and an error, respectively.
-func GetMessageShareCount(tdlibClient *client.Client, chatID, messageID int64) (int, error) {
+func GetMessageShareCount(tdlibClient *client.Client, chatID, messageID int64, channelname string) (int, error) {
 	// Fetch the message details
-	log.Info().Msg("Getting message share count")
+	log.Info().Msgf("Getting message share count for channel %s", channelname)
 	message, err := tdlibClient.GetMessage(&client.GetMessageRequest{
 		ChatId:    chatID,
 		MessageId: messageID,
 	})
 	if err != nil {
-		return 0, fmt.Errorf("failed to get message: %w", err)
+		return 0, fmt.Errorf("failed to get message for channel %s: %w", channelname, err)
 	}
 
 	// Check if InteractionInfo is available
@@ -99,10 +99,10 @@ func GetMessageShareCount(tdlibClient *client.Client, chatID, messageID int64) (
 // Returns:
 //
 //	An integer representing the total number of views across all messages in the channel, or an error if the operation fails.
-func GetTotalChannelViews(tdlibClient *client.Client, channelID int64) (int, error) {
+func GetTotalChannelViews(tdlibClient *client.Client, channelID int64, channelname string) (int, error) {
 	var totalViews int64
 	var lastMessageID int64 = 0 // Start from the most recent message
-	log.Info().Msg("Getting total views")
+	log.Info().Msgf("Getting total views for channel %s", channelname)
 	for {
 		// Fetch a batch of messages
 		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
@@ -111,7 +111,7 @@ func GetTotalChannelViews(tdlibClient *client.Client, channelID int64) (int, err
 			Limit:         100, // Fetch up to 100 messages at a time
 		})
 		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get chat history: %v", err)
+			log.Error().Err(err).Stack().Msgf("Failed to get chat history %s: %v", channelname, err)
 			return 0, fmt.Errorf("failed to get chat history: %w", err)
 		}
 
@@ -131,6 +131,7 @@ func GetTotalChannelViews(tdlibClient *client.Client, channelID int64) (int, err
 		lastMessageID = chatHistory.Messages[len(chatHistory.Messages)-1].Id
 	}
 
+	log.Info().Msgf("Total views for channel %s: %d", channelname, totalViews)
 	return int(totalViews), nil
 }
 
@@ -149,7 +150,7 @@ Returns:
 The function fetches comments in batches of up to 100 and continues until no more comments are available.
 It extracts the text, reactions, view count, and reply count for each comment.
 */
-func GetMessageComments(tdlibClient *client.Client, chatID, messageID int64) ([]model.Comment, error) {
+func GetMessageComments(tdlibClient *client.Client, chatID, messageID int64, channelname string) ([]model.Comment, error) {
 	// Fetch the message thread
 	//thread, err := tdlibClient.GetMessageThread(&client.GetMessageThreadRequest{
 	//	ChatId:    chatID,
@@ -171,7 +172,7 @@ func GetMessageComments(tdlibClient *client.Client, chatID, messageID int64) ([]
 			Limit:         100, // Fetch up to 100 comments at a time
 		})
 		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get message thread history: %v", err)
+			log.Error().Err(err).Stack().Msgf("Failed to get message thread history for channel %s: %v", channelname, err)
 			return comments, fmt.Errorf("failed to get message thread history: %w", err)
 		}
 
@@ -218,5 +219,6 @@ func GetMessageComments(tdlibClient *client.Client, chatID, messageID int64) ([]
 		fromMessageId = threadHistory.Messages[len(threadHistory.Messages)-1].Id
 	}
 
+	log.Info().Msgf("Got %d comments for channel %s", len(comments), channelname)
 	return comments, nil
 }

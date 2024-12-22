@@ -129,8 +129,8 @@ func run(crawlid, channelUsername string, storageprefix string, sm state.StateMa
 	})
 
 	var fromMessageId int64 = 0
-	vc, err := telegramhelper.GetTotalChannelViews(tdlibClient, chat.Id)
-	pc3, err := telegramhelper.GetMessageCount(tdlibClient, chat.Id)
+	vc, err := telegramhelper.GetTotalChannelViews(tdlibClient, chat.Id, channelUsername)
+	pc3, err := telegramhelper.GetMessageCount(tdlibClient, chat.Id, channelUsername)
 	sgid := int64(0)
 	if chat.Type != nil {
 		if supergroupType, ok := chat.Type.(*client.ChatTypeSupergroup); ok {
@@ -157,7 +157,7 @@ func run(crawlid, channelUsername string, storageprefix string, sm state.StateMa
 		}
 
 		if len(chatHistory.Messages) == 0 {
-			log.Info().Msg("No messages found in the channel")
+			log.Info().Msgf("No messages found in the channel %s", channelUsername)
 			return nil
 		}
 
