@@ -55,29 +55,65 @@ func (r readSeekCloserWrapper) Close() error {
 //   - An error if there is a failure in loading the list.
 func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLO" +
-		"B_NAME")
+	blobName := os.Getenv("BLOB_NAME")
 	accountUrl := os.Getenv("AZURE_STORAGE_ACCOUNT_URL")
 
-	// Seed list if needed
+	// Check if list needs to be seeded
 	if _, err := os.Stat(sm.listFile); os.IsNotExist(err) {
 		if containerName != "" && blobName != "" && accountUrl != "" {
 			err := sm.seedListToBlob(seedlist)
 			if err != nil {
 				log.Fatal().Err(err).Msg("Failed to seed list to Azure Blob Storage")
 			}
+			return sm.loadListFromBlob() // Read directly from blob after seeding
 		} else {
-			sm.seedList(seedlist)
+			sm.seedList(seedlist) // Seed to local file
 		}
 	}
 
-	// Load list
-	list, err := sm.loadList()
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load list")
+	// Load list from either local file or Azure Blob Storage
+	if containerName != "" && blobName != "" && accountUrl != "" {
+		return sm.loadListFromBlob()
 	}
 
-	return list, nil
+	return sm.loadList() // Fallback to local file loading
+}
+
+func (sm *StateManager) loadListFromBlob() ([]string, error) {
+	client, err := sm.createAZClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Azure Blob client: %w", err)
+	}
+
+	containerName := os.Getenv("CONTAINER_NAME")
+	blobName := os.Getenv("BLOB_NAME")
+
+	// Create temporary file to download the blob
+	tmpFile, err := os.CreateTemp("", "progress-*.txt")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name()) // Clean up after reading
+	defer tmpFile.Close()
+
+	// Download blob directly to temp file
+	_, err = client.DownloadFile(context.TODO(), containerName, blobName, tmpFile, nil)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // Blob not found, return empty list
+		}
+		return nil, fmt.Errorf("failed to download list from Azure Blob: %w", err)
+	}
+
+	// Read and parse the downloaded file
+	data, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		return nil, fmt.Errorf("failed to read temporary file: %w", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	log.Info().Msgf("Loaded %d items from Azure Blob Storage", len(lines))
+	return lines, nil
 }
 
 // seedList writes a list of items to a file, creating the file if it does not exist.
@@ -104,35 +140,40 @@ func (sm *StateManager) seedList(items []string) {
 }
 
 func (sm *StateManager) seedListToBlob(items []string) error {
-	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
-	blobName = os.Getenv("BLOB_NAME") + "/list.txt"
 	client, err := sm.createAZClient()
 	if err != nil {
-		return fmt.Errorf("failed to create Azure Blob Storage client: %w", err)
+		return fmt.Errorf("failed to create Azure Blob client: %w", err)
 	}
 
-	// Create temporary file to write the list
+	containerName := os.Getenv("CONTAINER_NAME")
+	blobName := os.Getenv("BLOB_NAME") + "/list.txt"
+
+	// Create temporary file to store seed list
 	tmpFile, err := os.CreateTemp("", "seedlist-*.txt")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
-	defer os.Remove(tmpFile.Name()) // Clean up after upload
+	defer os.Remove(tmpFile.Name()) // Cleanup after upload
 	defer tmpFile.Close()
 
 	// Write seed list to the temporary file
 	for _, item := range items {
-		_, err = tmpFile.WriteString(item + "\n")
+		_, err := tmpFile.WriteString(item + "\n")
 		if err != nil {
 			return fmt.Errorf("failed to write to temporary file: %w", err)
 		}
 	}
 
-	// Upload to Azure Blob Storage
-	tmpFile.Seek(0, 0) // Reset file pointer to the start
+	// Reset file pointer to the start before upload
+	_, err = tmpFile.Seek(0, 0)
+	if err != nil {
+		return fmt.Errorf("failed to reset file pointer: %w", err)
+	}
+
+	// Upload the temporary file to Azure Blob Storage
 	_, err = client.UploadFile(context.TODO(), containerName, blobName, tmpFile, nil)
 	if err != nil {
-		return fmt.Errorf("failed to upload file to Azure Blob Storage: %w", err)
+		return fmt.Errorf("failed to upload list to Azure Blob Storage: %w", err)
 	}
 
 	log.Info().Msgf("Seed list uploaded to Azure Blob Storage: %s/%s", containerName, blobName)
@@ -173,7 +214,7 @@ func (sm *StateManager) loadList() ([]string, error) {
 // If the progress file does not exist, it returns 0 and no error, indicating to start from the beginning.
 func (sm *StateManager) LoadProgress() (int, error) {
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
+	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
 
 	// If Azure environment variables are set, load from Azure Blob Storage
 	if containerName != "" && blobName != "" {
@@ -207,7 +248,7 @@ func (sm *StateManager) LoadProgress() (int, error) {
 //   - An error if there is a failure in creating the file or writing the index to it.
 func (sm *StateManager) SaveProgress(index int) error {
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME")
+	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
 
 	// If Azure environment variables are set, save to Azure Blob Storage
 	if containerName != "" && blobName != "" {
