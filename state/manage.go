@@ -499,12 +499,14 @@ func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, file
 	// Upload the file to the specified container with the specified blob name
 	_, err = client.UploadFile(context.TODO(), containerName, blobName, file, nil)
 	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to upload file to Azure Blob Storage")
 		return fmt.Errorf("failed to upload file to Azure Blob Storage: %w", err)
 	}
 
 	// Remove the local file upon successful upload
 	err = os.Remove(filePath)
 	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to remove file from local Storage")
 		return fmt.Errorf("failed to delete local file after upload: %w", err)
 	}
 

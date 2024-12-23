@@ -56,7 +56,7 @@ func GetMessageCount(tdlibClient *client.Client, chatID int64, channelname strin
 // GetViewCount retrieves the view count from a given message's InteractionInfo.
 // If InteractionInfo is nil, it returns 0 as the default view count.
 func GetViewCount(message *client.Message, channelname string) int {
-	log.Info().Msgf("Getting view count for channel %s", channelname)
+	log.Info().Msgf("Getting message view count for channel %s", channelname)
 	if message.InteractionInfo != nil {
 		return int(message.InteractionInfo.ViewCount)
 	}
