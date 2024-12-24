@@ -85,7 +85,7 @@ func (sm *StateManager) loadListFromBlob() ([]string, error) {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/list.txt"
 
 	// Create temporary file to download the blob
@@ -146,7 +146,7 @@ func (sm *StateManager) seedListToBlob(items []string) error {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 
 	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/list.txt"
 
@@ -216,7 +216,7 @@ func (sm *StateManager) loadList() ([]string, error) {
 // If the progress file does not exist, it returns 0 and no error, indicating to start from the beginning.
 func (sm *StateManager) LoadProgress() (int, error) {
 	containerName := os.Getenv("CONTAINER_NAME")
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 
 	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
@@ -252,7 +252,7 @@ func (sm *StateManager) LoadProgress() (int, error) {
 //   - An error if there is a failure in creating the file or writing the index to it.
 func (sm *StateManager) SaveProgress(index int) error {
 	containerName := os.Getenv("CONTAINER_NAME")
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 
 	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
@@ -279,7 +279,7 @@ func (sm *StateManager) loadProgressFromBlob() (int, error) {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 
 	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
@@ -321,7 +321,7 @@ func (sm *StateManager) saveProgressToBlob(index int) error {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 
 	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
@@ -376,7 +376,7 @@ func (sm *StateManager) StoreData(crawlid, channelname string, post model.Post) 
 	// Check if environment variables for Azure Blob Storage are set
 	containerName := os.Getenv("CONTAINER_NAME")
 	blobName := os.Getenv("BLOB_NAME")
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 
 	if containerName != "" && blobName != "" {
 		// Azure Blob Storage logic
@@ -505,7 +505,7 @@ func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, file
 	containerName := os.Getenv("CONTAINER_NAME")
 	fp, _ := sm.urlToBlobPath(rawURL)
 	filename := filepath.Base(filePath)
-	jobid := os.Getenv("JOB_ID")
+	jobid := os.Getenv("JOB_UID")
 
 	fp = fp + "_" + filename
 	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/" + crawlid + "/media/" + channelid + "/" + fp
