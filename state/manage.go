@@ -57,7 +57,6 @@ func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 	containerName := os.Getenv("CONTAINER_NAME")
 	blobName := os.Getenv("BLOB_NAME")
 	accountUrl := os.Getenv("AZURE_STORAGE_ACCOUNT_URL")
-
 	// Check if list needs to be seeded
 	if _, err := os.Stat(sm.listFile); os.IsNotExist(err) {
 		if containerName != "" && blobName != "" && accountUrl != "" {
@@ -86,7 +85,8 @@ func (sm *StateManager) loadListFromBlob() ([]string, error) {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME") + "/list.txt"
+	jobid := os.Getenv("JOB_ID")
+	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/list.txt"
 
 	// Create temporary file to download the blob
 	tmpFile, err := os.CreateTemp("", "progress-*.txt")
@@ -146,7 +146,9 @@ func (sm *StateManager) seedListToBlob(items []string) error {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME") + "/list.txt"
+	jobid := os.Getenv("JOB_ID")
+
+	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/list.txt"
 
 	// Create temporary file to store seed list
 	tmpFile, err := os.CreateTemp("", "seedlist-*.txt")
@@ -214,7 +216,9 @@ func (sm *StateManager) loadList() ([]string, error) {
 // If the progress file does not exist, it returns 0 and no error, indicating to start from the beginning.
 func (sm *StateManager) LoadProgress() (int, error) {
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
+	jobid := os.Getenv("JOB_ID")
+
+	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
 	// If Azure environment variables are set, load from Azure Blob Storage
 	if containerName != "" && blobName != "" {
@@ -248,7 +252,9 @@ func (sm *StateManager) LoadProgress() (int, error) {
 //   - An error if there is a failure in creating the file or writing the index to it.
 func (sm *StateManager) SaveProgress(index int) error {
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
+	jobid := os.Getenv("JOB_ID")
+
+	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
 	// If Azure environment variables are set, save to Azure Blob Storage
 	if containerName != "" && blobName != "" {
@@ -273,7 +279,9 @@ func (sm *StateManager) loadProgressFromBlob() (int, error) {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
+	jobid := os.Getenv("JOB_ID")
+
+	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
 	// Create a temporary file to download the blob
 	tmpFile, err := os.CreateTemp("", "progress-*.txt")
@@ -313,7 +321,9 @@ func (sm *StateManager) saveProgressToBlob(index int) error {
 	}
 
 	containerName := os.Getenv("CONTAINER_NAME")
-	blobName := os.Getenv("BLOB_NAME") + "/progress.txt"
+	jobid := os.Getenv("JOB_ID")
+
+	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/progress.txt"
 
 	// Write progress to an in-memory buffer
 	data := []byte(strconv.Itoa(index) + "\n")
@@ -366,12 +376,13 @@ func (sm *StateManager) StoreData(crawlid, channelname string, post model.Post) 
 	// Check if environment variables for Azure Blob Storage are set
 	containerName := os.Getenv("CONTAINER_NAME")
 	blobName := os.Getenv("BLOB_NAME")
+	jobid := os.Getenv("JOB_ID")
 
 	if containerName != "" && blobName != "" {
 		// Azure Blob Storage logic
 		client, err := sm.createAZClient()
 		// Use a function to append the data to an existing blob or create a new one if not present
-		blobPath := filepath.Join(blobName, crawlid, channelname+".jsonl")
+		blobPath := filepath.Join(blobName, jobid, crawlid, channelname+".jsonl")
 		err = sm.appendToBlob(client, containerName, blobPath, postData)
 		if err != nil {
 			return fmt.Errorf("failed to upload post to Azure Blob Storage: %w", err)
@@ -494,8 +505,10 @@ func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, file
 	containerName := os.Getenv("CONTAINER_NAME")
 	fp, _ := sm.urlToBlobPath(rawURL)
 	filename := filepath.Base(filePath)
+	jobid := os.Getenv("JOB_ID")
+
 	fp = fp + "_" + filename
-	blobName := os.Getenv("BLOB_NAME") + "/" + crawlid + "/media/" + channelid + "/" + fp
+	blobName := os.Getenv("BLOB_NAME") + "/" + jobid + "/" + crawlid + "/media/" + channelid + "/" + fp
 	// Upload the file to the specified container with the specified blob name
 	_, err = client.UploadFile(context.TODO(), containerName, blobName, file, nil)
 	if err != nil {
