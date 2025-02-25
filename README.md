@@ -1,6 +1,6 @@
-# TDLib Scraper
+# Telegram Scraper
 
-The **TDLib Scraper** is a Go-based application designed to scrape messages and metadata from Telegram channels using the TDLib library. It collects and processes messages, storing the results in either local files or Azure Blob Storage for further analysis.
+The **Telegram Scraper** is a Go-based application designed to scrape messages and metadata from Telegram channels using the TDLib library. It collects and processes messages, storing the results in either local files or Azure Blob Storage for further analysis.
 
 ## Features
 
