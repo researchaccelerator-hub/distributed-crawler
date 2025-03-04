@@ -1,18 +1,24 @@
-name: TDLIB Build and Deploy
-
+name: Go
 on:
   push:
     branches:
       - feature/**
       - main
       - dev
-    # paths:
-    #   - .github/workflows/node-build.yaml
-    #   - .github/build-config.jsonc
+
 jobs:
-  node-build:
-    uses: IRIEAccelerator/common-workflows/.github/workflows/node-reuse.yaml@main
-    secrets: inherit
-    with:
-      config-file: .github/build-config.jsonc
-      runner: injected-runner
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21.x'
+      - name: Install dependencies
+        run: go get .
+      - name: Build
+        run: go build -v ./...
+      - name: Test with the Go CLI
+        run: go test
