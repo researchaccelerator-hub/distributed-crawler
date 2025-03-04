@@ -18,6 +18,7 @@ var (
 	urlList      []string
 	urlFile      string
 	generateCode bool
+	crawlType    string
 )
 
 func main() {
@@ -68,6 +69,7 @@ var rootCmd = &cobra.Command{
 		crawlerCfg.Timeout = viper.GetInt("crawler.timeout")
 		crawlerCfg.UserAgent = viper.GetString("crawler.useragent")
 		crawlerCfg.OutputFormat = viper.GetString("output.format")
+		crawlerCfg.StorageRoot = viper.GetString("storage.root")
 
 		return nil
 	},
@@ -103,6 +105,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
 	rootCmd.Flags().StringVar(&urlFile, "url-file", "", "file containing URLs to crawl (one per line)")
 	rootCmd.Flags().BoolVar(&generateCode, "generate-code", false, "run code generation after crawling")
+	rootCmd.Flags().StringVar(&crawlType, "crawl-type", "focused", "Select between focused(default) and snowball")
 
 	// Bind flags to viper
 	viper.BindPFlag("dapr.enabled", rootCmd.PersistentFlags().Lookup("dapr"))
@@ -111,7 +114,7 @@ func init() {
 	viper.BindPFlag("crawler.timeout", rootCmd.PersistentFlags().Lookup("timeout"))
 	viper.BindPFlag("crawler.useragent", rootCmd.PersistentFlags().Lookup("user-agent"))
 	viper.BindPFlag("output.format", rootCmd.PersistentFlags().Lookup("output"))
-	viper.BindPFlag("output.storageroot", rootCmd.PersistentFlags().Lookup("storage-root"))
+	viper.BindPFlag("storage.root", rootCmd.PersistentFlags().Lookup("storage-root"))
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
 }
