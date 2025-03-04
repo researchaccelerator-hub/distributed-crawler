@@ -1,14 +1,14 @@
 package standalone
 
 import (
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
+	"github.com/researchaccelerator-hub/telegram-scraper/state"
+	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"os"
 	"strings"
-	"tdlib-scraper/common"
-	"tdlib-scraper/crawl"
-	"tdlib-scraper/state"
-	"tdlib-scraper/telegramhelper"
 )
 
 // StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,

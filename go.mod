@@ -1,4 +1,4 @@
-module tdlib-scraper
+module github.com/researchaccelerator-hub/telegram-scraper
 
 go 1.23
 

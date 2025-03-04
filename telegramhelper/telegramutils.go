@@ -1,9 +1,9 @@
 package telegramhelper
 
 import (
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"tdlib-scraper/model"
 )
 
 // GetMessageCount retrieves the total number of messages in a specified chat.
@@ -34,7 +34,7 @@ func GetMessageCount(tdlibClient *client.Client, chatID int64, channelname strin
 			Limit:         100,           // Fetch up to 100 messages at a time
 		})
 		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", channelname, err)
+			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", channelname)
 			return 0, err
 		}
 

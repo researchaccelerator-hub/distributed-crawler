@@ -1,10 +1,10 @@
 package crawl
 
 import (
+	"github.com/researchaccelerator-hub/telegram-scraper/state"
+	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"tdlib-scraper/state"
-	"tdlib-scraper/telegramhelper"
 )
 
 // Run connects to a Telegram channel using the provided username and crawl ID,

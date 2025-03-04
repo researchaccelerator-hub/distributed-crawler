@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"fmt"
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
+	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
 	"io"
@@ -12,8 +14,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"tdlib-scraper/model"
-	"tdlib-scraper/state"
 	"time"
 )
 
@@ -170,7 +170,7 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 		log.Fatal().Err(err).Msg("GetOption error")
 	}
 
-	log.Printf("TDLib version: %s", optionValue.(*client.OptionValueString).Value)
+	log.Info().Msgf("TDLib version: %s", optionValue.(*client.OptionValueString).Value)
 
 	me, err := tdlibClient.GetMe()
 	if err != nil {
@@ -186,15 +186,13 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 // into the target directory. It handles HTTP requests, decompresses gzip files, and processes
 // tar archives to create directories and files as needed. Returns an error if any step fails.
 func downloadAndExtractTarball(url, targetDir string) error {
-	// Step 1: Download the tarball
 	req, err := http.NewRequest("GET", url, nil)
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+	req.Header.Set("Accept", "*/*")
 	if err != nil {
 		return err
 	}
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -203,20 +201,30 @@ func downloadAndExtractTarball(url, targetDir string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return err
+		return fmt.Errorf("non-200 status returned: %v", resp.Status)
 	}
 
-	// Step 2: Decompress the gzip file
-	gzReader, err := gzip.NewReader(resp.Body)
+	// Pass the response body to the new function
+	return downloadAndExtractTarballFromReader(resp.Body, targetDir)
+}
+
+// downloadAndExtractTarballFromReader extracts files from a gzip-compressed tarball
+// provided by the reader and writes them to the specified target directory.
+// It handles directories and regular files, creating necessary directories
+// and files as needed. Unknown file types are ignored. Returns an error if
+// any operation fails.
+func downloadAndExtractTarballFromReader(reader io.Reader, targetDir string) error {
+	// Step 1: Decompress the gzip file
+	gzReader, err := gzip.NewReader(reader)
 	if err != nil {
 		return err
 	}
 	defer gzReader.Close()
 
-	// Step 3: Read the tarball contents
+	// Step 2: Read the tarball contents
 	tarReader := tar.NewReader(gzReader)
 
-	// Step 4: Extract files
+	// Step 3: Extract files
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -231,13 +239,11 @@ func downloadAndExtractTarball(url, targetDir string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			// Create directory
 			err := os.MkdirAll(targetPath, os.ModePerm)
 			if err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			// Create file
 			err := os.MkdirAll(filepath.Dir(targetPath), os.ModePerm)
 			if err != nil {
 				return err
@@ -248,7 +254,6 @@ func downloadAndExtractTarball(url, targetDir string) error {
 			}
 			defer file.Close()
 
-			// Copy file contents
 			_, err = io.Copy(file, tarReader)
 			if err != nil {
 				return err
@@ -438,9 +443,9 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
 		}
 	case *client.MessageGiveawayWinners:
-		log.Debug().Msgf("This message is a giveaway winner:", content)
+		log.Debug().Msgf("This message is a giveaway winner: %v", content)
 	case *client.MessageGiveawayCompleted:
-		log.Debug().Msgf("This message is a giveaway completed:", content)
+		log.Debug().Msgf("This message is a giveaway completed: %v", content)
 	case *client.MessageVideoNote:
 		thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)

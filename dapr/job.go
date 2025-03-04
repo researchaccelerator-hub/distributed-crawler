@@ -8,9 +8,9 @@ import (
 	daprc "github.com/dapr/go-sdk/client"
 	"github.com/dapr/go-sdk/service/common"
 	daprs "github.com/dapr/go-sdk/service/grpc"
+	common2 "github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/types/known/anypb"
-	common2 "tdlib-scraper/common"
 )
 
 // StartDaprMode initializes and starts a Dapr service in job mode using the provided
@@ -58,10 +58,10 @@ func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 		if err := server.AddJobEventHandler(jobName, handleJob); err != nil {
 			log.Fatal().Err(err).Msg("failed to register job event handler")
 		}
-		fmt.Println("Registered job handler for: ", jobName)
+		log.Info().Msgf("Registered job handler for: %s", jobName)
 	}
 
-	fmt.Println("Starting server on port: " + port)
+	log.Info().Msgf("Starting server on port: %s", port)
 	if err = server.Start(); err != nil {
 		log.Fatal().Err(err).Msg("failed to start server")
 	}
@@ -81,16 +81,16 @@ type DroidJob struct {
 	DueTime string `json:"dueTime"`
 }
 
-//scheduleJob handles the scheduling of a job based on the provided invocation event.
-//It unmarshals the event data into a DroidJob structure, constructs a JobData object,
-//and marshals it into JSON format. The job is then scheduled using the Dapr client.
-//Returns the original invocation event content and any error encountered during the process.
+// scheduleJob handles the scheduling of a job based on the provided invocation event.
+// It unmarshals the event data into a DroidJob structure, constructs a JobData object,
+// and marshals it into JSON format. The job is then scheduled using the Dapr client.
+// Returns the original invocation event content and any error encountered during the process.
 //
-//Parameters:
+// Parameters:
 // - ctx: The context for the operation.
 // - in: The invocation event containing job details.
 //
-//Returns:
+// Returns:
 // - out: The content of the invocation event.
 // - err: An error if the job scheduling fails.
 func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.Content, err error) {
@@ -103,7 +103,7 @@ func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.C
 	droidJob := DroidJob{}
 	err = json.Unmarshal(in.Data, &droidJob)
 	if err != nil {
-		fmt.Println("failed to unmarshal job: ", err)
+		log.Error().Err(err).Msgf("failed to unmarshal job: %v", err)
 		return nil, err
 	}
 
@@ -114,7 +114,7 @@ func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.C
 
 	content, err := json.Marshal(jobData)
 	if err != nil {
-		fmt.Printf("Error marshalling job content")
+		log.Error().Err(err).Msg("Error marshalling job content")
 		return nil, err
 	}
 
@@ -129,11 +129,11 @@ func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.C
 
 	err = app.daprClient.ScheduleJobAlpha1(ctx, &job)
 	if err != nil {
-		fmt.Println("failed to schedule job. err: ", err)
+		log.Error().Msgf("failed to schedule job. err: %v", err)
 		return nil, err
 	}
 
-	fmt.Println("Job scheduled: ", droidJob.Name)
+	log.Info().Msgf("Job scheduled: %v", droidJob.Name)
 
 	out = &common.Content{
 		Data:        in.Data,
@@ -164,7 +164,7 @@ func getJob(ctx context.Context, in *common.InvocationEvent) (out *common.Conten
 
 	job, err := app.daprClient.GetJobAlpha1(ctx, string(in.Data))
 	if err != nil {
-		fmt.Println("failed to get job. err: ", err)
+		log.Error().Err(err).Msgf("failed to get job. err: %v", err)
 	}
 
 	out = &common.Content{
@@ -191,8 +191,8 @@ type JobData struct {
 // Returns:
 // - error: An error if the job data or payload unmarshaling fails.
 func handleJob(ctx context.Context, job *common.JobEvent) error {
-	fmt.Println("Job event received! Raw data:", string(job.Data))
-	fmt.Println("Job type:", job.JobType)
+	log.Info().Msgf("Job event received! Raw data: %s", string(job.Data))
+	log.Info().Msgf("Job type: %s", job.JobType)
 	var jobData common.Job
 	if err := json.Unmarshal(job.Data, &jobData); err != nil {
 		return fmt.Errorf("failed to unmarshal job: %v", err)
@@ -203,8 +203,8 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 		return fmt.Errorf("failed to unmarshal payload: %v", err)
 	}
 
-	fmt.Println("Starting droid:", jobPayload.Droid)
-	fmt.Println("Executing maintenance job:", jobPayload.Task)
+	log.Info().Msgf("Starting droid: %s", jobPayload.Droid)
+	log.Info().Msgf("Executing maintenance job: %s", jobPayload.Task)
 
 	return nil
 }

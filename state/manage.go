@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 	"io"
 	"net/url"
@@ -15,7 +16,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"tdlib-scraper/model"
 )
 
 // StateManager encapsulates state management with a configurable storage root prefix.
