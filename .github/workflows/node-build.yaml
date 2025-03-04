@@ -14,7 +14,7 @@ jobs:
       - name: install tdlib
         run:      sudo apt-get update &&\
                   sudo apt-get upgrade &&\
-                  sudo apt-get install make git zlib1g-dev libssl-dev gperf php-cli cmake g++ &&\
+                  sudo apt-get install -y make git zlib1g-dev libssl-dev gperf php-cli cmake g++ &&\
                   git clone https://github.com/tdlib/td.git &&\
                   cd td &&\
                   rm -rf build &&\
