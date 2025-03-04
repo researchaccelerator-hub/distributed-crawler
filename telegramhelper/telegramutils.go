@@ -1,6 +1,7 @@
 package telegramhelper
 
 import (
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
@@ -20,7 +21,7 @@ import (
 //
 //	An integer representing the total number of messages in the chat, or an error if the
 //	operation fails.
-func GetMessageCount(tdlibClient *client.Client, chatID int64, channelname string) (int, error) {
+func GetMessageCount(tdlibClient crawler.TDLibClient, chatID int64, channelname string) (int, error) {
 	log.Info().Msgf("Getting message count for channel %s", channelname)
 	messageCount := 0
 	var fromMessageId int64 = 0 // Start from the latest message (ID = 0)
@@ -67,7 +68,7 @@ func GetViewCount(message *client.Message, channelname string) int {
 // It uses the provided tdlibClient to fetch message details from Telegram.
 // If the message's InteractionInfo is available, it returns the ForwardCount as the share count.
 // If InteractionInfo is nil or an error occurs, it returns 0 and an error, respectively.
-func GetMessageShareCount(tdlibClient *client.Client, chatID, messageID int64, channelname string) (int, error) {
+func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) (int, error) {
 	// Fetch the message details
 	log.Info().Msgf("Getting message share count for channel %s", channelname)
 	message, err := tdlibClient.GetMessage(&client.GetMessageRequest{
@@ -98,7 +99,7 @@ func GetMessageShareCount(tdlibClient *client.Client, chatID, messageID int64, c
 // Returns:
 //
 //	An integer representing the total number of views across all messages in the channel, or an error if the operation fails.
-func GetTotalChannelViews(tdlibClient *client.Client, channelID int64, channelname string) (int, error) {
+func GetTotalChannelViews(tdlibClient crawler.TDLibClient, channelID int64, channelname string) (int, error) {
 	var totalViews int64
 	var lastMessageID int64 = 0 // Start from the most recent message
 	log.Info().Msgf("Getting total views for channel %s", channelname)
@@ -149,7 +150,7 @@ Returns:
 The function fetches comments in batches of up to 100 and continues until no more comments are available.
 It extracts the text, reactions, view count, and reply count for each comment.
 */
-func GetMessageComments(tdlibClient *client.Client, chatID, messageID int64, channelname string) ([]model.Comment, error) {
+func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) ([]model.Comment, error) {
 	// Fetch the message thread
 	//thread, err := tdlibClient.GetMessageThread(&client.GetMessageThreadRequest{
 	//	ChatId:    chatID,

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"fmt"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
@@ -19,15 +20,15 @@ import (
 
 // TelegramService defines an interface for interacting with the Telegram client
 type TelegramService interface {
-	InitializeClient(storagePrefix string) (*client.Client, error)
-	GetMe(*client.Client) (*client.User, error)
+	InitializeClient(storagePrefix string) (*crawler.TDLibClient, error)
+	GetMe(libClient *crawler.TDLibClient) (*client.User, error)
 }
 
 // RealTelegramService is the actual TDLib implementation
 type RealTelegramService struct{}
 
 // InitializeClient sets up a real TDLib client
-func (t *RealTelegramService) InitializeClient(storagePrefix string) (*client.Client, error) {
+func (t *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TDLibClient, error) {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
 
@@ -124,18 +125,19 @@ func (m *MockTelegramService) GetMe(tdlibClient *client.Client) (*client.User, e
 
 // GenCode initializes the TDLib client and retrieves the authenticated user
 func GenCode(service TelegramService, storagePrefix string) {
-	client, err := service.InitializeClient(storagePrefix)
+	tdclient, err := service.InitializeClient(storagePrefix)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize TDLib client")
 		return
 	}
 	defer func() {
-		if client != nil {
-			client.Close()
+		if tdclient != nil {
+			libClient := *tdclient
+			libClient.Close()
 		}
 	}()
 
-	user, err := service.GetMe(client)
+	user, err := service.GetMe(tdclient)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to retrieve user information")
 		return
@@ -289,7 +291,7 @@ func removeMultimedia(filedir string) error {
 // - videoPath: The remote ID of the video.
 // - description: The text caption of the video.
 // - err: An error if the message structure is invalid or corrupt.
-func processMessageSafely(mymsg *client.MessageVideo, tdlibClient *client.Client) (thumbnailPath, videoPath, description string, err error) {
+func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath, description string, err error) {
 	if mymsg == nil || mymsg.Video == nil || mymsg.Video.Thumbnail == nil {
 		return "", "", "", fmt.Errorf("invalid or corrupt message structure")
 	}
@@ -321,7 +323,21 @@ func processMessageSafely(mymsg *client.MessageVideo, tdlibClient *client.Client
 // Returns:
 // - post: A Post model populated with the extracted data.
 // - err: An error if the parsing fails.
-func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLink, chat *client.Chat, supergroup *client.Supergroup, supergroupInfo *client.SupergroupFullInfo, postcount int, viewcount int, channelName string, tdlibClient *client.Client, sm state.StateManager) (post model.Post, err error) {
+// In telegramhelper package:
+var ParseMessage = func(
+	crawlid string,
+	message *client.Message,
+	mlr *client.MessageLink,
+	chat *client.Chat,
+	supergroup *client.Supergroup,
+	supergroupInfo *client.SupergroupFullInfo,
+	postcount int,
+	viewcount int,
+	channelName string,
+	tdlibClient crawler.TDLibClient, // our interface type
+	sm state.StateManager,
+) (post model.Post, err error) {
+	// original implementation...
 	// Defer to recover from panics and ensure the crawl continues
 	defer func() {
 		if r := recover(); r != nil {
@@ -366,7 +382,7 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	case *client.MessageText:
 		description = content.Text.Text
 	case *client.MessageVideo:
-		thumbnailPath, videoPath, description, _ = processMessageSafely(content, tdlibClient)
+		thumbnailPath, videoPath, description, _ = processMessageSafely(content)
 		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
 		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
 		path = fetchfilefromtelegram(tdlibClient, videoPath)
@@ -529,7 +545,7 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 //   - A string containing the local path of the downloaded file. Returns an empty string if an error occurs during fetching or downloading.
 //
 // The function includes error handling and logs relevant information, including any panics that are recovered.
-func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string {
+func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) string {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Info().Msgf("Recovered from panic: %v\n", r)

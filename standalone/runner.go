@@ -45,7 +45,8 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 
 	if generateCode {
 		log.Info().Msg("Running code generation...")
-		telegramhelper.GenCode(crawlerCfg.StorageRoot)
+		svc := &telegramhelper.RealTelegramService{}
+		telegramhelper.GenCode(svc, crawlerCfg.StorageRoot)
 		os.Exit(0)
 	}
 
