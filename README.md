@@ -74,6 +74,14 @@ The **Telegram Scraper** is a Go-based application designed to scrape messages a
 
 Run the scraper with the necessary environment variables and seed list:
 
+*Important*
+For reasons I'm not quite sure of to run the app I need to set the following env vars on OSX:
+
+```bash
+export CGO_CFLAGS=-I/opt/homebrew/include
+export CGO_LDFLAGS=-L/opt/homebrew/lib -lssl -lcrypto
+```
+
 ```bash
 ./tdlib-scraper -seed-list "channel1,channel2,channel3"
 ```
