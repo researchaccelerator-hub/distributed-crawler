@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
+	"github.com/zelenin/go-tdlib/client"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -285,17 +287,22 @@ func TestCorruptedTarFile(t *testing.T) {
 	}
 }
 
-//// TestRealTelegramService_InitializeClient tests real client initialization
-//func TestRealTelegramService_InitializeClient(t *testing.T) {
-//	os.Setenv("TG_API_ID", "123456")
-//	os.Setenv("TG_API_HASH", "testhash")
-//
-//	service := &RealTelegramService{}
-//	tdlibClient, err := service.InitializeClient()
-//
-//	assert.NoError(t, err, "RealTelegramService should initialize client without error")
-//	assert.NotNil(t, tdlibClient, "RealTelegramService should return a non-nil client")
-//}
+// MockTelegramService is a mock implementation for testing
+type MockTelegramService struct{}
+
+// InitializeClient simulates a successful TDLib connection
+func (m *MockTelegramService) InitializeClient(storagePrefix string) (crawler.TDLibClient, error) {
+	log.Info().Msg("MockTelegramService: Simulating client initialization")
+	return nil, nil
+}
+
+// GetMe simulates retrieving a fake user
+func (m *MockTelegramService) GetMe(tdlibClient crawler.TDLibClient) (*client.User, error) {
+	return &client.User{
+		FirstName: "Mock",
+		LastName:  "User",
+	}, nil
+}
 
 // TestMockTelegramService_InitializeClient tests mock client initialization
 func TestMockTelegramService_InitializeClient(t *testing.T) {

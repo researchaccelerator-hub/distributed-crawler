@@ -1,42 +1,47 @@
+// Package crawl provides functionality to crawl Telegram channels and extract data.
+// This file contains tests for the crawling functionality.
 package crawl
 
 import (
 	"errors"
-	"github.com/google/uuid"
-	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
-	"github.com/rs/zerolog/log"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"io/ioutil"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
+	"github.com/rs/zerolog/log"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/zelenin/go-tdlib/client"
 )
 
-// fakeTdlibClient implements TDLibClient for testing.
+// fakeTdlibClient implements the TDLibClient interface for testing purposes.
+// It allows customizing individual method behaviors by providing function fields
+// that can be set to return specific test responses or simulate errors.
 type fakeTdlibClient struct {
 	getMessageFunc     func(req *client.GetMessageRequest) (*client.Message, error)
 	getMessageLinkFunc func(req *client.GetMessageLinkRequest) (*client.MessageLink, error)
 	getChatHistoryFunc func(req *client.GetChatHistoryRequest) (*client.Messages, error)
 }
 
-func (f *fakeTdlibClient) GetMessageThreadHistory(req *client.GetMessageThreadHistoryRequest) (*client.Messages, error) {
+func (f *fakeTdlibClient) GetMe() (*client.User, error) {
 	//TODO implement me
+	panic("implement me")
+}
+
+func (f *fakeTdlibClient) GetMessageThreadHistory(req *client.GetMessageThreadHistoryRequest) (*client.Messages, error) {
 	panic("implement me")
 }
 
 func (f *fakeTdlibClient) GetRemoteFile(req *client.GetRemoteFileRequest) (*client.File, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
 func (f *fakeTdlibClient) DownloadFile(req *client.DownloadFileRequest) (*client.File, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
@@ -48,27 +53,22 @@ func (f *fakeTdlibClient) GetChatHistory(req *client.GetChatHistoryRequest) (*cl
 }
 
 func (f *fakeTdlibClient) SearchPublicChat(req *client.SearchPublicChatRequest) (*client.Chat, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
 func (f *fakeTdlibClient) GetChat(req *client.GetChatRequest) (*client.Chat, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
 func (f *fakeTdlibClient) GetSupergroup(req *client.GetSupergroupRequest) (*client.Supergroup, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
 func (f *fakeTdlibClient) GetSupergroupFullInfo(req *client.GetSupergroupFullInfoRequest) (*client.SupergroupFullInfo, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
 func (f *fakeTdlibClient) Close() (*client.Ok, error) {
-	//TODO implement me
 	panic("implement me")
 }
 
@@ -80,19 +80,19 @@ func (f *fakeTdlibClient) GetMessageLink(req *client.GetMessageLinkRequest) (*cl
 	return f.getMessageLinkFunc(req)
 }
 
-// TestProcessMessage_GetMessageError simulates an error when fetching the detailed message.
+// TestProcessMessage_GetMessageError tests the behavior of processMessage when GetMessage fails.
+// It verifies that when the TDLib client's GetMessage method returns an error,
+// the processMessage function should propagate that error to the caller.
 func TestProcessMessage_GetMessageError(t *testing.T) {
 	fakeClient := &fakeTdlibClient{
 		getMessageFunc: func(req *client.GetMessageRequest) (*client.Message, error) {
 			return nil, errors.New("GetMessage error")
 		},
-		// This function should not be called in this test.
 		getMessageLinkFunc: func(req *client.GetMessageLinkRequest) (*client.MessageLink, error) {
-			l := client.MessageLink{
+			return &client.MessageLink{
 				Link:     "http://t.me/message_link",
 				IsPublic: false,
-			}
-			return &l, nil
+			}, nil
 		},
 	}
 
@@ -112,8 +112,10 @@ func TestProcessMessage_GetMessageError(t *testing.T) {
 	}
 }
 
-// TestProcessMessage_GetMessageLinkError simulates a failure in GetMessageLink,
-// which should be logged as a warning but not cause processMessage to fail.
+// TestProcessMessage_GetMessageLinkError tests how processMessage handles errors in GetMessageLink.
+// This test verifies that when the TDLib client's GetMessageLink method fails,
+// processMessage should log the failure as a warning but continue processing
+// the message without returning an error (non-critical failure handling).
 func TestProcessMessage_GetMessageLinkError(t *testing.T) {
 	fakeClient := &fakeTdlibClient{
 		getMessageFunc: func(req *client.GetMessageRequest) (*client.Message, error) {
@@ -134,7 +136,7 @@ func TestProcessMessage_GetMessageLinkError(t *testing.T) {
 		totalViews:     50,
 	}
 
-	// Override ParseMessage to simulate success.
+	// Override ParseMessage to simulate success
 	origParseMessage := telegramhelper.ParseMessage
 	telegramhelper.ParseMessage = func(
 		crawlid string,
@@ -149,7 +151,7 @@ func TestProcessMessage_GetMessageLinkError(t *testing.T) {
 		tdlibClient crawler.TDLibClient,
 		sm state.StateManager,
 	) (post model.Post, err error) {
-		// Verify that mlr is nil due to the simulated error.
+		// Verify that mlr is nil due to the simulated error
 		if mlr != nil {
 			t.Error("Expected nil mlr because of error in GetMessageLink")
 		}
@@ -163,19 +165,20 @@ func TestProcessMessage_GetMessageLinkError(t *testing.T) {
 	}
 }
 
-// TestProcessMessage_ParseMessageError simulates an error returned by ParseMessage.
+// TestProcessMessage_ParseMessageError tests the behavior when the ParseMessage function fails.
+// It verifies that when the telegramhelper.ParseMessage function returns an error,
+// the processMessage function should propagate that error to the caller since
+// parsing is a critical step in the message processing flow.
 func TestProcessMessage_ParseMessageError(t *testing.T) {
 	fakeClient := &fakeTdlibClient{
 		getMessageFunc: func(req *client.GetMessageRequest) (*client.Message, error) {
 			return &client.Message{Id: 3, ChatId: 300}, nil
 		},
 		getMessageLinkFunc: func(req *client.GetMessageLinkRequest) (*client.MessageLink, error) {
-			l := client.MessageLink{
+			return &client.MessageLink{
 				Link:     "http://t.me/message_link",
 				IsPublic: false,
-			}
-			return &l, nil
-
+			}, nil
 		},
 	}
 
@@ -213,18 +216,20 @@ func TestProcessMessage_ParseMessageError(t *testing.T) {
 	}
 }
 
-// TestProcessMessage_Success tests the happy path when all functions succeed.
+// TestProcessMessage_Success tests the successful execution path of processMessage.
+// This "happy path" test verifies that when all TDLib client calls succeed and
+// ParseMessage processes the message correctly, the processMessage function
+// should complete without errors and correctly parse the message content.
 func TestProcessMessage_Success(t *testing.T) {
 	fakeClient := &fakeTdlibClient{
 		getMessageFunc: func(req *client.GetMessageRequest) (*client.Message, error) {
 			return &client.Message{Id: 4, ChatId: 400}, nil
 		},
 		getMessageLinkFunc: func(req *client.GetMessageLinkRequest) (*client.MessageLink, error) {
-			l := client.MessageLink{
+			return &client.MessageLink{
 				Link:     "http://t.me/message_link",
 				IsPublic: false,
-			}
-			return &l, nil
+			}, nil
 		},
 	}
 
@@ -252,7 +257,6 @@ func TestProcessMessage_Success(t *testing.T) {
 		tdlibClient crawler.TDLibClient,
 		sm state.StateManager,
 	) (post model.Post, err error) {
-		// In the success case, simply return a dummy result.
 		return model.Post{PostLink: "parsed"}, nil
 	}
 	defer func() { telegramhelper.ParseMessage = origParseMessage }()
@@ -263,6 +267,10 @@ func TestProcessMessage_Success(t *testing.T) {
 	}
 }
 
+// TestFetchMessages_Success tests the successful retrieval of messages from a chat.
+// It verifies that the fetchMessages function correctly calls the TDLib client's
+// GetChatHistory method with the expected parameters and properly processes the
+// returned messages.
 func TestFetchMessages_Success(t *testing.T) {
 	// Arrange
 	expectedMessages := []*client.Message{
@@ -305,8 +313,10 @@ func TestFetchMessages_Success(t *testing.T) {
 	assert.Len(t, messages, 2)
 }
 
+// TestFetchMessages_EmptyResult tests the behavior of fetchMessages when no messages are returned.
+// It verifies that the function handles empty message lists correctly, returning an empty
+// slice rather than nil and not throwing any errors.
 func TestFetchMessages_EmptyResult(t *testing.T) {
-	// Arrange
 	mockClient := &fakeTdlibClient{
 		getChatHistoryFunc: func(req *client.GetChatHistoryRequest) (*client.Messages, error) {
 			return &client.Messages{
@@ -316,16 +326,16 @@ func TestFetchMessages_EmptyResult(t *testing.T) {
 		},
 	}
 
-	// Act
 	messages, err := fetchMessages(mockClient, 100, 0)
 
-	// Assert
 	assert.NoError(t, err)
 	assert.Empty(t, messages)
 }
 
+// TestFetchMessages_Error tests the error handling in fetchMessages when the API call fails.
+// It verifies that when the GetChatHistory call returns an error, the fetchMessages function
+// properly propagates that error to the caller and returns nil for the messages slice.
 func TestFetchMessages_Error(t *testing.T) {
-	// Arrange
 	expectedError := errors.New("API error")
 	mockClient := &fakeTdlibClient{
 		getChatHistoryFunc: func(req *client.GetChatHistoryRequest) (*client.Messages, error) {
@@ -333,17 +343,17 @@ func TestFetchMessages_Error(t *testing.T) {
 		},
 	}
 
-	// Act
 	messages, err := fetchMessages(mockClient, 100, 0)
 
-	// Assert
 	assert.Error(t, err)
 	assert.Equal(t, expectedError, err)
 	assert.Nil(t, messages)
 }
 
+// TestFetchMessages_NilMessages tests how fetchMessages handles a nil messages field in the API response.
+// It verifies that when GetChatHistory returns a response with a nil Messages field,
+// the fetchMessages function returns an empty slice instead of propagating the nil value.
 func TestFetchMessages_NilMessages(t *testing.T) {
-	// Arrange
 	mockClient := &fakeTdlibClient{
 		getChatHistoryFunc: func(req *client.GetChatHistoryRequest) (*client.Messages, error) {
 			return &client.Messages{
@@ -353,16 +363,16 @@ func TestFetchMessages_NilMessages(t *testing.T) {
 		},
 	}
 
-	// Act
 	messages, err := fetchMessages(mockClient, 100, 0)
 
-	// Assert
 	assert.NoError(t, err)
 	assert.Empty(t, messages)
 }
 
+// TestFetchMessages_VerifyParameters tests that fetchMessages passes the correct parameters to GetChatHistory.
+// It verifies that all parameters (chatID, fromMessageID, and limit) are correctly forwarded
+// from fetchMessages to the underlying TDLib client call.
 func TestFetchMessages_VerifyParameters(t *testing.T) {
-	// Arrange
 	chatID := int64(123456)
 	fromMessageID := int64(789)
 	limit := int32(100)
@@ -382,17 +392,16 @@ func TestFetchMessages_VerifyParameters(t *testing.T) {
 		},
 	}
 
-	// Act
 	_, err := fetchMessages(mockClient, chatID, fromMessageID)
 
-	// Assert
 	assert.NoError(t, err)
 	assert.True(t, parameterChecked, "Parameters should have been verified")
 }
 
-// Test with different message types
+// TestFetchMessages_DifferentMessageTypes tests that fetchMessages properly handles various message types.
+// It verifies that the function correctly processes text messages, photo messages, and video messages,
+// ensuring that all message types are properly returned in the result slice.
 func TestFetchMessages_DifferentMessageTypes(t *testing.T) {
-	// Arrange
 	expectedMessages := []*client.Message{
 		{
 			Id:     1,
@@ -428,37 +437,56 @@ func TestFetchMessages_DifferentMessageTypes(t *testing.T) {
 		},
 	}
 
-	// Act
 	messages, err := fetchMessages(mockClient, 100, 0)
 
-	// Assert
 	assert.NoError(t, err)
 	assert.Equal(t, expectedMessages, messages)
 	assert.Len(t, messages, 3)
 }
 
-// Modified processAllMessages that accepts a MessageProcessor
+// MessageProcessor is an interface for processing Telegram messages.
+// This interface abstracts the message processing logic to allow for easier testing
+// and more flexible implementation strategies. Implementations of this interface
+// are responsible for extracting and storing relevant information from messages.
+type MessageProcessor interface {
+	// ProcessMessage processes a single Telegram message.
+	// It takes the TDLib client, the message to process, channel information,
+	// a crawl ID to identify the current crawling session, the channel username,
+	// and a state manager to track progress.
+	// Returns an error if processing fails.
+	ProcessMessage(tdlibClient crawler.TDLibClient, message *client.Message, info *channelInfo, crawlID string, channelUsername string, sm *state.StateManager) error
+}
+
+// processAllMessagesWithProcessor retrieves and processes all messages from a channel.
+// This function fetches messages in batches, starting from the most recent message
+// and working backward through the history. It uses the provided MessageProcessor
+// to process each message, allowing for customized message handling.
+//
+// Parameters:
+//   - tdlibClient: The TDLib client for Telegram API access
+//   - info: Information about the channel being processed
+//   - crawlID: Unique identifier for this crawling session
+//   - channelUsername: Username of the channel being processed
+//   - sm: State manager to track crawling progress
+//   - processor: Implementation of MessageProcessor to handle individual messages
+//
+// Returns an error if message fetching fails, but continues processing despite individual message errors.
 func processAllMessagesWithProcessor(tdlibClient crawler.TDLibClient, info *channelInfo, crawlID, channelUsername string, sm *state.StateManager, processor MessageProcessor) error {
 	var fromMessageID int64 = 0
 
 	for {
-		// We'll use fmt.Printf instead of log.Info for testing
-		// fmt.Printf("Fetching from message id %d\n", fromMessageID)
-
 		messages, err := fetchMessages(tdlibClient, info.chat.Id, fromMessageID)
 		if err != nil {
 			return err
 		}
 
 		if len(messages) == 0 {
-			// fmt.Printf("No more messages found in the channel %s\n", channelUsername)
 			break
 		}
 
 		// Process messages
 		for _, message := range messages {
 			if err := processor.ProcessMessage(tdlibClient, message, info, crawlID, channelUsername, sm); err != nil {
-				// fmt.Printf("Error processing message %d: %v\n", message.Id, err)
 				continue // Skip to next message on error
 			}
 		}
@@ -470,10 +498,8 @@ func processAllMessagesWithProcessor(tdlibClient crawler.TDLibClient, info *chan
 	return nil
 }
 
-type MessageProcessor interface {
-	ProcessMessage(tdlibClient crawler.TDLibClient, message *client.Message, info *channelInfo, crawlID string, channelUsername string, sm *state.StateManager) error
-}
-
+// mockMessageProcessor implements the MessageProcessor interface for testing.
+// It uses the testify/mock framework to track and verify method calls.
 type mockMessageProcessor struct {
 	mock.Mock
 }
@@ -483,9 +509,17 @@ func (m *mockMessageProcessor) ProcessMessage(tdlibClient crawler.TDLibClient, m
 	return args.Error(0)
 }
 
+// createTempStateManager creates a temporary StateManager for testing purposes.
+// It creates a temporary directory and initializes a StateManager with a unique crawl ID.
+// The caller is responsible for cleaning up the temporary directory when done.
+//
+// Returns:
+//   - A pointer to the initialized StateManager
+//   - The path to the temporary directory (for cleanup)
+//   - An error if creation fails
 func createTempStateManager() (*state.StateManager, string, error) {
 	// Create a temporary directory
-	tmpDir, err := ioutil.TempDir("", "test-state-")
+	tmpDir, err := os.MkdirTemp("", "test-state-")
 	if err != nil {
 		return nil, "", err
 	}
@@ -497,6 +531,10 @@ func createTempStateManager() (*state.StateManager, string, error) {
 	return stateManager, tmpDir, nil
 }
 
+// TestProcessAllMessages_Success tests the successful operation of processAllMessagesWithProcessor.
+// It verifies that the function correctly fetches messages in multiple batches and
+// processes each message using the provided processor, eventually stopping when
+// no more messages are available.
 func TestProcessAllMessages_Success(t *testing.T) {
 	// Create a temp StateManager
 	stateManager, tmpDir, err := createTempStateManager()
@@ -555,6 +593,10 @@ func TestProcessAllMessages_Success(t *testing.T) {
 	mockProcessor.AssertNumberOfCalls(t, "ProcessMessage", 5)
 	mockProcessor.AssertExpectations(t)
 }
+
+// TestProcessAllMessages_FetchError tests error handling when message fetching fails.
+// It verifies that when fetchMessages returns an error, processAllMessagesWithProcessor
+// properly propagates that error to the caller and does not attempt to process any messages.
 func TestProcessAllMessages_FetchError(t *testing.T) {
 	// Create a temp StateManager
 	stateManager, tmpDir, err := createTempStateManager()
@@ -588,6 +630,10 @@ func TestProcessAllMessages_FetchError(t *testing.T) {
 	mockProcessor.AssertNotCalled(t, "ProcessMessage")
 }
 
+// TestProcessAllMessages_ProcessError tests how processAllMessagesWithProcessor handles message processing errors.
+// It verifies that when the processor returns an error for a specific message,
+// the function should log the error and continue processing the remaining messages
+// rather than stopping the entire process.
 func TestProcessAllMessages_ProcessError(t *testing.T) {
 	// Create a temp StateManager
 	stateManager, tmpDir, err := createTempStateManager()
@@ -634,6 +680,10 @@ func TestProcessAllMessages_ProcessError(t *testing.T) {
 	mockProcessor.AssertExpectations(t)
 }
 
+// TestProcessAllMessages_NoMessages tests processAllMessagesWithProcessor behavior with an empty channel.
+// It verifies that when fetchMessages returns an empty list of messages immediately,
+// the function should terminate gracefully without error and without calling
+// the message processor.
 func TestProcessAllMessages_NoMessages(t *testing.T) {
 	// Create a temp StateManager
 	stateManager, tmpDir, err := createTempStateManager()
@@ -665,6 +715,10 @@ func TestProcessAllMessages_NoMessages(t *testing.T) {
 	mockProcessor.AssertNotCalled(t, "ProcessMessage")
 }
 
+// TestProcessAllMessages_MultipleBatches tests processing messages across multiple batches.
+// It verifies that processAllMessagesWithProcessor correctly handles pagination
+// by fetching multiple batches of messages and updating the fromMessageID parameter
+// correctly between batches, ensuring all messages in the channel are processed.
 func TestProcessAllMessages_MultipleBatches(t *testing.T) {
 	// Create a temp StateManager
 	stateManager, tmpDir, err := createTempStateManager()
@@ -733,9 +787,17 @@ func TestProcessAllMessages_MultipleBatches(t *testing.T) {
 	mockProcessor.AssertExpectations(t)
 }
 
-// Mock for TDLibClient with additional methods needed for getChannelInfo
+// mockTDLibClient is a comprehensive mock implementation of the TDLibClient interface.
+// Unlike fakeTdlibClient, which only implements a subset of methods with custom function fields,
+// this implementation uses the testify/mock framework to provide a complete mock that
+// can be configured with expectations for all methods of the interface.
 type mockTDLibClient struct {
 	mock.Mock
+}
+
+func (m *mockTDLibClient) GetMe() (*client.User, error) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (m *mockTDLibClient) SearchPublicChat(req *client.SearchPublicChatRequest) (*client.Chat, error) {
@@ -826,14 +888,28 @@ func (m *mockTDLibClient) Close() (*client.Ok, error) {
 	return args.Get(0).(*client.Ok), args.Error(1)
 }
 
-// Instead of mocking the telegramhelper functions directly,
-// we'll use a wrapper for testing purposes
-
-// Create interfaces for the helper functions
+// TotalViewsGetter is a function type for retrieving the total view count of a channel.
+// This abstraction allows for easier testing by replacing the real implementation
+// with test-specific versions.
 type TotalViewsGetter func(client crawler.TDLibClient, chatID int64, channelUsername string) (int, error)
+
+// MessageCountGetter is a function type for retrieving the message count of a channel.
+// This abstraction allows for easier testing by replacing the real implementation
+// with test-specific versions.
 type MessageCountGetter func(client crawler.TDLibClient, chatID int64, channelUsername string) (int, error)
 
-// Create a testable version of getChannelInfo that accepts the helper functions as parameters
+// getChannelInfoForTest is a testable version of getChannelInfo that accepts replaceable helper functions.
+// This function retrieves information about a Telegram channel, including basic chat details,
+// supergroup information, view counts, and message counts. By accepting the helper functions
+// as parameters, it allows tests to provide mock implementations, making the function testable.
+//
+// Parameters:
+//   - tdlibClient: The TDLib client for Telegram API access
+//   - channelUsername: Username of the channel to retrieve information for
+//   - getTotalViewsFn: Function to get the channel's total view count
+//   - getMessageCountFn: Function to get the channel's message count
+//
+// Returns channel information or an error if retrieval fails.
 func getChannelInfoForTest(
 	tdlibClient crawler.TDLibClient,
 	channelUsername string,
@@ -917,7 +993,12 @@ func getChannelInfoForTest(
 	}, nil
 }
 
-// Add a wrapper function to connect the original function with our testable version
+// getChannelInfoWrapper is a wrapper function that connects the original getChannelInfo
+// function with our testable version. It uses the standard telegramhelper implementations
+// for view count and message count retrieval.
+//
+// This function serves as a bridge between the production code and the test code,
+// allowing the same core logic to be tested with mock dependencies.
 func getChannelInfoWrapper(tdlibClient crawler.TDLibClient, channelUsername string) (*channelInfo, error) {
 	return getChannelInfoForTest(
 		tdlibClient,
@@ -927,6 +1008,10 @@ func getChannelInfoWrapper(tdlibClient crawler.TDLibClient, channelUsername stri
 	)
 }
 
+// TestGetChannelInfo_SearchPublicChatError tests getChannelInfo behavior when SearchPublicChat fails.
+// It verifies that when the initial SearchPublicChat call to find the channel fails,
+// getChannelInfo properly propagates that error to the caller without attempting
+// to retrieve additional information.
 func TestGetChannelInfo_SearchPublicChatError(t *testing.T) {
 	// Mock client
 	mockClient := new(mockTDLibClient)
@@ -940,7 +1025,7 @@ func TestGetChannelInfo_SearchPublicChatError(t *testing.T) {
 		Username: channelUsername,
 	}).Return(nil, searchError)
 
-	// Create mock helper functions - define them here even though they won't be called
+	// Create mock helper functions
 	getMockTotalViews := func(client crawler.TDLibClient, chatID int64, channelUsername string) (int, error) {
 		return 0, nil
 	}
@@ -961,6 +1046,10 @@ func TestGetChannelInfo_SearchPublicChatError(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestGetChannelInfo_Success tests the successful retrieval of channel information.
+// It verifies that getChannelInfo correctly retrieves and combines information from
+// multiple sources: basic chat info, supergroup info, view counts, and message counts,
+// resulting in a complete channelInfo object.
 func TestGetChannelInfo_Success(t *testing.T) {
 	// Mock client
 	mockClient := new(mockTDLibClient)
@@ -969,8 +1058,8 @@ func TestGetChannelInfo_Success(t *testing.T) {
 	channelUsername := "testchannel"
 	chatID := int64(12345)
 	supergroupID := int64(67890)
-	totalViews := 5000  // Define the variable
-	messageCount := 100 // Define the variable
+	totalViews := 5000
+	messageCount := 100
 
 	// Mock responses
 	chat := &client.Chat{
@@ -1058,6 +1147,10 @@ func TestGetChannelInfo_Success(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestGetChannelInfo_NonSupergroupChannel tests getChannelInfo with a non-supergroup chat type.
+// It verifies that when the channel is not a supergroup (e.g., it's a private chat),
+// getChannelInfo still retrieves basic information but correctly handles the absence
+// of supergroup-specific data without errors.
 func TestGetChannelInfo_NonSupergroupChannel(t *testing.T) {
 	// Mock client
 	mockClient := new(mockTDLibClient)
@@ -1065,8 +1158,8 @@ func TestGetChannelInfo_NonSupergroupChannel(t *testing.T) {
 	// Test data
 	channelUsername := "testchannel"
 	chatID := int64(12345)
-	totalViews := 0    // Define the variable
-	messageCount := 50 // Define the variable
+	totalViews := 0
+	messageCount := 50
 
 	// Mock responses - chat that is not a supergroup
 	chat := &client.Chat{
@@ -1090,8 +1183,6 @@ func TestGetChannelInfo_NonSupergroupChannel(t *testing.T) {
 	mockClient.On("GetChat", &client.GetChatRequest{
 		ChatId: chatID,
 	}).Return(chatDetails, nil)
-
-	// No supergroup calls expected
 
 	// Create mock helper functions
 	getMockTotalViews := func(client crawler.TDLibClient, chatID int64, channelUsername string) (int, error) {
@@ -1119,6 +1210,10 @@ func TestGetChannelInfo_NonSupergroupChannel(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestGetChannelInfo_TotalViewsError tests getChannelInfo resilience when view count retrieval fails.
+// It verifies that when the getTotalViewsFn returns an error, getChannelInfo should
+// log a warning but continue execution, setting the totalViews field to 0 and
+// still returning the channel information without an error.
 func TestGetChannelInfo_TotalViewsError(t *testing.T) {
 	// Mock client
 	mockClient := new(mockTDLibClient)
@@ -1127,7 +1222,7 @@ func TestGetChannelInfo_TotalViewsError(t *testing.T) {
 	channelUsername := "testchannel"
 	chatID := int64(12345)
 	viewsError := errors.New("views count error")
-	messageCount := 200 // Define the variable
+	messageCount := 200
 
 	// Mock responses
 	chat := &client.Chat{
@@ -1176,6 +1271,10 @@ func TestGetChannelInfo_TotalViewsError(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestGetChannelInfo_MessageCountError tests getChannelInfo resilience when message count retrieval fails.
+// It verifies that when the getMessageCountFn returns an error, getChannelInfo should
+// log a warning but continue execution, setting the messageCount field to 0 and
+// still returning the channel information without an error.
 func TestGetChannelInfo_MessageCountError(t *testing.T) {
 	// Mock client
 	mockClient := new(mockTDLibClient)
@@ -1184,7 +1283,7 @@ func TestGetChannelInfo_MessageCountError(t *testing.T) {
 	channelUsername := "testchannel"
 	chatID := int64(12345)
 	messageCountError := errors.New("message count error")
-	totalViews := 4000 // Define the variable
+	totalViews := 4000
 
 	// Mock responses
 	chat := &client.Chat{
@@ -1218,7 +1317,7 @@ func TestGetChannelInfo_MessageCountError(t *testing.T) {
 		return 0, messageCountError
 	}
 
-	// Call the function with mock helpers (not with getChannelInfo)
+	// Call the function with mock helpers
 	info, err := getChannelInfoForTest(mockClient, channelUsername, getMockTotalViews, getMockMessageCount)
 
 	// Assertions - should still succeed because the function is tolerant of message count errors
@@ -1233,6 +1332,10 @@ func TestGetChannelInfo_MessageCountError(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestGetChannelInfo_AllNonCriticalErrorsTogether tests getChannelInfo with multiple non-critical errors.
+// It verifies that getChannelInfo is resilient to multiple simultaneous non-critical
+// errors (supergroup info, view count, and message count errors), continuing execution
+// and returning partial channel information without propagating these errors.
 func TestGetChannelInfo_AllNonCriticalErrorsTogether(t *testing.T) {
 	// Mock client
 	mockClient := new(mockTDLibClient)
@@ -1282,7 +1385,7 @@ func TestGetChannelInfo_AllNonCriticalErrorsTogether(t *testing.T) {
 		return 0, messageCountError
 	}
 
-	// Call the function with mock helpers (not with getChannelInfo)
+	// Call the function with mock helpers
 	info, err := getChannelInfoForTest(mockClient, channelUsername, getMockTotalViews, getMockMessageCount)
 
 	// Assertions - should still succeed despite all non-critical errors

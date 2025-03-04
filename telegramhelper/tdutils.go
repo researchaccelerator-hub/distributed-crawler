@@ -20,8 +20,8 @@ import (
 
 // TelegramService defines an interface for interacting with the Telegram client
 type TelegramService interface {
-	InitializeClient(storagePrefix string) (*crawler.TDLibClient, error)
-	GetMe(libClient *crawler.TDLibClient) (*client.User, error)
+	InitializeClient(storagePrefix string) (crawler.TDLibClient, error)
+	GetMe(libClient crawler.TDLibClient) (*client.User, error)
 }
 
 // RealTelegramService is the actual TDLib implementation
@@ -96,7 +96,7 @@ func (t *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TD
 }
 
 // GetMe retrieves the authenticated Telegram user
-func (t *RealTelegramService) GetMe(tdlibClient *client.Client) (*client.User, error) {
+func (t *RealTelegramService) GetMe(tdlibClient crawler.TDLibClient) (*client.User, error) {
 	user, err := tdlibClient.GetMe()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to retrieve authenticated user")
@@ -104,23 +104,6 @@ func (t *RealTelegramService) GetMe(tdlibClient *client.Client) (*client.User, e
 	}
 	log.Info().Msgf("Logged in as: %s %s", user.FirstName, user.LastName)
 	return user, nil
-}
-
-// MockTelegramService is a mock implementation for testing
-type MockTelegramService struct{}
-
-// InitializeClient simulates a successful TDLib connection
-func (m *MockTelegramService) InitializeClient(storagePrefix string) (*client.Client, error) {
-	log.Info().Msg("MockTelegramService: Simulating client initialization")
-	return nil, nil
-}
-
-// GetMe simulates retrieving a fake user
-func (m *MockTelegramService) GetMe(tdlibClient *client.Client) (*client.User, error) {
-	return &client.User{
-		FirstName: "Mock",
-		LastName:  "User",
-	}, nil
 }
 
 // GenCode initializes the TDLib client and retrieves the authenticated user
@@ -132,8 +115,7 @@ func GenCode(service TelegramService, storagePrefix string) {
 	}
 	defer func() {
 		if tdclient != nil {
-			libClient := *tdclient
-			libClient.Close()
+			tdclient.Close()
 		}
 	}()
 

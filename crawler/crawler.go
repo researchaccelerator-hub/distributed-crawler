@@ -14,4 +14,5 @@ type TDLibClient interface {
 	GetSupergroup(req *client.GetSupergroupRequest) (*client.Supergroup, error)
 	GetSupergroupFullInfo(req *client.GetSupergroupFullInfoRequest) (*client.SupergroupFullInfo, error)
 	Close() (*client.Ok, error)
+	GetMe() (*client.User, error)
 }
