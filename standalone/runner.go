@@ -11,7 +11,14 @@ import (
 	"tdlib-scraper/telegramhelper"
 )
 
-// Start the crawler in standalone mode
+// StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,
+// configures the crawler using the specified configuration, and optionally runs code generation. If no URLs are provided,
+// the function logs a fatal error. The function logs the start and completion of the crawling process.
+// Parameters:
+//   - urlList: A list of URLs to crawl.
+//   - urlFile: A file containing URLs to crawl.
+//   - crawlerCfg: Configuration settings for the crawler.
+//   - generateCode: A flag indicating whether to run code generation.
 func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting crawler in standalone mode")
 
@@ -47,7 +54,9 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 	log.Info().Msg("Crawling completed")
 }
 
-// Helper function to read URLs from a file
+// readURLsFromFile reads a file specified by the filename and returns a slice of URLs.
+// It ignores empty lines and lines starting with a '#' character, which are considered comments.
+// Returns an error if the file cannot be read.
 func readURLsFromFile(filename string) ([]string, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -67,6 +76,16 @@ func readURLsFromFile(filename string) ([]string, error) {
 	return urls, nil
 }
 
+// launch initializes and runs the scraping process for a given list of strings using the specified crawler configuration.
+//
+// It generates a unique crawl ID, sets up the state manager, and seeds the list. The function then loads the progress
+// and processes each item in the list from the last saved progress point. Errors during processing are logged, and the
+// progress is saved after each item is processed. The function ensures that all items are processed successfully, and
+// handles any panics that occur during item processing.
+//
+// Parameters:
+//   - stringList: A slice of strings representing the items to be processed.
+//   - crawlCfg: A CrawlerConfig struct containing configuration settings for the crawler.
 func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	crawlid := common.GenerateCrawlID()
