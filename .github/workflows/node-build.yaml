@@ -21,7 +21,7 @@ jobs:
           mkdir build
           cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -G Ninja ..
-          cmake --build . --target install
+          sudo cmake --build . --target install
       - uses: actions/checkout@v4
       - name: Setup Go
         uses: actions/setup-go@v5
