@@ -78,6 +78,9 @@ func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 	return sm.loadList() // Fallback to local file loading
 }
 
+// loadListFromBlob downloads a list from an Azure Blob Storage container and returns it as a slice of strings.
+// It constructs the blob name using environment variables and downloads the blob to a temporary file.
+// If the blob is not found, it returns an empty list. Any errors encountered during the process are returned.
 func (sm *StateManager) loadListFromBlob() ([]string, error) {
 	client, err := sm.createAZClient()
 	if err != nil {
@@ -272,6 +275,10 @@ func (sm *StateManager) SaveProgress(index int) error {
 	return err
 }
 
+// loadProgressFromBlob downloads and reads the progress file from Azure Blob Storage.
+// It constructs the blob name using environment variables and downloads the file
+// to a temporary location. The method returns the progress as an integer or an error
+// if any step fails. If the blob does not exist, it returns zero progress.
 func (sm *StateManager) loadProgressFromBlob() (int, error) {
 	client, err := sm.createAZClient()
 	if err != nil {
@@ -314,6 +321,11 @@ func (sm *StateManager) loadProgressFromBlob() (int, error) {
 	return progress, nil
 }
 
+// saveProgressToBlob uploads the current progress index to Azure Blob Storage.
+// It creates an Azure Blob client using environment variables for configuration,
+// constructs the blob name using the job ID, and writes the progress index to
+// the specified blob in the container. Returns an error if the client creation
+// or upload fails.
 func (sm *StateManager) saveProgressToBlob(index int) error {
 	client, err := sm.createAZClient()
 	if err != nil {
@@ -337,6 +349,11 @@ func (sm *StateManager) saveProgressToBlob(index int) error {
 	log.Info().Msgf("Progress saved to Azure Blob Storage: %d", index)
 	return nil
 }
+
+// createAZClient initializes an Azure Blob Storage client using environment
+// variables for container name, blob name, and account URL. It returns the
+// client and any error encountered during the creation of the Azure credential
+// or client. If the required environment variables are not set, it returns nil.
 func (sm *StateManager) createAZClient() (*azblob.Client, error) {
 	// Check if environment variables for Azure Blob Storage are set
 	containerName := os.Getenv("CONTAINER_NAME")
@@ -417,7 +434,20 @@ func (sm *StateManager) StoreData(crawlid, channelname string, post model.Post) 
 	return nil
 }
 
-// blobExists checks if a blob exists in Azure Blob Storage.
+// blobExists checks if a blob exists in the specified container within Azure Blob Storage.
+// It returns true if the blob exists, otherwise false. If an error occurs during the check,
+// it returns false along with the error.
+//
+// Parameters:
+//
+//	client - an instance of azblob.Client to interact with Azure Blob Storage.
+//	containerName - the name of the container where the blob is located.
+//	blobName - the name of the blob to check.
+//
+// Returns:
+//
+//	bool - true if the blob exists, false otherwise.
+//	error - an error if there is an issue checking the blob's existence.
 func (sm *StateManager) blobExists(client *azblob.Client, containerName, blobName string) (bool, error) {
 	// Get blob client
 	blobClient := client.ServiceClient().NewContainerClient(containerName).NewBlobClient(blobName)
@@ -434,13 +464,38 @@ func (sm *StateManager) blobExists(client *azblob.Client, containerName, blobNam
 	return false, fmt.Errorf("error checking blob existence: %w", err)
 }
 
-// uploadDataToBlob uploads or overwrites data to an Azure Blob.
+// uploadDataToBlob uploads the provided data to an Azure Blob Storage container.
+//
+// Parameters:
+//
+//	client - An instance of azblob.Client used to interact with Azure Blob Storage.
+//	containerName - The name of the container where the blob will be stored.
+//	blobName - The name of the blob to be created or updated.
+//	data - The string data to be uploaded as the content of the blob.
+//
+// Returns:
+//
+//	An error if the upload operation fails, otherwise nil.
 func (sm *StateManager) uploadDataToBlob(client *azblob.Client, containerName, blobName, data string) error {
 	dataReader := strings.NewReader(data)
 	_, err := client.UploadStream(context.TODO(), containerName, blobName, dataReader, nil)
 	return err
 }
 
+// appendToBlob appends data to an Azure Blob Storage append blob. It first checks if the blob
+// exists and creates it if it does not. The method uses the provided azblob.Client to interact
+// with the blob storage, and it handles errors related to blob existence and data appending.
+//
+// Parameters:
+//
+//	client - The azblob.Client used to interact with Azure Blob Storage.
+//	containerName - The name of the container where the blob resides.
+//	blobName - The name of the append blob to which data will be appended.
+//	data - The byte slice containing the data to append.
+//
+// Returns:
+//
+//	An error if the blob creation or data appending fails, otherwise nil.
 func (sm *StateManager) appendToBlob(client *azblob.Client, containerName, blobName string, data []byte) error {
 	// Get container client
 	containerClient := client.ServiceClient().NewContainerClient(containerName)
@@ -476,12 +531,21 @@ func (sm *StateManager) appendToBlob(client *azblob.Client, containerName, blobN
 	return nil
 }
 
-// Helper function to append a string
+// appendStringToBlob appends a string content to an Azure Blob Storage append blob.
+// It converts the string content to a byte slice and delegates the operation to appendToBlob.
+// Parameters:
+//   - client: The Azure Blob Storage client.
+//   - containerName: The name of the container where the blob resides.
+//   - blobName: The name of the blob to which the content will be appended.
+//   - content: The string content to append to the blob.
+//
+// Returns an error if the operation fails.
 func (sm *StateManager) appendStringToBlob(client *azblob.Client, containerName, blobName, content string) error {
 	return sm.appendToBlob(client, containerName, blobName, []byte(content))
 }
 
-// Helper function to append from a reader
+// appendReaderToBlob reads data from the provided io.Reader and appends it to an Azure Blob Storage append blob.
+// If the blob does not exist, it will be created. Returns an error if reading the data or appending to the blob fails.
 func (sm *StateManager) appendReaderToBlob(client *azblob.Client, containerName, blobName string, reader io.Reader) error {
 	data, err := io.ReadAll(reader)
 	if err != nil {
@@ -490,6 +554,19 @@ func (sm *StateManager) appendReaderToBlob(client *azblob.Client, containerName,
 	return sm.appendToBlob(client, containerName, blobName, data)
 }
 
+// UploadBlobFileAndDelete uploads a local file to Azure Blob Storage and deletes it locally upon successful upload.
+// It constructs the blob path using the provided crawl ID, channel ID, and raw URL, and uploads the file to the
+// specified container and blob name. If the upload is successful, the local file is removed. Returns an error if
+// any operation fails.
+//
+// Parameters:
+//   - crawlid: A string representing the crawl ID.
+//   - channelid: A string representing the channel ID.
+//   - rawURL: A string containing the raw URL to be used for blob path construction.
+//   - filePath: A string specifying the local file path to be uploaded.
+//
+// Returns:
+//   - error: An error if the file cannot be opened, uploaded, or deleted.
 func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, filePath string) error {
 	// Open the file for reading
 	file, err := os.OpenFile(filePath, os.O_RDONLY, 0)
@@ -526,6 +603,10 @@ func (sm *StateManager) UploadBlobFileAndDelete(crawlid, channelid, rawURL, file
 	log.Info().Msg("File uploaded and deleted successfully.")
 	return nil
 }
+
+// urlToBlobPath converts a raw URL string into a blob path by parsing the URL,
+// removing the leading slash from the path, and replacing slashes with a desired
+// separator. Returns the resulting blob path or an error if the URL parsing fails.
 func (sm *StateManager) urlToBlobPath(rawURL string) (string, error) {
 	// Parse the URL
 	parsedURL, err := url.Parse(rawURL)

@@ -17,6 +17,8 @@ type CrawlerConfig struct {
 	StorageRoot  string
 }
 
+// GenerateCrawlID generates a unique identifier based on the current timestamp.
+// The identifier is formatted as a string in the "YYYYMMDDHHMMSS" format.
 func GenerateCrawlID() string {
 	// Get the current timestamp
 	currentTime := time.Now()
@@ -41,6 +43,3 @@ func ParseSeedList(stringList string) []string {
 	values := strings.Split(stringList, ",")
 	return values
 }
-
-// generateCrawlID generates a unique identifier based on the current timestamp.
-// The identifier is formatted as a string in the "YYYYMMDDHHMMSS" format.

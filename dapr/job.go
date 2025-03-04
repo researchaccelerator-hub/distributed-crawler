@@ -13,7 +13,11 @@ import (
 	common2 "tdlib-scraper/common"
 )
 
-// Start the crawler in DAPR job mode
+// StartDaprMode initializes and starts a Dapr service in job mode using the provided
+// crawler configuration. It sets up service invocation handlers for scheduling and
+// retrieving jobs, and registers job event handlers for predefined job names. The
+// service listens for Dapr requests on the specified port and logs relevant information
+// and errors during the process.
 func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 	log.Info().Msg("Starting crawler in DAPR job mode")
 	log.Printf("Listening on port %d for DAPR requests", crawlerCfg.DaprPort)
@@ -77,6 +81,18 @@ type DroidJob struct {
 	DueTime string `json:"dueTime"`
 }
 
+//scheduleJob handles the scheduling of a job based on the provided invocation event.
+//It unmarshals the event data into a DroidJob structure, constructs a JobData object,
+//and marshals it into JSON format. The job is then scheduled using the Dapr client.
+//Returns the original invocation event content and any error encountered during the process.
+//
+//Parameters:
+// - ctx: The context for the operation.
+// - in: The invocation event containing job details.
+//
+//Returns:
+// - out: The content of the invocation event.
+// - err: An error if the job scheduling fails.
 func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.Content, err error) {
 
 	if in == nil {
@@ -129,7 +145,16 @@ func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.C
 
 }
 
-// Handler that gets a job by name
+// getJob retrieves a job by its name using the provided invocation event.
+// It fetches the job data from the Dapr client and returns it in a common.Content structure.
+//
+// Parameters:
+// - ctx: The context for the operation.
+// - in: The invocation event containing the job name.
+//
+// Returns:
+// - out: The content of the job retrieved.
+// - err: An error if the job retrieval fails.
 func getJob(ctx context.Context, in *common.InvocationEvent) (out *common.Content, err error) {
 
 	if in == nil {
@@ -156,6 +181,15 @@ type JobData struct {
 	Task  string `json:"Task"`
 }
 
+// handleJob processes a job event by unmarshaling the job data and payload,
+// then logs the droid and task information. It returns an error if unmarshaling fails.
+//
+// Parameters:
+// - ctx: The context for the operation.
+// - job: The job event containing the job data.
+//
+// Returns:
+// - error: An error if the job data or payload unmarshaling fails.
 func handleJob(ctx context.Context, job *common.JobEvent) error {
 	fmt.Println("Job event received! Raw data:", string(job.Data))
 	fmt.Println("Job type:", job.JobType)

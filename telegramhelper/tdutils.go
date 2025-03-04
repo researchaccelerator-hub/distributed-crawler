@@ -17,6 +17,9 @@ import (
 	"time"
 )
 
+// GenCode initializes a TDLib client using environment variables for configuration.
+// It sets up necessary directories, handles errors, and manages client initialization
+// with a timeout mechanism. Logs are generated for each significant step.
 func GenCode() {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
@@ -178,6 +181,10 @@ func TdConnect(storageprefix string) (*client.Client, error) {
 
 	return tdlibClient, err
 }
+
+// downloadAndExtractTarball downloads a tarball from the specified URL and extracts its contents
+// into the target directory. It handles HTTP requests, decompresses gzip files, and processes
+// tar archives to create directories and files as needed. Returns an error if any step fails.
 func downloadAndExtractTarball(url, targetDir string) error {
 	// Step 1: Download the tarball
 	req, err := http.NewRequest("GET", url, nil)
@@ -544,6 +551,17 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	}
 	return post, nil
 }
+
+// fetchfilefromtelegram retrieves and downloads a file from Telegram using the provided tdlib client and download ID.
+//
+// Parameters:
+//   - tdlibClient: A pointer to the tdlib client used for interacting with Telegram.
+//   - downloadid: A string representing the ID of the file to be downloaded.
+//
+// Returns:
+//   - A string containing the local path of the downloaded file. Returns an empty string if an error occurs during fetching or downloading.
+//
+// The function includes error handling and logs relevant information, including any panics that are recovered.
 func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string {
 	defer func() {
 		if r := recover(); r != nil {
