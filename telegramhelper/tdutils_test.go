@@ -300,7 +300,7 @@ func TestCorruptedTarFile(t *testing.T) {
 // TestMockTelegramService_InitializeClient tests mock client initialization
 func TestMockTelegramService_InitializeClient(t *testing.T) {
 	service := &MockTelegramService{}
-	tdlibClient, err := service.InitializeClient()
+	tdlibClient, err := service.InitializeClient("/tmp")
 
 	assert.NoError(t, err, "MockTelegramService should not return an error")
 	assert.Nil(t, tdlibClient, "MockTelegramService should return nil")
@@ -320,7 +320,7 @@ func TestMockTelegramService_GetMe(t *testing.T) {
 // TestGenCode_MockService tests GenCode using a mock service
 func TestGenCode_MockService(t *testing.T) {
 	service := &MockTelegramService{}
-	assert.NotPanics(t, func() { GenCode(service) }, "GenCode should not panic")
+	assert.NotPanics(t, func() { GenCode(service, "/tmp") }, "GenCode should not panic")
 }
 
 // ExampleGenCode demonstrates how GenCode is used
@@ -352,7 +352,7 @@ func ExampleGenCode() {
 
 	// Run the function
 	service := &MockTelegramService{}
-	GenCode(service)
+	GenCode(service, "/tmp")
 
 	// Restore the original logger
 	log.Logger = originalLogger

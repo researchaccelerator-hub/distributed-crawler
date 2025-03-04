@@ -19,7 +19,7 @@ import (
 
 // TelegramService defines an interface for interacting with the Telegram client
 type TelegramService interface {
-	InitializeClient() (*client.Client, error)
+	InitializeClient(storagePrefix string) (*client.Client, error)
 	GetMe(*client.Client) (*client.User, error)
 }
 
@@ -27,7 +27,7 @@ type TelegramService interface {
 type RealTelegramService struct{}
 
 // InitializeClient sets up a real TDLib client
-func (t *RealTelegramService) InitializeClient() (*client.Client, error) {
+func (t *RealTelegramService) InitializeClient(storagePrefix string) (*client.Client, error) {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
 
@@ -53,8 +53,8 @@ func (t *RealTelegramService) InitializeClient() (*client.Client, error) {
 
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(tempDir, ".tdlib", "database"),
-		FilesDirectory:      filepath.Join(tempDir, ".tdlib", "files"),
+		DatabaseDirectory:   filepath.Join(storagePrefix+"/state", ".tdlib", "database"),
+		FilesDirectory:      filepath.Join(storagePrefix+"/state", ".tdlib", "files"),
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
 		UseMessageDatabase:  true,
@@ -109,7 +109,7 @@ func (t *RealTelegramService) GetMe(tdlibClient *client.Client) (*client.User, e
 type MockTelegramService struct{}
 
 // InitializeClient simulates a successful TDLib connection
-func (m *MockTelegramService) InitializeClient() (*client.Client, error) {
+func (m *MockTelegramService) InitializeClient(storagePrefix string) (*client.Client, error) {
 	log.Info().Msg("MockTelegramService: Simulating client initialization")
 	return nil, nil
 }
@@ -123,8 +123,8 @@ func (m *MockTelegramService) GetMe(tdlibClient *client.Client) (*client.User, e
 }
 
 // GenCode initializes the TDLib client and retrieves the authenticated user
-func GenCode(service TelegramService) {
-	client, err := service.InitializeClient()
+func GenCode(service TelegramService, storagePrefix string) {
+	client, err := service.InitializeClient(storagePrefix)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize TDLib client")
 		return

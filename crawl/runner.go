@@ -13,7 +13,9 @@ import (
 // resources are properly closed. The function returns an error if any operation
 // fails.
 func Run(crawlid, channelUsername string, storageprefix string, sm state.StateManager) error {
-	tdlibClient, err := telegramhelper.TdConnect(storageprefix)
+	service := &telegramhelper.RealTelegramService{}
+	tdlibClient, err := service.InitializeClient(storageprefix)
+	//tdlibClient, err := telegramhelper.TdConnect(storageprefix)
 	// Ensure tdlibClient is closed after the function finishes
 	defer func() {
 		if tdlibClient != nil {
