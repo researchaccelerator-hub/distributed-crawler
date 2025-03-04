@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -280,4 +283,81 @@ func TestCorruptedTarFile(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for corrupted tar data, got nil")
 	}
+}
+
+//// TestRealTelegramService_InitializeClient tests real client initialization
+//func TestRealTelegramService_InitializeClient(t *testing.T) {
+//	os.Setenv("TG_API_ID", "123456")
+//	os.Setenv("TG_API_HASH", "testhash")
+//
+//	service := &RealTelegramService{}
+//	tdlibClient, err := service.InitializeClient()
+//
+//	assert.NoError(t, err, "RealTelegramService should initialize client without error")
+//	assert.NotNil(t, tdlibClient, "RealTelegramService should return a non-nil client")
+//}
+
+// TestMockTelegramService_InitializeClient tests mock client initialization
+func TestMockTelegramService_InitializeClient(t *testing.T) {
+	service := &MockTelegramService{}
+	tdlibClient, err := service.InitializeClient()
+
+	assert.NoError(t, err, "MockTelegramService should not return an error")
+	assert.Nil(t, tdlibClient, "MockTelegramService should return nil")
+}
+
+// TestMockTelegramService_GetMe tests mock retrieval of a user
+func TestMockTelegramService_GetMe(t *testing.T) {
+	service := &MockTelegramService{}
+	user, err := service.GetMe(nil)
+
+	assert.NoError(t, err, "MockTelegramService GetMe should not return an error")
+	assert.NotNil(t, user, "MockTelegramService GetMe should return a user")
+	assert.Equal(t, "Mock", user.FirstName, "User first name should be Mock")
+	assert.Equal(t, "User", user.LastName, "User last name should be User")
+}
+
+// TestGenCode_MockService tests GenCode using a mock service
+func TestGenCode_MockService(t *testing.T) {
+	service := &MockTelegramService{}
+	assert.NotPanics(t, func() { GenCode(service) }, "GenCode should not panic")
+}
+
+// ExampleGenCode demonstrates how GenCode is used
+func ExampleGenCode() {
+	// Store the original logger configuration
+	originalLogger := log.Logger
+
+	// Configure zerolog to use the console writer with minimal formatting
+	consoleWriter := zerolog.ConsoleWriter{
+		Out:        os.Stdout,
+		NoColor:    true,
+		TimeFormat: "",
+		FormatLevel: func(i interface{}) string {
+			return ""
+		},
+		FormatTimestamp: func(i interface{}) string {
+			return ""
+		},
+		FormatCaller: func(i interface{}) string {
+			return ""
+		},
+		FormatMessage: func(i interface{}) string {
+			return i.(string)
+		},
+	}
+
+	// Replace the global logger
+	log.Logger = zerolog.New(consoleWriter).With().Logger()
+
+	// Run the function
+	service := &MockTelegramService{}
+	GenCode(service)
+
+	// Restore the original logger
+	log.Logger = originalLogger
+
+	// Output:
+	// MockTelegramService: Simulating client initialization
+	// Authenticated as: Mock User
 }

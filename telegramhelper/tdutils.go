@@ -17,46 +17,49 @@ import (
 	"time"
 )
 
-// GenCode initializes a TDLib client using environment variables for configuration.
-// It sets up necessary directories, handles errors, and manages client initialization
-// with a timeout mechanism. Logs are generated for each significant step.
-func GenCode() {
+// TelegramService defines an interface for interacting with the Telegram client
+type TelegramService interface {
+	InitializeClient() (*client.Client, error)
+	GetMe(*client.Client) (*client.User, error)
+}
+
+// RealTelegramService is the actual TDLib implementation
+type RealTelegramService struct{}
+
+// InitializeClient sets up a real TDLib client
+func (t *RealTelegramService) InitializeClient() (*client.Client, error) {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
 
-	apiId := os.Getenv("TG_API_ID")
-	intValue, err := strconv.Atoi(apiId)
+	apiID, err := strconv.Atoi(os.Getenv("TG_API_ID"))
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error converting string to int\n")
-
+		log.Fatal().Err(err).Msg("Error converting TG_API_ID to int")
+		return nil, err
 	}
+	apiHash := os.Getenv("TG_API_HASH")
+
+	// Create temporary directory
 	workingDir, err := os.Getwd()
 	if err != nil {
-		log.Error().Err(err).Stack().Msg("Failed to get working directory")
-		return
+		log.Error().Err(err).Msg("Failed to get working directory")
+		return nil, err
 	}
 	tempDir, err := os.MkdirTemp(workingDir, "tempdir-*")
-	log.Info().Msgf("Temporary directory: %s", tempDir)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create temporary directory")
+		return nil, err
+	}
+	log.Info().Msgf("Temporary directory created: %s", tempDir)
 
-	if err != nil {
-		log.Error().Err(err).Stack().Msg("Failed to create temporary directory")
-		return
-	}
-	int32Value := int32(intValue)
-	apiHash := os.Getenv("TG_API_HASH")
-	filedir := filepath.Join(".tdlib", "files")
-	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
 		DatabaseDirectory:   filepath.Join(tempDir, ".tdlib", "database"),
-		FilesDirectory:      filedir,
+		FilesDirectory:      filepath.Join(tempDir, ".tdlib", "files"),
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
 		UseMessageDatabase:  true,
 		UseSecretChats:      false,
-		ApiId:               int32Value,
+		ApiId:               int32(apiID),
 		ApiHash:             apiHash,
 		SystemLanguageCode:  "en",
 		DeviceModel:         "Server",
@@ -64,19 +67,12 @@ func GenCode() {
 		ApplicationVersion:  "1.0.0",
 	}
 
-	//authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
+	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM. IF YOUR TG_PHONE_CODE IS INVALID, YOU MUST RE-RUN WITH A VALID CODE.")
 
-	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
-		NewVerbosityLevel: 5,
-	})
-
-	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
 	clientReady := make(chan *client.Client)
 	errChan := make(chan error)
+
 	go func() {
-		log.Info().Msg("Starting client initialization...")
 		tdlibClient, err := client.NewClient(authorizer)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
@@ -88,98 +84,64 @@ func GenCode() {
 	select {
 	case tdlibClient := <-clientReady:
 		log.Info().Msg("Client initialized successfully")
-		defer tdlibClient.Close()
-	case err = <-errChan:
+		return tdlibClient, nil
+	case err := <-errChan:
 		log.Fatal().Err(err).Msg("Error initializing client")
+		return nil, err
 	case <-time.After(30 * time.Second):
 		log.Warn().Msg("Timeout reached. Exiting application.")
+		return nil, fmt.Errorf("timeout initializing TDLib client")
 	}
 }
 
-// TdConnect initializes and connects a new TDLib client instance.
-// It sets the necessary TDLib parameters, including API ID and hash,
-// database and file directories, and logging verbosity level. The function
-// returns the connected client instance or an error if the connection fails.
-func TdConnect(storageprefix string) (*client.Client, error) {
-	authorizer := client.ClientAuthorizer()
-
-	go client.CliInteractor(authorizer)
-	fn := "https://tomb218.sg-host.com/tdlib.tgz"
-	targetDir := storageprefix + "/state"
-
-	err := downloadAndExtractTarball(fn, targetDir)
+// GetMe retrieves the authenticated Telegram user
+func (t *RealTelegramService) GetMe(tdlibClient *client.Client) (*client.User, error) {
+	user, err := tdlibClient.GetMe()
 	if err != nil {
-		log.Error().Err(err).Stack().Msg("Error extracting tarball")
-	} else {
-		log.Info().Msg("Extraction completed successfully!")
+		log.Fatal().Err(err).Msg("Failed to retrieve authenticated user")
+		return nil, err
 	}
-	apiId := os.Getenv("TG_API_ID")
-	intValue, err := strconv.Atoi(apiId)
+	log.Info().Msgf("Logged in as: %s %s", user.FirstName, user.LastName)
+	return user, nil
+}
+
+// MockTelegramService is a mock implementation for testing
+type MockTelegramService struct{}
+
+// InitializeClient simulates a successful TDLib connection
+func (m *MockTelegramService) InitializeClient() (*client.Client, error) {
+	log.Info().Msg("MockTelegramService: Simulating client initialization")
+	return nil, nil
+}
+
+// GetMe simulates retrieving a fake user
+func (m *MockTelegramService) GetMe(tdlibClient *client.Client) (*client.User, error) {
+	return &client.User{
+		FirstName: "Mock",
+		LastName:  "User",
+	}, nil
+}
+
+// GenCode initializes the TDLib client and retrieves the authenticated user
+func GenCode(service TelegramService) {
+	client, err := service.InitializeClient()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error converting string to int\n")
-
+		log.Fatal().Err(err).Msg("Failed to initialize TDLib client")
+		return
 	}
+	defer func() {
+		if client != nil {
+			client.Close()
+		}
+	}()
 
-	// Cast int to int32
-	int32Value := int32(intValue)
-	apiHash := os.Getenv("TG_API_HASH")
-	filedir := filepath.Join(storageprefix+"/state", ".tdlib", "files")
-	err = removeMultimedia(filedir)
+	user, err := service.GetMe(client)
 	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
-	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
-		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(storageprefix+"/state", ".tdlib", "database"),
-		FilesDirectory:      filedir,
-		UseFileDatabase:     true,
-		UseChatInfoDatabase: true,
-		UseMessageDatabase:  true,
-		UseSecretChats:      false,
-		ApiId:               int32Value,
-		ApiHash:             apiHash,
-		SystemLanguageCode:  "en",
-		DeviceModel:         "Server",
-		SystemVersion:       "1.0.0",
-		ApplicationVersion:  "1.0.0",
+		log.Fatal().Err(err).Msg("Failed to retrieve user information")
+		return
 	}
 
-	//authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
-	//if os.Getenv("TG_PHONE_CODE") == "" {
-	//	log.Fatal().Msg("TG_PHONE_CODE environment variable is not set")
-	//}
-	//authorizer.Code <- os.Getenv("TG_PHONE_CODE")
-
-	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
-		NewVerbosityLevel: 1,
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
-
-	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM IF YOUR TG_PHONE_CODE IS NOT VALID, YOU WILL NEED TO RE-RUN THE PROGRAM WITH A VALID TG_PHONE_CODE. THIS WILL HANG WHILST IT TRIES TO CONNECT")
-	tdlibClient, err := client.NewClient(authorizer)
-	if err != nil {
-		log.Fatal().Err(err).Msg("NewClient error")
-	}
-
-	optionValue, err := client.GetOption(&client.GetOptionRequest{
-		Name: "version",
-	})
-	if err != nil {
-		log.Fatal().Err(err).Msg("GetOption error")
-	}
-
-	log.Info().Msgf("TDLib version: %s", optionValue.(*client.OptionValueString).Value)
-
-	me, err := tdlibClient.GetMe()
-	if err != nil {
-		log.Fatal().Err(err).Msg("GetMe error: %s")
-	}
-
-	log.Info().Msgf("Logged in as: %s %s", me.FirstName, me.LastName)
-
-	return tdlibClient, err
+	log.Info().Msgf("Authenticated as: %s %s", user.FirstName, user.LastName)
 }
 
 // downloadAndExtractTarball downloads a tarball from the specified URL and extracts its contents
