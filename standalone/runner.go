@@ -91,7 +91,17 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	crawlid := common.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
-	sm := state.NewStateManager(crawlCfg.StorageRoot, crawlid)
+	cfg := state.Config{
+		StorageRoot:   crawlCfg.StorageRoot,
+		ContainerName: "",
+		BlobNameRoot:  "",
+		JobID:         "",
+		CrawlID:       crawlid,
+	}
+	sm, err := state.NewStateManager(cfg)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load progress")
+	}
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	list, err := sm.SeedSetup(stringList)
 	// Load progress
