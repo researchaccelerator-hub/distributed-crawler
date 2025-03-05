@@ -286,6 +286,35 @@ func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath,
 	return thumbnailPath, videoPath, description, nil
 }
 
+//fetchAndUploadMedia fetches a media file from Telegram using the provided TDLibClient
+//and uploads it to Azure blob storage via the StateManager. It requires the crawl ID,
+//channel name, file ID, and post link as inputs. If the file ID is empty, it returns
+//immediately with no error. The function returns the file ID upon successful upload,
+//or an error if any step fails.
+func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManager, crawlid, channelName, fileID, postLink string) (string, error) {
+	if fileID == "" {
+		return "", nil
+	}
+
+	path, err := fetchfilefromtelegram(tdlibClient, fileID)
+	if err != nil {
+		log.Error().Err(err).Str("fileID", fileID).Msg("Failed to fetch file from Telegram")
+		return "", err
+	}
+
+	if path == "" {
+		return "", fmt.Errorf("empty path returned from fetch operation")
+	}
+
+	err = sm.UploadBlobFileAndDelete(channelName, postLink, path)
+	if err != nil {
+		log.Error().Err(err).Str("path", path).Msg("Failed to upload file to blob storage")
+		return "", err
+	}
+
+	return fileID, nil
+}
+
 // ParseMessage processes a Telegram message and extracts relevant information to create a Post model.
 //
 // This function handles various message content types, including text, video, photo, animation, and more.
@@ -343,17 +372,13 @@ var ParseMessage = func(
 	}
 
 	comments := make([]model.Comment, 0)
-	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Info().Msgf("Recovered from panic while fetching comments for channel %s: %v\n", channelName, r)
-			}
-		}()
-		if message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
-			comments, err = GetMessageComments(tdlibClient, chat.Id, message.Id, channelName)
-			if err != nil {
-				log.Error().Stack().Err(err).Msg("Fetch message error")
-			}
+	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil &&
+		message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
+		fetchedComments, fetchErr := GetMessageComments(tdlibClient, chat.Id, message.Id, channelName)
+		if fetchErr != nil {
+			log.Error().Stack().Err(fetchErr).Msg("Failed to fetch comments")
+		} else {
+			comments = fetchedComments
 		}
 	}
 
@@ -365,27 +390,18 @@ var ParseMessage = func(
 		description = content.Text.Text
 	case *client.MessageVideo:
 		thumbnailPath, videoPath, description, _ = processMessageSafely(content)
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		path = fetchfilefromtelegram(tdlibClient, videoPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
 	case *client.MessagePhoto:
 		description = content.Caption.Text
 		thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
-		//thumbnailPath = fetch(tdlibClient, content.Photo.Sizes[0].Photo.Remote.Id)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+
 	case *client.MessageAnimation:
 		description = content.Caption.Text
 		thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+
 	case *client.MessageAnimatedEmoji:
 		description = content.Emoji
 	case *client.MessagePoll:
@@ -396,58 +412,30 @@ var ParseMessage = func(
 		description = content.Caption.Text
 	case *client.MessageSticker:
 		thumbnailPath = content.Sticker.Sticker.Remote.Id
-		//thumbnailPath = Fetch(tdlibClient, content.Sticker.Sticker.Remote.Id)
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
 	case *client.MessageGiveawayWinners:
 		log.Debug().Msgf("This message is a giveaway winner: %v", content)
 	case *client.MessageGiveawayCompleted:
 		log.Debug().Msgf("This message is a giveaway completed: %v", content)
 	case *client.MessageVideoNote:
 		thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
 		videoPath = content.VideoNote.Video.Remote.Id
-		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
-		//thumbnailPath = fetch(tdlibClient, thumbnailPath)
-		//videoPath = fetch(tdlibClient, videoPath)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
 	case *client.MessageDocument:
 		description = content.Document.FileName
 		thumbnailPath = content.Document.Thumbnail.File.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
-		}
 		videoPath = content.Document.Document.Remote.Id
-		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
-		}
-		//thumbnailPath = fetch(tdlibClient, thumbnailPath)
-		//videoPath = fetch(tdlibClient, videoPath)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
+
 	default:
 		log.Debug().Msg("Unknown message content type")
 	}
 
 	reactions := make(map[string]int)
-	if message.InteractionInfo != nil && message.InteractionInfo.Reactions != nil && len(message.InteractionInfo.Reactions.Reactions) > 0 {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Info().Msgf("Recovered from panic while processing reactions: %v\n", r)
-			}
-		}()
+	if message.InteractionInfo != nil && message.InteractionInfo.Reactions != nil &&
+		len(message.InteractionInfo.Reactions.Reactions) > 0 {
 		for _, reaction := range message.InteractionInfo.Reactions.Reactions {
 			if reaction.Type != nil {
 				if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok {
@@ -456,7 +444,6 @@ var ParseMessage = func(
 			}
 		}
 	}
-
 	posttype := []string{message.Content.MessageContentType()}
 	createdAt := time.Unix(int64(message.EditDate), 0)
 	vc := GetViewCount(message, channelName)
@@ -510,9 +497,10 @@ var ParseMessage = func(
 		Comments:  comments,
 		Reactions: reactions,
 	}
-	err = sm.StoreData(crawlid, channelName, post)
-	if err != nil {
-		log.Error().Err(err).Msg("StoreData error")
+	storeErr := sm.StoreData(channelName, post)
+	if storeErr != nil {
+		log.Error().Err(storeErr).Msg("Failed to store data")
+		// Not returning error here as we still want to return the post
 	}
 	return post, nil
 }
@@ -527,7 +515,7 @@ var ParseMessage = func(
 //   - A string containing the local path of the downloaded file. Returns an empty string if an error occurs during fetching or downloading.
 //
 // The function includes error handling and logs relevant information, including any panics that are recovered.
-func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) string {
+func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) (string, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Info().Msgf("Recovered from panic: %v\n", r)
@@ -540,7 +528,7 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) s
 	})
 	if err != nil {
 		log.Error().Err(err).Stack().Msgf("Error fetching remote file: %v\n", downloadid)
-		return ""
+		return "", err
 	}
 
 	// Download the file
@@ -553,15 +541,15 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) s
 	})
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("Error downloading file: %v\n", f.Id)
-		return ""
+		return "", err
 	}
 
 	// Ensure the file path is valid
 	if downloadedFile.Local.Path == "" {
 		log.Debug().Msg("Downloaded file path is empty.")
-		return ""
+		return "", err
 	}
 
 	log.Info().Msgf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
-	return downloadedFile.Local.Path
+	return downloadedFile.Local.Path, nil
 }
