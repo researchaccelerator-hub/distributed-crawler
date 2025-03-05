@@ -4,6 +4,9 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"fmt"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
+	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
 	"io"
@@ -12,51 +15,60 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"tdlib-scraper/model"
-	"tdlib-scraper/state"
 	"time"
 )
 
-// GenCode initializes a TDLib client using environment variables for configuration.
-// It sets up necessary directories, handles errors, and manages client initialization
-// with a timeout mechanism. Logs are generated for each significant step.
-func GenCode() {
+// TelegramService defines an interface for interacting with the Telegram client
+type TelegramService interface {
+	InitializeClient(storagePrefix string) (crawler.TDLibClient, error)
+	GetMe(libClient crawler.TDLibClient) (*client.User, error)
+}
+
+// RealTelegramService is the actual TDLib implementation
+type RealTelegramService struct{}
+
+// InitializeClient sets up a real TDLib client
+func (t *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TDLibClient, error) {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
+	fn := "https://tomb218.sg-host.com/tdlib.tgz"
+	targetDir := storagePrefix + "/state"
 
-	apiId := os.Getenv("TG_API_ID")
-	intValue, err := strconv.Atoi(apiId)
+	err := downloadAndExtractTarball(fn, targetDir)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error converting string to int\n")
-
+		log.Error().Err(err).Stack().Msg("Error extracting tarball")
+	} else {
+		log.Info().Msg("Extraction completed successfully!")
 	}
+	apiID, err := strconv.Atoi(os.Getenv("TG_API_ID"))
+	if err != nil {
+		log.Fatal().Err(err).Msg("Error converting TG_API_ID to int")
+		return nil, err
+	}
+	apiHash := os.Getenv("TG_API_HASH")
+
+	// Create temporary directory
 	workingDir, err := os.Getwd()
 	if err != nil {
-		log.Error().Err(err).Stack().Msg("Failed to get working directory")
-		return
+		log.Error().Err(err).Msg("Failed to get working directory")
+		return nil, err
 	}
 	tempDir, err := os.MkdirTemp(workingDir, "tempdir-*")
-	log.Info().Msgf("Temporary directory: %s", tempDir)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create temporary directory")
+		return nil, err
+	}
+	log.Info().Msgf("Temporary directory created: %s", tempDir)
 
-	if err != nil {
-		log.Error().Err(err).Stack().Msg("Failed to create temporary directory")
-		return
-	}
-	int32Value := int32(intValue)
-	apiHash := os.Getenv("TG_API_HASH")
-	filedir := filepath.Join(".tdlib", "files")
-	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(tempDir, ".tdlib", "database"),
-		FilesDirectory:      filedir,
+		DatabaseDirectory:   filepath.Join(storagePrefix+"/state", ".tdlib", "database"),
+		FilesDirectory:      filepath.Join(storagePrefix+"/state", ".tdlib", "files"),
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
 		UseMessageDatabase:  true,
 		UseSecretChats:      false,
-		ApiId:               int32Value,
+		ApiId:               int32(apiID),
 		ApiHash:             apiHash,
 		SystemLanguageCode:  "en",
 		DeviceModel:         "Server",
@@ -64,19 +76,12 @@ func GenCode() {
 		ApplicationVersion:  "1.0.0",
 	}
 
-	//authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
+	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM. IF YOUR TG_PHONE_CODE IS INVALID, YOU MUST RE-RUN WITH A VALID CODE.")
 
-	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
-		NewVerbosityLevel: 5,
-	})
-
-	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
 	clientReady := make(chan *client.Client)
 	errChan := make(chan error)
+
 	go func() {
-		log.Info().Msg("Starting client initialization...")
 		tdlibClient, err := client.NewClient(authorizer)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
@@ -88,113 +93,60 @@ func GenCode() {
 	select {
 	case tdlibClient := <-clientReady:
 		log.Info().Msg("Client initialized successfully")
-		defer tdlibClient.Close()
-	case err = <-errChan:
+		return tdlibClient, nil
+	case err := <-errChan:
 		log.Fatal().Err(err).Msg("Error initializing client")
+		return nil, err
 	case <-time.After(30 * time.Second):
 		log.Warn().Msg("Timeout reached. Exiting application.")
+		return nil, fmt.Errorf("timeout initializing TDLib client")
 	}
 }
 
-// TdConnect initializes and connects a new TDLib client instance.
-// It sets the necessary TDLib parameters, including API ID and hash,
-// database and file directories, and logging verbosity level. The function
-// returns the connected client instance or an error if the connection fails.
-func TdConnect(storageprefix string) (*client.Client, error) {
-	authorizer := client.ClientAuthorizer()
-
-	go client.CliInteractor(authorizer)
-	fn := "https://tomb218.sg-host.com/tdlib.tgz"
-	targetDir := storageprefix + "/state"
-
-	err := downloadAndExtractTarball(fn, targetDir)
+// GetMe retrieves the authenticated Telegram user
+func (t *RealTelegramService) GetMe(tdlibClient crawler.TDLibClient) (*client.User, error) {
+	user, err := tdlibClient.GetMe()
 	if err != nil {
-		log.Error().Err(err).Stack().Msg("Error extracting tarball")
-	} else {
-		log.Info().Msg("Extraction completed successfully!")
+		log.Fatal().Err(err).Msg("Failed to retrieve authenticated user")
+		return nil, err
 	}
-	apiId := os.Getenv("TG_API_ID")
-	intValue, err := strconv.Atoi(apiId)
+	log.Info().Msgf("Logged in as: %s %s", user.FirstName, user.LastName)
+	return user, nil
+}
+
+// GenCode initializes the TDLib client and retrieves the authenticated user
+func GenCode(service TelegramService, storagePrefix string) {
+	tdclient, err := service.InitializeClient(storagePrefix)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Error converting string to int\n")
-
+		log.Fatal().Err(err).Msg("Failed to initialize TDLib client")
+		return
 	}
+	defer func() {
+		if tdclient != nil {
+			tdclient.Close()
+		}
+	}()
 
-	// Cast int to int32
-	int32Value := int32(intValue)
-	apiHash := os.Getenv("TG_API_HASH")
-	filedir := filepath.Join(storageprefix+"/state", ".tdlib", "files")
-	err = removeMultimedia(filedir)
+	user, err := service.GetMe(tdclient)
 	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
-	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
-		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(storageprefix+"/state", ".tdlib", "database"),
-		FilesDirectory:      filedir,
-		UseFileDatabase:     true,
-		UseChatInfoDatabase: true,
-		UseMessageDatabase:  true,
-		UseSecretChats:      false,
-		ApiId:               int32Value,
-		ApiHash:             apiHash,
-		SystemLanguageCode:  "en",
-		DeviceModel:         "Server",
-		SystemVersion:       "1.0.0",
-		ApplicationVersion:  "1.0.0",
+		log.Fatal().Err(err).Msg("Failed to retrieve user information")
+		return
 	}
 
-	//authorizer.PhoneNumber <- os.Getenv("TG_PHONE_NUMBER")
-	//if os.Getenv("TG_PHONE_CODE") == "" {
-	//	log.Fatal().Msg("TG_PHONE_CODE environment variable is not set")
-	//}
-	//authorizer.Code <- os.Getenv("TG_PHONE_CODE")
-
-	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
-		NewVerbosityLevel: 1,
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("SetLogVerbosityLevel error")
-	}
-
-	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM IF YOUR TG_PHONE_CODE IS NOT VALID, YOU WILL NEED TO RE-RUN THE PROGRAM WITH A VALID TG_PHONE_CODE. THIS WILL HANG WHILST IT TRIES TO CONNECT")
-	tdlibClient, err := client.NewClient(authorizer)
-	if err != nil {
-		log.Fatal().Err(err).Msg("NewClient error")
-	}
-
-	optionValue, err := client.GetOption(&client.GetOptionRequest{
-		Name: "version",
-	})
-	if err != nil {
-		log.Fatal().Err(err).Msg("GetOption error")
-	}
-
-	log.Printf("TDLib version: %s", optionValue.(*client.OptionValueString).Value)
-
-	me, err := tdlibClient.GetMe()
-	if err != nil {
-		log.Fatal().Err(err).Msg("GetMe error: %s")
-	}
-
-	log.Info().Msgf("Logged in as: %s %s", me.FirstName, me.LastName)
-
-	return tdlibClient, err
+	log.Info().Msgf("Authenticated as: %s %s", user.FirstName, user.LastName)
 }
 
 // downloadAndExtractTarball downloads a tarball from the specified URL and extracts its contents
 // into the target directory. It handles HTTP requests, decompresses gzip files, and processes
 // tar archives to create directories and files as needed. Returns an error if any step fails.
 func downloadAndExtractTarball(url, targetDir string) error {
-	// Step 1: Download the tarball
 	req, err := http.NewRequest("GET", url, nil)
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+	req.Header.Set("Accept", "*/*")
 	if err != nil {
 		return err
 	}
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -203,20 +155,30 @@ func downloadAndExtractTarball(url, targetDir string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return err
+		return fmt.Errorf("non-200 status returned: %v", resp.Status)
 	}
 
-	// Step 2: Decompress the gzip file
-	gzReader, err := gzip.NewReader(resp.Body)
+	// Pass the response body to the new function
+	return downloadAndExtractTarballFromReader(resp.Body, targetDir)
+}
+
+// downloadAndExtractTarballFromReader extracts files from a gzip-compressed tarball
+// provided by the reader and writes them to the specified target directory.
+// It handles directories and regular files, creating necessary directories
+// and files as needed. Unknown file types are ignored. Returns an error if
+// any operation fails.
+func downloadAndExtractTarballFromReader(reader io.Reader, targetDir string) error {
+	// Step 1: Decompress the gzip file
+	gzReader, err := gzip.NewReader(reader)
 	if err != nil {
 		return err
 	}
 	defer gzReader.Close()
 
-	// Step 3: Read the tarball contents
+	// Step 2: Read the tarball contents
 	tarReader := tar.NewReader(gzReader)
 
-	// Step 4: Extract files
+	// Step 3: Extract files
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -231,13 +193,11 @@ func downloadAndExtractTarball(url, targetDir string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			// Create directory
 			err := os.MkdirAll(targetPath, os.ModePerm)
 			if err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			// Create file
 			err := os.MkdirAll(filepath.Dir(targetPath), os.ModePerm)
 			if err != nil {
 				return err
@@ -248,7 +208,6 @@ func downloadAndExtractTarball(url, targetDir string) error {
 			}
 			defer file.Close()
 
-			// Copy file contents
 			_, err = io.Copy(file, tarReader)
 			if err != nil {
 				return err
@@ -322,7 +281,7 @@ func removeMultimedia(filedir string) error {
 // - videoPath: The remote ID of the video.
 // - description: The text caption of the video.
 // - err: An error if the message structure is invalid or corrupt.
-func processMessageSafely(mymsg *client.MessageVideo, tdlibClient *client.Client) (thumbnailPath, videoPath, description string, err error) {
+func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath, description string, err error) {
 	if mymsg == nil || mymsg.Video == nil || mymsg.Video.Thumbnail == nil {
 		return "", "", "", fmt.Errorf("invalid or corrupt message structure")
 	}
@@ -333,6 +292,35 @@ func processMessageSafely(mymsg *client.MessageVideo, tdlibClient *client.Client
 	//thumbnailPath = fetch(tdlibClient, thumbnailPath)
 	//videoPath = fetch(tdlibClient, videoPath)
 	return thumbnailPath, videoPath, description, nil
+}
+
+// fetchAndUploadMedia fetches a media file from Telegram using the provided TDLibClient
+// and uploads it to Azure blob storage via the StateManager. It requires the crawl ID,
+// channel name, file ID, and post link as inputs. If the file ID is empty, it returns
+// immediately with no error. The function returns the file ID upon successful upload,
+// or an error if any step fails.
+func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManager, crawlid, channelName, fileID, postLink string) (string, error) {
+	if fileID == "" {
+		return "", nil
+	}
+
+	path, err := fetchfilefromtelegram(tdlibClient, fileID)
+	if err != nil {
+		log.Error().Err(err).Str("fileID", fileID).Msg("Failed to fetch file from Telegram")
+		return "", err
+	}
+
+	if path == "" {
+		return "", fmt.Errorf("empty path returned from fetch operation")
+	}
+
+	err = sm.UploadBlobFileAndDelete(channelName, postLink, path)
+	if err != nil {
+		log.Error().Err(err).Str("path", path).Msg("Failed to upload file to blob storage")
+		return "", err
+	}
+
+	return fileID, nil
 }
 
 // ParseMessage processes a Telegram message and extracts relevant information to create a Post model.
@@ -354,7 +342,21 @@ func processMessageSafely(mymsg *client.MessageVideo, tdlibClient *client.Client
 // Returns:
 // - post: A Post model populated with the extracted data.
 // - err: An error if the parsing fails.
-func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLink, chat *client.Chat, supergroup *client.Supergroup, supergroupInfo *client.SupergroupFullInfo, postcount int, viewcount int, channelName string, tdlibClient *client.Client, sm state.StateManager) (post model.Post, err error) {
+// In telegramhelper package:
+var ParseMessage = func(
+	crawlid string,
+	message *client.Message,
+	mlr *client.MessageLink,
+	chat *client.Chat,
+	supergroup *client.Supergroup,
+	supergroupInfo *client.SupergroupFullInfo,
+	postcount int,
+	viewcount int,
+	channelName string,
+	tdlibClient crawler.TDLibClient, // our interface type
+	sm state.StateManager,
+) (post model.Post, err error) {
+	// original implementation...
 	// Defer to recover from panics and ensure the crawl continues
 	defer func() {
 		if r := recover(); r != nil {
@@ -378,17 +380,13 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	}
 
 	comments := make([]model.Comment, 0)
-	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Info().Msgf("Recovered from panic while fetching comments for channel %s: %v\n", channelName, r)
-			}
-		}()
-		if message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
-			comments, err = GetMessageComments(tdlibClient, chat.Id, message.Id, channelName)
-			if err != nil {
-				log.Error().Stack().Err(err).Msg("Fetch message error")
-			}
+	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil &&
+		message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
+		fetchedComments, fetchErr := GetMessageComments(tdlibClient, chat.Id, message.Id, channelName)
+		if fetchErr != nil {
+			log.Error().Stack().Err(fetchErr).Msg("Failed to fetch comments")
+		} else {
+			comments = fetchedComments
 		}
 	}
 
@@ -399,28 +397,19 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 	case *client.MessageText:
 		description = content.Text.Text
 	case *client.MessageVideo:
-		thumbnailPath, videoPath, description, _ = processMessageSafely(content, tdlibClient)
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		path = fetchfilefromtelegram(tdlibClient, videoPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
+		thumbnailPath, videoPath, description, _ = processMessageSafely(content)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
 	case *client.MessagePhoto:
 		description = content.Caption.Text
 		thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
-		//thumbnailPath = fetch(tdlibClient, content.Photo.Sizes[0].Photo.Remote.Id)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+
 	case *client.MessageAnimation:
 		description = content.Caption.Text
 		thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+
 	case *client.MessageAnimatedEmoji:
 		description = content.Emoji
 	case *client.MessagePoll:
@@ -431,58 +420,30 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 		description = content.Caption.Text
 	case *client.MessageSticker:
 		thumbnailPath = content.Sticker.Sticker.Remote.Id
-		//thumbnailPath = Fetch(tdlibClient, content.Sticker.Sticker.Remote.Id)
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
 	case *client.MessageGiveawayWinners:
-		log.Debug().Msgf("This message is a giveaway winner:", content)
+		log.Debug().Msgf("This message is a giveaway winner: %v", content)
 	case *client.MessageGiveawayCompleted:
-		log.Debug().Msgf("This message is a giveaway completed:", content)
+		log.Debug().Msgf("This message is a giveaway completed: %v", content)
 	case *client.MessageVideoNote:
 		thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
 		videoPath = content.VideoNote.Video.Remote.Id
-		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error")
-		}
-		//thumbnailPath = fetch(tdlibClient, thumbnailPath)
-		//videoPath = fetch(tdlibClient, videoPath)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
 	case *client.MessageDocument:
 		description = content.Document.FileName
 		thumbnailPath = content.Document.Thumbnail.File.Remote.Id
-		path := fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
-		}
 		videoPath = content.Document.Document.Remote.Id
-		path = fetchfilefromtelegram(tdlibClient, thumbnailPath)
-		err = sm.UploadBlobFileAndDelete(crawlid, channelName, mlr.Link, path)
-		if err != nil {
-			log.Error().Err(err).Msg("UploadBlobFileAndDelete error for video")
-		}
-		//thumbnailPath = fetch(tdlibClient, thumbnailPath)
-		//videoPath = fetch(tdlibClient, videoPath)
+		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
+
 	default:
 		log.Debug().Msg("Unknown message content type")
 	}
 
 	reactions := make(map[string]int)
-	if message.InteractionInfo != nil && message.InteractionInfo.Reactions != nil && len(message.InteractionInfo.Reactions.Reactions) > 0 {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Info().Msgf("Recovered from panic while processing reactions: %v\n", r)
-			}
-		}()
+	if message.InteractionInfo != nil && message.InteractionInfo.Reactions != nil &&
+		len(message.InteractionInfo.Reactions.Reactions) > 0 {
 		for _, reaction := range message.InteractionInfo.Reactions.Reactions {
 			if reaction.Type != nil {
 				if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok {
@@ -491,7 +452,6 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 			}
 		}
 	}
-
 	posttype := []string{message.Content.MessageContentType()}
 	createdAt := time.Unix(int64(message.EditDate), 0)
 	vc := GetViewCount(message, channelName)
@@ -505,7 +465,7 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 		URL:            mlr.Link,
 		PublishedAt:    publishedAt,
 		CreatedAt:      createdAt,
-		LanguageCode:   "RU",
+		LanguageCode:   "",
 		Engagement:     vc,
 		ViewCount:      vc,
 		LikeCount:      0,
@@ -545,9 +505,10 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 		Comments:  comments,
 		Reactions: reactions,
 	}
-	err = sm.StoreData(crawlid, channelName, post)
-	if err != nil {
-		log.Error().Err(err).Msg("StoreData error")
+	storeErr := sm.StoreData(channelName, post)
+	if storeErr != nil {
+		log.Error().Err(storeErr).Msg("Failed to store data")
+		// Not returning error here as we still want to return the post
 	}
 	return post, nil
 }
@@ -562,7 +523,7 @@ func ParseMessage(crawlid string, message *client.Message, mlr *client.MessageLi
 //   - A string containing the local path of the downloaded file. Returns an empty string if an error occurs during fetching or downloading.
 //
 // The function includes error handling and logs relevant information, including any panics that are recovered.
-func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string {
+func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) (string, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Info().Msgf("Recovered from panic: %v\n", r)
@@ -575,7 +536,7 @@ func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string
 	})
 	if err != nil {
 		log.Error().Err(err).Stack().Msgf("Error fetching remote file: %v\n", downloadid)
-		return ""
+		return "", err
 	}
 
 	// Download the file
@@ -588,15 +549,15 @@ func fetchfilefromtelegram(tdlibClient *client.Client, downloadid string) string
 	})
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("Error downloading file: %v\n", f.Id)
-		return ""
+		return "", err
 	}
 
 	// Ensure the file path is valid
 	if downloadedFile.Local.Path == "" {
 		log.Debug().Msg("Downloaded file path is empty.")
-		return ""
+		return "", err
 	}
 
 	log.Info().Msgf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
-	return downloadedFile.Local.Path
+	return downloadedFile.Local.Path, nil
 }

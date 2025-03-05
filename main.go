@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/dapr"
+	"github.com/researchaccelerator-hub/telegram-scraper/standalone"
 	"os"
 	"strings"
-	"tdlib-scraper/common"
-	"tdlib-scraper/dapr"
-	"tdlib-scraper/standalone"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

@@ -1,14 +1,14 @@
 package standalone
 
 import (
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
+	"github.com/researchaccelerator-hub/telegram-scraper/state"
+	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"os"
 	"strings"
-	"tdlib-scraper/common"
-	"tdlib-scraper/crawl"
-	"tdlib-scraper/state"
-	"tdlib-scraper/telegramhelper"
 )
 
 // StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,
@@ -45,7 +45,8 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 
 	if generateCode {
 		log.Info().Msg("Running code generation...")
-		telegramhelper.GenCode()
+		svc := &telegramhelper.RealTelegramService{}
+		telegramhelper.GenCode(svc, crawlerCfg.StorageRoot)
 		os.Exit(0)
 	}
 
@@ -90,7 +91,17 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	crawlid := common.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
-	sm := state.NewStateManager(crawlCfg.StorageRoot, crawlid)
+	cfg := state.Config{
+		StorageRoot:   crawlCfg.StorageRoot,
+		ContainerName: "",
+		BlobNameRoot:  "",
+		JobID:         "",
+		CrawlID:       crawlid,
+	}
+	sm, err := state.NewStateManager(cfg)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to load progress")
+	}
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	list, err := sm.SeedSetup(stringList)
 	// Load progress
