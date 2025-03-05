@@ -59,8 +59,28 @@ type channelInfo struct {
 	messageCount   int32
 }
 
-// getChannelInfo retrieves all necessary information about a channel
+// TotalViewsGetter is a function type for retrieving total view count
+type TotalViewsGetter func(client crawler.TDLibClient, chatID int64, channelUsername string) (int, error)
+
+// MessageCountGetter is a function type for retrieving message count
+type MessageCountGetter func(client crawler.TDLibClient, chatID int64, channelUsername string) (int, error)
+
 func getChannelInfo(tdlibClient crawler.TDLibClient, channelUsername string) (*channelInfo, error) {
+	return getChannelInfoWithDeps(
+		tdlibClient,
+		channelUsername,
+		telegramhelper.GetTotalChannelViews,
+		telegramhelper.GetMessageCount,
+	)
+}
+
+// getChannelInfoWithDeps is the dependency-injected version of getChannelInfo
+func getChannelInfoWithDeps(
+	tdlibClient crawler.TDLibClient,
+	channelUsername string,
+	getTotalViewsFn TotalViewsGetter,
+	getMessageCountFn MessageCountGetter,
+) (*channelInfo, error) {
 	// Search for the channel
 	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 		Username: channelUsername,
@@ -79,16 +99,26 @@ func getChannelInfo(tdlibClient crawler.TDLibClient, channelUsername string) (*c
 	}
 
 	// Get channel stats
-	totalViews, err := telegramhelper.GetTotalChannelViews(tdlibClient, chat.Id, channelUsername)
-	if err != nil {
-		log.Warn().Err(err).Msgf("Failed to get total views for channel: %v", channelUsername)
-		// Continue anyway, this is not critical
+	totalViews := 0
+	if getTotalViewsFn != nil {
+		totalViewsVal, err := getTotalViewsFn(tdlibClient, chat.Id, channelUsername)
+		if err != nil {
+			log.Warn().Err(err).Msgf("Failed to get total views for channel: %v", channelUsername)
+			// Continue anyway, this is not critical
+		} else {
+			totalViews = totalViewsVal
+		}
 	}
 
-	messageCount, err := telegramhelper.GetMessageCount(tdlibClient, chat.Id, channelUsername)
-	if err != nil {
-		log.Warn().Err(err).Msgf("Failed to get message count for channel: %v", channelUsername)
-		// Continue anyway, this is not critical
+	messageCount := 0
+	if getMessageCountFn != nil {
+		messageCountVal, err := getMessageCountFn(tdlibClient, chat.Id, channelUsername)
+		if err != nil {
+			log.Warn().Err(err).Msgf("Failed to get message count for channel: %v", channelUsername)
+			// Continue anyway, this is not critical
+		} else {
+			messageCount = messageCountVal
+		}
 	}
 
 	// Get supergroup information if available
@@ -128,14 +158,67 @@ func getChannelInfo(tdlibClient crawler.TDLibClient, channelUsername string) (*c
 	}, nil
 }
 
+type MessageFetcher interface {
+	FetchMessages(tdlibClient crawler.TDLibClient, chatID int64, fromMessageID int64) ([]*client.Message, error)
+}
+
+type DefaultMessageFetcher struct{}
+
+func (f *DefaultMessageFetcher) FetchMessages(tdlibClient crawler.TDLibClient, chatID int64, fromMessageID int64) ([]*client.Message, error) {
+	// Call the original fetchMessages implementation
+	chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
+		ChatId:        chatID,
+		Limit:         100,
+		FromMessageId: fromMessageID,
+	})
+
+	if err != nil {
+		log.Error().Stack().Err(err).Msg("Failed to get chat history")
+		return nil, err
+	}
+
+	return chatHistory.Messages, nil
+}
+
+type MessageProcessor interface {
+	// ProcessMessage processes a single Telegram message.
+	ProcessMessage(tdlibClient crawler.TDLibClient, message *client.Message, info *channelInfo, crawlID string, channelUsername string, sm *state.StateManager) error
+}
+
+// DefaultMessageProcessor implements the MessageProcessor interface using the default processMessage function
+type DefaultMessageProcessor struct{}
+
+// ProcessMessage implements the MessageProcessor interface
+func (p *DefaultMessageProcessor) ProcessMessage(tdlibClient crawler.TDLibClient, message *client.Message, info *channelInfo, crawlID string, channelUsername string, sm *state.StateManager) error {
+	return processMessage(tdlibClient, message, info, crawlID, channelUsername, *sm)
+}
+
 // processAllMessages retrieves and processes all messages from a channel
 func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, crawlID, channelUsername string, sm state.StateManager) error {
+	processor := &DefaultMessageProcessor{}
+	fetcher := &DefaultMessageFetcher{}
+	return processAllMessagesWithProcessor(tdlibClient, info, crawlID, channelUsername, sm, processor, fetcher)
+}
+
+// processAllMessagesWithProcessor retrieves and processes all messages from a channel.
+// This function fetches messages in batches, starting from the most recent message
+// and working backward through the history. It uses the provided MessageProcessor
+// to process each message, allowing for customized message handling.
+func processAllMessagesWithProcessor(
+	tdlibClient crawler.TDLibClient,
+	info *channelInfo,
+	crawlID,
+	channelUsername string,
+	sm state.StateManager,
+	processor MessageProcessor,
+	fetcher MessageFetcher) error {
+
 	var fromMessageID int64 = 0
 
 	for {
 		log.Info().Msgf("Fetching from message id %d", fromMessageID)
 
-		messages, err := fetchMessages(tdlibClient, info.chat.Id, fromMessageID)
+		messages, err := fetcher.FetchMessages(tdlibClient, info.chat.Id, fromMessageID)
 		if err != nil {
 			return err
 		}
@@ -147,7 +230,7 @@ func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, craw
 
 		// Process messages
 		for _, message := range messages {
-			if err := processMessage(tdlibClient, message, info, crawlID, channelUsername, sm); err != nil {
+			if err := processor.ProcessMessage(tdlibClient, message, info, crawlID, channelUsername, &sm); err != nil {
 				log.Error().Err(err).Msgf("Error processing message %d", message.Id)
 				continue // Skip to next message on error
 			}
