@@ -31,7 +31,15 @@ type RealTelegramService struct{}
 func (t *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TDLibClient, error) {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
+	fn := "https://tomb218.sg-host.com/tdlib.tgz"
+	targetDir := storagePrefix + "/state"
 
+	err := downloadAndExtractTarball(fn, targetDir)
+	if err != nil {
+		log.Error().Err(err).Stack().Msg("Error extracting tarball")
+	} else {
+		log.Info().Msg("Extraction completed successfully!")
+	}
 	apiID, err := strconv.Atoi(os.Getenv("TG_API_ID"))
 	if err != nil {
 		log.Fatal().Err(err).Msg("Error converting TG_API_ID to int")
@@ -286,11 +294,11 @@ func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath,
 	return thumbnailPath, videoPath, description, nil
 }
 
-//fetchAndUploadMedia fetches a media file from Telegram using the provided TDLibClient
-//and uploads it to Azure blob storage via the StateManager. It requires the crawl ID,
-//channel name, file ID, and post link as inputs. If the file ID is empty, it returns
-//immediately with no error. The function returns the file ID upon successful upload,
-//or an error if any step fails.
+// fetchAndUploadMedia fetches a media file from Telegram using the provided TDLibClient
+// and uploads it to Azure blob storage via the StateManager. It requires the crawl ID,
+// channel name, file ID, and post link as inputs. If the file ID is empty, it returns
+// immediately with no error. The function returns the file ID upon successful upload,
+// or an error if any step fails.
 func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManager, crawlid, channelName, fileID, postLink string) (string, error) {
 	if fileID == "" {
 		return "", nil
@@ -457,7 +465,7 @@ var ParseMessage = func(
 		URL:            mlr.Link,
 		PublishedAt:    publishedAt,
 		CreatedAt:      createdAt,
-		LanguageCode:   "RU",
+		LanguageCode:   "",
 		Engagement:     vc,
 		ViewCount:      vc,
 		LikeCount:      0,

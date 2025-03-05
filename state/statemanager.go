@@ -452,8 +452,9 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 
 // UploadBlobFileAndDelete uploads a local file to Azure Blob Storage and deletes it locally upon successful upload.
 func (sm *StateManager) UploadBlobFileAndDelete(channelid, rawURL, filePath string) error {
-	if !sm.shouldUseAzure() || sm.azureClient == nil {
-		return fmt.Errorf("Azure client not initialized")
+	// Check if the file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return fmt.Errorf("file does not exist: %w", err)
 	}
 
 	// Open the file for reading
@@ -463,42 +464,106 @@ func (sm *StateManager) UploadBlobFileAndDelete(channelid, rawURL, filePath stri
 	}
 	defer file.Close()
 
-	fp, err := sm.urlToBlobPath(rawURL)
+	// Read file content into memory (we need this for both local and remote storage)
+	fileContent, err := io.ReadAll(file)
 	if err != nil {
-		return fmt.Errorf("failed to convert URL to blob path: %w", err)
+		return fmt.Errorf("failed to read file content: %w", err)
+	}
+
+	// Reset file pointer to beginning for potential reuse
+	if _, err := file.Seek(0, 0); err != nil {
+		return fmt.Errorf("failed to reset file pointer: %w", err)
 	}
 
 	filename := filepath.Base(filePath)
-	fp = fp + "_" + filename
-	blobName := filepath.Join(
-		sm.config.BlobNameRoot,
-		sm.config.JobID,
-		sm.config.CrawlID,
-		"media",
-		channelid,
-		fp,
-	)
 
-	// Upload the file to the specified container with the specified blob name
-	_, err = sm.azureClient.UploadFile(
-		context.TODO(),
-		sm.config.ContainerName,
-		blobName,
-		file,
-		nil,
-	)
+	// Try Azure upload if it should be used
+	if sm.shouldUseAzure() && sm.azureClient != nil {
+		fp, err := sm.urlToBlobPath(rawURL)
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to convert URL to blob path, proceeding with local storage only")
+		} else {
+			fp = fp + "_" + filename
+			blobName := filepath.Join(
+				sm.config.BlobNameRoot,
+				sm.config.JobID,
+				sm.config.CrawlID,
+				"media",
+				channelid,
+				fp,
+			)
 
-	if err != nil {
-		return fmt.Errorf("failed to upload file to Azure: %w", err)
+			// Upload to Azure
+			_, err = sm.azureClient.UploadFile(
+				context.TODO(),
+				sm.config.ContainerName,
+				blobName,
+				file,
+				nil,
+			)
+
+			if err != nil {
+				log.Error().Err(err).Msg("failed to upload file to Azure, proceeding with local storage only")
+			} else {
+				log.Info().Msg("File uploaded to Azure successfully.")
+			}
+		}
+	} else {
+		// Always store locally regardless of Azure upload result
+		outputDir := filepath.Join(sm.config.StorageRoot, sm.config.CrawlID)
+		if outputDir == "" {
+			outputDir = "output" // Default directory if not specified
+		}
+
+		// Create media directory structure
+		mediaDir := filepath.Join(outputDir, "media", channelid)
+		if err := os.MkdirAll(mediaDir, 0755); err != nil {
+			return fmt.Errorf("failed to create media directory: %w", err)
+		}
+
+		// Create a new filename by sanitizing the rawURL to create a unique but readable name
+		sanitizedURL := sanitizeURLForFilename(rawURL)
+		localFilename := sanitizedURL + "_" + filename
+		localFilePath := filepath.Join(mediaDir, localFilename)
+
+		// Write file locally
+		if err := os.WriteFile(localFilePath, fileContent, 0644); err != nil {
+			return fmt.Errorf("failed to write local file copy: %w", err)
+		}
+
+		log.Info().Str("path", localFilePath).Msg("File saved locally")
 	}
 
-	// Remove the local file upon successful upload
+	// Remove the original file after successful processing
 	if err := os.Remove(filePath); err != nil {
-		return fmt.Errorf("failed to delete local file after upload: %w", err)
+		return fmt.Errorf("failed to delete original file after upload: %w", err)
 	}
 
-	log.Info().Msg("File uploaded and deleted successfully.")
+	log.Info().Msg("Original file deleted successfully.")
 	return nil
+}
+
+// sanitizeURLForFilename creates a safe filename from a URL
+func sanitizeURLForFilename(url string) string {
+	// Remove protocol and domain parts
+	parts := strings.Split(url, "/")
+	relevantParts := parts[len(parts)-2:]
+
+	// Replace unsafe characters with underscores
+	sanitized := strings.Join(relevantParts, "_")
+	sanitized = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, sanitized)
+
+	// Limit filename length
+	if len(sanitized) > 50 {
+		sanitized = sanitized[:50]
+	}
+
+	return sanitized
 }
 
 // urlToBlobPath converts a raw URL string into a blob path
