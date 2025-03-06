@@ -22,6 +22,12 @@ import (
 	"time"
 )
 
+type Message struct {
+	ChatId    int64
+	MessageId int64
+	Status    string
+	PageId    string
+}
 type Page struct {
 	URL       string
 	Depth     int
@@ -30,6 +36,7 @@ type Page struct {
 	Error     error
 	ID        string
 	ParentID  string
+	Messages  []Message
 }
 
 // Layer represents a collection of pages at the same depth
@@ -56,12 +63,18 @@ type StateManager struct {
 	config      Config
 	azureClient *azblob.Client
 	daprClient  *daprc.Client
-	Layers      []*Layer
+	StateStore  DaprStateStore
 	listFile    string
 }
 
 type DaprStateStore struct {
-	Layers []*Layer `json:"layerList"`
+	Layers           []*Layer  `json:"layerList"`
+	JobExecutionTime time.Time `json:"jobExecutionTime"`
+}
+
+type CrawlManagement struct {
+	PreviousCrawlID []string  `json:"previousCrawlId"`
+	LastTriggerTime time.Time `json:"lastTriggerTime"`
 }
 
 // NewStateManager initializes a new StateManager with the given storage root prefix.
@@ -139,51 +152,74 @@ func (sm *StateManager) listToLayer(list []string) []*Layer {
 
 }
 
+func setPagesToUnfetched(layers []*Layer) {
+	for _, layer := range layers {
+		layer.mutex.Lock() // Add lock to prevent race conditions
+		for i := range layer.Pages {
+			// Use index to access and modify the actual element in the slice
+			layer.Pages[i].Status = "unfetched"
+		}
+		layer.mutex.Unlock() // Release the lock
+	}
+}
+
 // SeedSetup initializes the list file with the provided seed list if it does not exist,
 // and then loads the list from the file.
-func (sm *StateManager) SeedSetup(seedlist []string) ([]*Layer, error) {
+func (sm *StateManager) StateSetup(seedlist []string) (DaprStateStore, error) {
+	prev, err := sm.GetLastPreviousCrawlId()
+	if err != nil {
+		return DaprStateStore{}, err
+	}
+
+	management := CrawlManagement{
+		PreviousCrawlID: append(prev, sm.config.CrawlExecutionID),
+		LastTriggerTime: time.Time{},
+	}
+
 	useAzure := sm.shouldUseAzure()
 	useDAPR := sm.shouldUseDapr()
 	layerzero := sm.listToLayer(seedlist)
 	if useAzure {
-		// Check if list exists in Azure
-		exists, err := sm.blobExists(sm.config.ContainerName, sm.getListBlobPath())
-		if err != nil {
-			return nil, fmt.Errorf("failed to check if list blob exists: %w", err)
-		}
-
-		if !exists {
-			// Need to seed the list
-			if err := sm.layersToBlob(layerzero); err != nil {
-				return nil, fmt.Errorf("failed to seed list to Azure: %w", err)
-			}
-		}
-
-		// Load list from Azure
-		return sm.loadListFromBlob()
+		panic("not implemented")
 	} else if useDAPR {
-		exists, err := sm.storageExists()
+
+		//Does a previous run exist
+		prevlayers, err := sm.GetLayers(prev)
 		if err != nil {
-			return nil, fmt.Errorf("failed to check if list blob exists: %w", err)
+			return DaprStateStore{}, fmt.Errorf("failed to check if list blob exists: %w", err)
+		}
+		//If so don't seed
+		if prevlayers != nil {
+			sm.StateStore.Layers = prevlayers
+			setPagesToUnfetched(sm.StateStore.Layers)
+			err = sm.UpdateCrawlManagement(management)
+			if err != nil {
+				return DaprStateStore{}, err
+			}
+			return sm.StateStore, nil
 		}
 
-		if !exists {
-			// Need to seed the list
-			if err := sm.layersToState(layerzero); err != nil {
-				return nil, fmt.Errorf("failed to seed list to Azure: %w", err)
-			}
+		// Need to seed the list
+		if err := sm.layersToState(layerzero); err != nil {
+			return DaprStateStore{}, fmt.Errorf("failed to seed list to Azure: %w", err)
+		}
+		sm.StateStore.Layers = layerzero
+		err = sm.UpdateCrawlManagement(management)
+		if err != nil {
+			return DaprStateStore{}, err
 		}
 		return sm.loadListFromDapr()
 	} else {
-		// Check if list exists locally
-		if _, err := os.Stat(sm.listFile); os.IsNotExist(err) {
-			if err := sm.seedList(layerzero); err != nil {
-				return nil, fmt.Errorf("failed to seed list locally: %w", err)
-			}
-		}
-
-		// Load list from local file
-		return sm.loadList()
+		//// Check if list exists locally
+		//if _, err := os.Stat(sm.listFile); os.IsNotExist(err) {
+		//	if err := sm.seedList(layerzero); err != nil {
+		//		return nil, fmt.Errorf("failed to seed list locally: %w", err)
+		//	}
+		//}
+		//
+		//// Load list from local file
+		//return sm.loadList()
+		panic("not implemented")
 	}
 }
 
@@ -218,27 +254,31 @@ func (sm *StateManager) storageExists() (bool, error) {
 	return true, nil
 }
 
+func (sm *StateManager) generateStorageKey(contname, crawlexecutionid string) string {
+	return contname + "/" + crawlexecutionid
+}
+
 func (sm *StateManager) layersToState(seedlist []*Layer) error {
 	state := DaprStateStore{Layers: seedlist}
 	err := sm.saveDaprState(state)
 	return err
 }
 
-func (sm *StateManager) loadListFromDapr() ([]*Layer, error) {
+func (sm *StateManager) loadListFromDapr() (DaprStateStore, error) {
 	res, err := sm.loadDaprState()
-	return res.Layers, err
+	return res, err
 }
 
 // loadListFromBlob downloads a list from an Azure Blob Storage container and returns it as a slice of strings.
-func (sm *StateManager) loadListFromBlob() ([]*Layer, error) {
+func (sm *StateManager) loadListFromBlob() (DaprStateStore, error) {
 	if sm.azureClient == nil {
-		return nil, fmt.Errorf("Azure client not initialized")
+		return DaprStateStore{}, fmt.Errorf("Azure client not initialized")
 	}
 
 	// Create temporary file to download the blob
 	tmpFile, err := os.CreateTemp("", "list-*.txt")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary file: %w", err)
+		return DaprStateStore{}, fmt.Errorf("failed to create temporary file: %w", err)
 	}
 	defer os.Remove(tmpFile.Name()) // Clean up after reading
 	defer tmpFile.Close()
@@ -254,35 +294,35 @@ func (sm *StateManager) loadListFromBlob() ([]*Layer, error) {
 
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil // Blob not found, return empty list
+			return DaprStateStore{}, nil // Blob not found, return empty list
 		}
-		return nil, fmt.Errorf("failed to download list from Azure: %w", err)
+		return DaprStateStore{}, fmt.Errorf("failed to download list from Azure: %w", err)
 	}
 
 	// Read and parse the downloaded file
 	if _, err := tmpFile.Seek(0, 0); err != nil {
-		return nil, fmt.Errorf("failed to reset file pointer: %w", err)
+		return DaprStateStore{}, fmt.Errorf("failed to reset file pointer: %w", err)
 	}
 
-	var list []*Layer
+	var list DaprStateStore
 	scanner := bufio.NewScanner(tmpFile)
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		// Create a Layer object from the line
-		layer, err := ParseLayer(line)
+		_, err := ParseLayer(line)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse layer from line: %w", err)
+			return DaprStateStore{}, fmt.Errorf("failed to parse layer from line: %w", err)
 		}
-
-		list = append(list, layer)
+		panic("not implemented")
+		//list = append(list, layer)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to read downloaded list: %w", err)
+		return DaprStateStore{}, fmt.Errorf("failed to read downloaded list: %w", err)
 	}
 
-	log.Info().Msgf("Loaded %d layers from Azure Blob Storage", len(list))
+	log.Info().Msgf("Loaded %d layers from Azure Blob Storage", len(list.Layers))
 	return list, nil
 
 }
@@ -365,7 +405,7 @@ func (sm *StateManager) loadList() ([]*Layer, error) {
 
 func (sm *StateManager) loadDaprState() (DaprStateStore, error) {
 	client := *sm.daprClient
-	res, err := client.GetState(context.Background(), stateStoreComponentName, sm.config.ContainerName, nil)
+	res, err := client.GetState(context.Background(), stateStoreComponentName, sm.generateStorageKey(sm.config.ContainerName, sm.config.CrawlExecutionID), nil)
 	if err != nil {
 		return DaprStateStore{}, err
 	}
@@ -379,7 +419,40 @@ func (sm *StateManager) saveDaprState(store DaprStateStore) error {
 	if err != nil {
 		return err
 	}
-	err = (*sm.daprClient).SaveState(context.Background(), stateStoreComponentName, sm.config.ContainerName, sbytes, nil)
+	err = (*sm.daprClient).SaveState(context.Background(), stateStoreComponentName, sm.generateStorageKey(sm.config.ContainerName, sm.config.CrawlExecutionID), sbytes, nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sm *StateManager) saveDaprStateToFile(store DaprStateStore, channelid string) error {
+	sbytes, err := json.Marshal(store)
+	if err != nil {
+		return err
+	}
+
+	client := *sm.daprClient
+
+	data := base64.StdEncoding.EncodeToString(sbytes)
+	metadata := make(map[string]string)
+	byteArray := []byte(data)
+	fn, err := fetchFileNamingComponent(client, "crawlstorage")
+	if err != nil {
+		return err
+	}
+	fgen, err := generateStandardStorageLocationForChannels(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelid, false)
+	if err != nil {
+		return err
+	}
+	metadata[fn] = fgen
+	req := daprc.InvokeBindingRequest{
+		Name:      "crawlstorage",
+		Operation: "create",
+		Data:      byteArray,
+		Metadata:  metadata,
+	}
+	_, err = client.InvokeBinding(context.Background(), &req)
 	if err != nil {
 		return err
 	}
@@ -397,32 +470,7 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 
 	if sm.shouldUseAzure() {
 		// Azure Blob Storage logic
-		if sm.azureClient == nil {
-			return fmt.Errorf("Azure client not initialized")
-		}
-
-		blobPath := sm.getChannelDataBlobPath(channelname)
-
-		// Check if blob exists
-		exists, err := sm.blobExists(sm.config.ContainerName, blobPath)
-		if err != nil {
-			return fmt.Errorf("failed to check if channel blob exists: %w", err)
-		}
-
-		// For append blobs, we need to create the blob first if it doesn't exist
-		if !exists {
-			if err := sm.createAppendBlob(sm.config.ContainerName, blobPath); err != nil {
-				return fmt.Errorf("failed to create append blob: %w", err)
-			}
-		}
-
-		// Append data to blob
-		if err := sm.appendToBlob(sm.config.ContainerName, blobPath, postData); err != nil {
-			return fmt.Errorf("failed to append data to blob: %w", err)
-		}
-
-		log.Info().Msgf("Post successfully uploaded to Azure for channel %s", channelname)
-		return nil
+		panic("not yet implemented")
 	} else if sm.shouldUseDapr() {
 		client := *sm.daprClient
 
@@ -683,4 +731,273 @@ func (sm *StateManager) shouldUseAzure() bool {
 
 func (sm *StateManager) shouldUseDapr() bool {
 	return sm.config.ContainerName != "" && sm.daprClient != nil
+}
+
+func (sm *StateManager) UpdateStatePage(state Page) {
+	for i := range sm.StateStore.Layers {
+		layer := sm.StateStore.Layers[i]
+
+		// Lock the layer for reading and writing
+		layer.mutex.Lock()
+
+		// Search for the page with matching ID in this layer
+		for j := range layer.Pages {
+			if layer.Pages[j].ID == state.ID {
+				// Found the page, update its state
+				layer.Pages[j].URL = state.URL
+				layer.Pages[j].Depth = state.Depth
+				layer.Pages[j].Timestamp = state.Timestamp
+				layer.Pages[j].Status = state.Status
+				layer.Pages[j].Error = state.Error
+				layer.Pages[j].ParentID = state.ParentID
+				layer.Pages[j].Messages = state.Messages
+
+				// Unlock and return after update
+				layer.mutex.Unlock()
+				sm.StoreState()
+				return
+			}
+		}
+
+		// Unlock if page not found in this layer
+		layer.mutex.Unlock()
+	}
+
+}
+
+func (sm *StateManager) UpdateStateMessage(mId int64, chatId int64, owner *Page, status string) {
+	// First, find the owner page in the layers
+	if owner == nil {
+		// Handle nil owner case - optional depending on your requirements
+		return
+	}
+
+	for i := range sm.StateStore.Layers {
+		layer := sm.StateStore.Layers[i]
+
+		// Lock the layer
+		layer.mutex.Lock()
+
+		// Search for the page with matching ID
+		for j := range layer.Pages {
+			if layer.Pages[j].ID == owner.ID {
+				// Found the owner page, now find the message by mId and chatId
+				found := false
+				for k := range layer.Pages[j].Messages {
+					if layer.Pages[j].Messages[k].MessageId == mId &&
+						layer.Pages[j].Messages[k].ChatId == chatId {
+						// Update the message status
+						layer.Pages[j].Messages[k].Status = status
+						found = true
+						break
+					}
+				}
+
+				// If message not found, append a new one
+				if !found {
+					newMessage := Message{
+						ChatId:    chatId,
+						MessageId: mId,
+						Status:    status,
+						PageId:    owner.ID,
+					}
+					layer.Pages[j].Messages = append(layer.Pages[j].Messages, newMessage)
+				}
+
+				// Unlock and return after update
+				layer.mutex.Unlock()
+				sm.StoreState()
+				return
+			}
+		}
+
+		// Unlock if page not found in this layer
+		layer.mutex.Unlock()
+	}
+
+	// If we get here, the owner page wasn't found in any layer
+	// Depending on your requirements, you might want to:
+	// 1. Log an error
+	// 2. Create a new page with this message
+	// 3. Or other error handling
+}
+
+func (sm *StateManager) AppendLayerAndPersist(pages []*Page) {
+	if len(pages) == 0 {
+		return // Nothing to add
+	}
+
+	// Get the depth of the new layer (assuming all pages have the same parent depth)
+	parentDepth := 0
+	if pages[0] != nil && pages[0].ParentID != "" {
+		// Find the parent's depth
+		for _, layer := range sm.StateStore.Layers {
+			for _, page := range layer.Pages {
+				if page.ID == pages[0].ParentID {
+					parentDepth = page.Depth
+					break
+				}
+			}
+			if parentDepth != -1 {
+				break
+			}
+		}
+	}
+
+	// Calculate new depth (one level deeper than parent)
+	newDepth := parentDepth + 1
+
+	// Check if the layer for this depth already exists
+	var targetLayer *Layer
+	for i := range sm.StateStore.Layers {
+		if sm.StateStore.Layers[i].Depth == newDepth {
+			targetLayer = sm.StateStore.Layers[i]
+			break
+		}
+	}
+
+	// If layer doesn't exist, create it
+	if targetLayer == nil {
+		newLayer := Layer{
+			Depth: newDepth,
+			Pages: []Page{},
+		}
+		sm.StateStore.Layers = append(sm.StateStore.Layers, &newLayer)
+		targetLayer = sm.StateStore.Layers[len(sm.StateStore.Layers)-1]
+	}
+
+	addPagesWithoutDuplicates(sm, pages, targetLayer, newDepth)
+	sm.StoreState()
+
+}
+
+func addPagesWithoutDuplicates(sm *StateManager, pages []*Page, targetLayer *Layer, newDepth int) {
+	// Create a map for faster lookups of existing URLs
+	existingURLs := make(map[string]bool)
+
+	// First collect all existing URLs with a single lock per layer
+	for i := range sm.StateStore.Layers {
+		layer := sm.StateStore.Layers[i]
+
+		// Lock the layer for reading
+		layer.mutex.RLock()
+
+		// Add all URLs from this layer to our map
+		for _, existingPage := range layer.Pages {
+			existingURLs[existingPage.URL] = true
+		}
+
+		layer.mutex.RUnlock()
+	}
+
+	// Now we can process new pages without needing to lock/unlock repeatedly
+	pagesToAdd := []Page{}
+	newPageURLs := make(map[string]bool) // Track URLs of new pages we're adding
+
+	for _, newPage := range pages {
+		if newPage == nil {
+			continue
+		}
+
+		// Check if this URL already exists in existing pages or in our new pages list
+		if !existingURLs[newPage.URL] && !newPageURLs[newPage.URL] {
+			// Convert *Page to Page
+			pageToAdd := Page{
+				URL:       newPage.URL,
+				Depth:     newDepth,
+				Timestamp: time.Now(),
+				Status:    "unfetched",
+				Error:     nil,
+				ID:        newPage.ID,
+				ParentID:  newPage.ParentID,
+				Messages:  newPage.Messages,
+			}
+
+			pagesToAdd = append(pagesToAdd, pageToAdd)
+			newPageURLs[newPage.URL] = true // Mark this URL as being added
+		}
+	}
+
+	// Finally, add all new pages at once
+	if len(pagesToAdd) > 0 {
+		targetLayer.mutex.Lock()
+		targetLayer.Pages = append(targetLayer.Pages, pagesToAdd...)
+		targetLayer.mutex.Unlock()
+	}
+}
+func (sm *StateManager) StoreState() {
+	if sm.shouldUseDapr() {
+		err := sm.saveDaprState(sm.StateStore)
+		if err != nil {
+			return
+		}
+	} else {
+		panic("not implemented")
+	}
+}
+
+func (sm *StateManager) UploadStateToStorage(channelid string) error {
+	err := sm.saveDaprStateToFile(sm.StateStore, channelid)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func (sm *StateManager) UpdateCrawlManagement(management CrawlManagement) error {
+
+	if sm.shouldUseDapr() {
+		sbytes, err := json.Marshal(management)
+		if err != nil {
+			return err
+		}
+		err = (*sm.daprClient).SaveState(context.Background(), stateStoreComponentName, sm.config.ContainerName, sbytes, nil)
+		if err != nil {
+			return err
+		}
+		return nil
+	} else {
+		panic("not implemented")
+	}
+}
+
+func (sm *StateManager) GetLayers(ids []string) ([]*Layer, error) {
+	// Iterate through ids starting from the most recent (last) one
+	for i := len(ids) - 1; i >= 0; i-- {
+		id := ids[i]
+		resp, err := (*sm.daprClient).GetState(context.Background(), stateStoreComponentName, sm.generateStorageKey(sm.config.ContainerName, id), nil)
+		if err != nil {
+			// If there's an error, continue to the next id rather than failing immediately
+			continue
+		}
+
+		if resp.Value != nil {
+			var result DaprStateStore
+			err = json.Unmarshal(resp.Value, &result)
+			if err != nil {
+				// If we can't unmarshal, try the next id
+				continue
+			}
+
+			// If we found layers, return them
+			if result.Layers != nil && len(result.Layers) > 0 {
+				return result.Layers, nil
+			}
+		}
+	}
+
+	// If we went through all ids and found nothing, return nil
+	return nil, nil
+}
+
+func (sm *StateManager) GetLastPreviousCrawlId() ([]string, error) {
+	resp, err := (*sm.daprClient).GetState(context.Background(), stateStoreComponentName, sm.config.ContainerName, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Value != nil {
+		var result CrawlManagement
+		err = json.Unmarshal(resp.Value, &result)
+		return result.PreviousCrawlID, err
+	}
+	return nil, nil
 }

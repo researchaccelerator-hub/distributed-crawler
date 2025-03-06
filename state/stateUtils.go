@@ -62,3 +62,15 @@ func generateStandardStorageLocation(storageroot string, crawlid string, crawlex
 	}
 	return storageroot + "/" + crawlid + "/" + crawlexecutionid + "/" + channelname + "/" + postid, nil
 }
+
+func generateStandardStorageLocationForChannels(storageroot string, crawlid string, crawlexecutionid string, channelname string, local bool) (string, error) {
+	if local {
+		path := filepath.Join(storageroot, crawlid, crawlexecutionid, channelname)
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return "", fmt.Errorf("failed to create media directory: %w", err)
+		}
+
+		return filepath.Join(storageroot, crawlid, crawlexecutionid, channelname), nil
+	}
+	return storageroot + "/" + crawlid + "/" + crawlexecutionid + "/" + channelname, nil
+}

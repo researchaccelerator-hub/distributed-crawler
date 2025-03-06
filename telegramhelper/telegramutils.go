@@ -73,9 +73,9 @@ func GetMessageCount(tdlibClient crawler.TDLibClient, chatID int64, channelname 
 	log.Info().Msgf("Getting message count for channel %s", channelname)
 	messageCount := 0
 	var fromMessageId int64 = 0 // Start from the latest message (ID = 0)
+	var oldestMessageId int64 = 0
 
 	for {
-		// Fetch a batch of messages
 		log.Info().Msgf("Getting message count for channel %s and batch %d", channelname, fromMessageId)
 		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 			ChatId:        chatID,
@@ -87,16 +87,27 @@ func GetMessageCount(tdlibClient crawler.TDLibClient, chatID int64, channelname 
 			return 0, err
 		}
 
-		// Increment the message count
-		messageCount += len(chatHistory.Messages)
-
-		// Stop if no more messages are returned
+		// If no messages are returned, break
 		if len(chatHistory.Messages) == 0 {
 			break
 		}
 
-		// Update `fromMessageId` to the ID of the oldest message in this batch
-		fromMessageId = chatHistory.Messages[len(chatHistory.Messages)-1].Id
+		// Increment the message count
+		messageCount += len(chatHistory.Messages)
+
+		// Get the ID of the oldest message in this batch
+		lastMessageId := chatHistory.Messages[len(chatHistory.Messages)-1].Id
+
+		// If we're seeing the same oldest message ID as before, we've reached the end
+		if lastMessageId == oldestMessageId {
+			break
+		}
+
+		// Save the oldest message ID for comparison in the next iteration
+		oldestMessageId = lastMessageId
+
+		// Set the next fromMessageId to fetch the next batch
+		fromMessageId = lastMessageId
 	}
 
 	return messageCount, nil

@@ -95,8 +95,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	for _, url := range stringList {
 		seenURLs[url] = true
 	}
+
 	crawlexecid := common.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
+
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
 		ContainerName:    crawlCfg.CrawlID,
@@ -106,87 +108,68 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		DAPREnabled:      crawlCfg.DaprMode,
 		CrawlExecutionID: crawlexecid,
 	}
+
 	sm, err := state.NewStateManager(cfg)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to load progress")
+		log.Error().Err(err).Msg("Failed to initialize state manager")
+		return
 	}
+
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	list, err := sm.SeedSetup(stringList)
-	// Load progress
-	for i := 0; i < len(list); i++ {
-		l := list[i]
-		for j := 0; j < len(l.Pages); j++ {
-			la := l.Pages[j]
-			if la.Status != "fetched" {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
-							// Continue to the next item
+
+	// Get the existing layers or seed a new crawl
+	_, err = sm.StateSetup(stringList)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to set up seed URLs")
+		return
+	}
+
+	// Process each layer
+	for layerIndex := 0; layerIndex < len(sm.StateStore.Layers); layerIndex++ {
+		layer := sm.StateStore.Layers[layerIndex]
+		log.Info().Msgf("Processing layer at depth %d with %d pages", layer.Depth, len(layer.Pages))
+
+		// Process each page in the current layer
+		for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
+			page := layer.Pages[pageIndex]
+
+			// Skip already processed pages
+			if page.Status == "fetched" {
+				log.Debug().Msgf("Skipping already processed page: %s", page.URL)
+				continue
+			}
+
+			// Create a closure for each page to handle possible panics
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", page.URL, r)
+						page.Status = "error"
+						// Save progress after recovery
+						if err := sm.StoreLayers(sm.StateStore.Layers); err != nil {
+							log.Error().Stack().Err(err).Msg("Failed to store layers after panic recovery")
 						}
-					}()
-					la.Timestamp = time.Now()
-					if outlinks, err := crawl.Run(&la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
-						log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
-						la.Status = "error"
-					} else {
-						la.Status = "fetched"
-						pag := make([]state.Page, 0) // Initialize as empty, we'll add only unique URLs
-
-						// Deduplicate outlinks within this batch and check against all previously seen URLs
-						uniqueOutlinks := make(map[string]*state.Page)
-						for _, ol := range outlinks {
-							if _, exists := seenURLs[ol.URL]; !exists {
-								// This is a new URL we haven't seen before
-								seenURLs[ol.URL] = true
-								uniqueOutlinks[ol.URL] = ol
-							} else {
-								// Skip this URL as we've seen it before (prevents cycles)
-								log.Debug().Msgf("Skipping already seen URL: %s", ol.URL)
-							}
-						}
-
-						// Convert map to slice
-						for _, ol := range uniqueOutlinks {
-							pag = append(pag, *ol)
-						}
-
-						if len(pag) > 0 {
-
-							// Add unique pages to the next layer
-							if len(list) > l.Depth+1 {
-								existing := list[l.Depth+1]
-								existing.Pages = append(existing.Pages, pag...)
-
-								// Deduplicate the layer
-								uniquePages := make(map[string]state.Page)
-								for _, page := range existing.Pages {
-									uniquePages[page.URL] = page
-								}
-
-								// Reset and rebuild the Pages slice
-								existing.Pages = make([]state.Page, 0, len(uniquePages))
-								for _, page := range uniquePages {
-									existing.Pages = append(existing.Pages, page)
-								}
-							} else {
-								layer := state.Layer{
-									Depth: l.Depth + 1,
-									Pages: pag,
-								}
-								list = append(list, &layer)
-							}
-						}
-					}
-					err = sm.StoreLayers(list)
-					if err != nil {
-						log.Error().Stack().Err(err).Msg("Failed to store layers")
 					}
 				}()
-			}
+
+				page.Timestamp = time.Now()
+
+				// Run the crawler for this page
+				discoveredChannels, err := crawl.RunForChannel(&page, crawlCfg.StorageRoot, *sm, crawlCfg)
+				if err != nil {
+					log.Error().Stack().Err(err).Msgf("Error processing item %s", page.URL)
+					page.Status = "error"
+				} else {
+					sm.AppendLayerAndPersist(discoveredChannels)
+					// TODO append list object for next iteration
+				}
+
+			}()
 		}
+
+		// Log progress after completing a layer
+		log.Info().Msgf("Completed layer at depth %d", layer.Depth)
 	}
 
 	log.Info().Msg("All items processed successfully.")
-
 }
