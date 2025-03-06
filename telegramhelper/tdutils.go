@@ -364,6 +364,7 @@ var ParseMessage = func(
 	channelName string,
 	tdlibClient crawler.TDLibClient, // our interface type
 	sm state.StateManager,
+	cfg common.CrawlerConfig,
 ) (post model.Post, err error) {
 	// original implementation...
 	// Defer to recover from panics and ensure the crawl continues
@@ -376,8 +377,11 @@ var ParseMessage = func(
 	}()
 
 	publishedAt := time.Unix(int64(message.Date), 0)
-	if publishedAt.Year() < 2018 {
-		return model.Post{}, nil // Skip messages not from earlier than 2018
+
+	if !cfg.MinPostDate.IsZero() {
+		if time.Unix(int64(message.Date), 0).Before(cfg.MinPostDate) {
+			return model.Post{}, nil // Skip messages not from earlier than 2018
+		}
 	}
 
 	var messageNumber string
