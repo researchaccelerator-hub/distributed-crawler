@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"os"
 	"strings"
+	"time"
 )
 
 // StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,
@@ -88,7 +89,12 @@ func readURLsFromFile(filename string) ([]string, error) {
 //   - stringList: A slice of strings representing the items to be processed.
 //   - crawlCfg: A CrawlerConfig struct containing configuration settings for the crawler.
 func launch(stringList []string, crawlCfg common.CrawlerConfig) {
+	seenURLs := make(map[string]bool)
 
+	// Initialize seenURLs with the seed URLs
+	for _, url := range stringList {
+		seenURLs[url] = true
+	}
 	crawlid := common.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
 	cfg := state.Config{
@@ -106,32 +112,77 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	list, err := sm.SeedSetup(stringList)
 	// Load progress
-	progress, err := sm.LoadProgress()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to load progress")
-	}
-	// Process remaining items
-	for i := progress; i < len(list); i++ {
-		item := list[i]
-		log.Info().Msgf("Processing item: %s", item)
+	for i := 0; i < len(list); i++ {
+		l := list[i]
+		for j := 0; j < len(l.Pages); j++ {
+			la := l.Pages[j]
+			if la.Status != "fetched" {
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
+							// Continue to the next item
+						}
+					}()
+					la.Timestamp = time.Now()
+					if outlinks, err := crawl.Run(crawlid, &la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
+						log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
+						la.Status = "error"
+					} else {
+						la.Status = "fetched"
+						pag := make([]state.Page, 0) // Initialize as empty, we'll add only unique URLs
 
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", item, r)
-					// Continue to the next item
-				}
-			}()
+						// Deduplicate outlinks within this batch and check against all previously seen URLs
+						uniqueOutlinks := make(map[string]*state.Page)
+						for _, ol := range outlinks {
+							if _, exists := seenURLs[ol.URL]; !exists {
+								// This is a new URL we haven't seen before
+								seenURLs[ol.URL] = true
+								uniqueOutlinks[ol.URL] = ol
+							} else {
+								// Skip this URL as we've seen it before (prevents cycles)
+								log.Debug().Msgf("Skipping already seen URL: %s", ol.URL)
+							}
+						}
 
-			if err = crawl.Run(crawlid, item, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
-				log.Error().Stack().Err(err).Msgf("Error processing item %s", item)
+						// Convert map to slice
+						for _, ol := range uniqueOutlinks {
+							pag = append(pag, *ol)
+						}
+
+						if len(pag) > 0 {
+
+							// Add unique pages to the next layer
+							if len(list) > l.Depth+1 {
+								existing := list[l.Depth+1]
+								existing.Pages = append(existing.Pages, pag...)
+
+								// Deduplicate the layer
+								uniquePages := make(map[string]state.Page)
+								for _, page := range existing.Pages {
+									uniquePages[page.URL] = page
+								}
+
+								// Reset and rebuild the Pages slice
+								existing.Pages = make([]state.Page, 0, len(uniquePages))
+								for _, page := range uniquePages {
+									existing.Pages = append(existing.Pages, page)
+								}
+							} else {
+								layer := state.Layer{
+									Depth: l.Depth + 1,
+									Pages: pag,
+								}
+								list = append(list, &layer)
+							}
+						}
+					}
+					err = sm.StoreLayers(list)
+					if err != nil {
+						log.Error().Stack().Err(err).Msg("Failed to store layers")
+					}
+				}()
 			}
-		}()
-
-		// Update progress
-		progress = i + 1
-		if err = sm.SaveProgress(progress); err != nil {
-			log.Fatal().Err(err).Msgf("Failed to save progress: %v", err)
 		}
 	}
 
