@@ -13,7 +13,6 @@ type CrawlerConfig struct {
 	UserAgent        string
 	OutputFormat     string
 	StorageRoot      string
-  MinPostDate  time.Time
 	TDLibDatabaseURL string
 	MinPostDate      time.Time
 	DaprJobMode      bool

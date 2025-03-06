@@ -10,15 +10,34 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	daprc "github.com/dapr/go-sdk/client"
+	"github.com/google/uuid"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
+
+type Page struct {
+	URL       string
+	Depth     int
+	Timestamp time.Time
+	Status    string
+	Error     error
+	ID        string
+	ParentID  string
+}
+
+// Layer represents a collection of pages at the same depth
+type Layer struct {
+	Depth int
+	Pages []Page
+	mutex sync.RWMutex
+}
 
 // Config holds the configuration for StateManager
 type Config struct {
@@ -28,28 +47,27 @@ type Config struct {
 	JobID         string
 	CrawlID       string
 	DAPREnabled   bool
+	MaxLayers     int
 }
 
 // StateManager encapsulates state management with a configurable storage root prefix.
 type StateManager struct {
-	config       Config
-	azureClient  *azblob.Client
-	daprClient   *daprc.Client
-	listFile     string
-	progressFile string
+	config      Config
+	azureClient *azblob.Client
+	daprClient  *daprc.Client
+	Layers      []*Layer
+	listFile    string
 }
 
 type DaprStateStore struct {
-	SeedList []string `json:"seedList"`
-	Progress int      `json:"progress"`
+	Layers []*Layer `json:"layerList"`
 }
 
 // NewStateManager initializes a new StateManager with the given storage root prefix.
 func NewStateManager(config Config) (*StateManager, error) {
 	sm := &StateManager{
-		config:       config,
-		listFile:     filepath.Join(config.StorageRoot, "list.txt"),
-		progressFile: filepath.Join(config.StorageRoot, "progress", fmt.Sprintf("%s.txt", config.CrawlID)),
+		config:   config,
+		listFile: filepath.Join(config.StorageRoot, "list.txt"),
 	}
 	accountURL := os.Getenv("AZURE_STORAGE_ACCOUNT_URL")
 
@@ -95,12 +113,37 @@ func (r readSeekCloserWrapper) Close() error {
 	return nil
 }
 
+func (sm *StateManager) listToLayer(list []string) []*Layer {
+	layers := make([]*Layer, 0)
+	pages := make([]Page, 0)
+	for _, l := range list {
+		page := Page{
+			URL:    l,
+			Depth:  0,
+			Status: "unfetched",
+			ID:     uuid.New().String(),
+		}
+
+		pages = append(pages, page)
+	}
+
+	layer := Layer{
+		Depth: 0,
+		Pages: pages,
+		mutex: sync.RWMutex{},
+	}
+	layers = append(layers, &layer)
+
+	return layers
+
+}
+
 // SeedSetup initializes the list file with the provided seed list if it does not exist,
 // and then loads the list from the file.
-func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
+func (sm *StateManager) SeedSetup(seedlist []string) ([]*Layer, error) {
 	useAzure := sm.shouldUseAzure()
 	useDAPR := sm.shouldUseDapr()
-
+	layerzero := sm.listToLayer(seedlist)
 	if useAzure {
 		// Check if list exists in Azure
 		exists, err := sm.blobExists(sm.config.ContainerName, sm.getListBlobPath())
@@ -110,7 +153,7 @@ func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 
 		if !exists {
 			// Need to seed the list
-			if err := sm.seedListToBlob(seedlist); err != nil {
+			if err := sm.layersToBlob(layerzero); err != nil {
 				return nil, fmt.Errorf("failed to seed list to Azure: %w", err)
 			}
 		}
@@ -118,22 +161,22 @@ func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 		// Load list from Azure
 		return sm.loadListFromBlob()
 	} else if useDAPR {
-		exists, err := sm.storageExists(sm.config.ContainerName)
+		exists, err := sm.storageExists()
 		if err != nil {
 			return nil, fmt.Errorf("failed to check if list blob exists: %w", err)
 		}
 
 		if !exists {
 			// Need to seed the list
-			if err := sm.seedListToState(sm.config.ContainerName, seedlist); err != nil {
+			if err := sm.layersToState(layerzero); err != nil {
 				return nil, fmt.Errorf("failed to seed list to Azure: %w", err)
 			}
 		}
-		return sm.loadListFromDapr(sm.config.ContainerName)
+		return sm.loadListFromDapr()
 	} else {
 		// Check if list exists locally
 		if _, err := os.Stat(sm.listFile); os.IsNotExist(err) {
-			if err := sm.seedList(seedlist); err != nil {
+			if err := sm.seedList(layerzero); err != nil {
 				return nil, fmt.Errorf("failed to seed list locally: %w", err)
 			}
 		}
@@ -143,11 +186,28 @@ func (sm *StateManager) SeedSetup(seedlist []string) ([]string, error) {
 	}
 }
 
+func (sm *StateManager) StoreLayers(layers []*Layer) error {
+	if sm.shouldUseAzure() {
+		err := sm.layersToBlob(layers)
+		if err != nil {
+			return err
+		}
+	} else if sm.shouldUseDapr() {
+		err := sm.layersToState(layers)
+		if err != nil {
+			return err
+		}
+	} else {
+		panic("no filestore layers yet")
+	}
+	return nil
+}
+
 const stateStoreComponentName = "statestore"
 
-func (sm *StateManager) storageExists(containerName string) (bool, error) {
+func (sm *StateManager) storageExists() (bool, error) {
 	client := *sm.daprClient
-	res, err := client.GetState(context.Background(), stateStoreComponentName, containerName, nil)
+	res, err := client.GetState(context.Background(), stateStoreComponentName, sm.config.ContainerName, nil)
 	if err != nil {
 		return false, err
 	}
@@ -157,19 +217,19 @@ func (sm *StateManager) storageExists(containerName string) (bool, error) {
 	return true, nil
 }
 
-func (sm *StateManager) seedListToState(containerName string, seedlist []string) error {
-	state := DaprStateStore{SeedList: seedlist}
+func (sm *StateManager) layersToState(seedlist []*Layer) error {
+	state := DaprStateStore{Layers: seedlist}
 	err := sm.saveDaprState(state)
 	return err
 }
 
-func (sm *StateManager) loadListFromDapr(containerName string) ([]string, error) {
+func (sm *StateManager) loadListFromDapr() ([]*Layer, error) {
 	res, err := sm.loadDaprState()
-	return res.SeedList, err
+	return res.Layers, err
 }
 
 // loadListFromBlob downloads a list from an Azure Blob Storage container and returns it as a slice of strings.
-func (sm *StateManager) loadListFromBlob() ([]string, error) {
+func (sm *StateManager) loadListFromBlob() ([]*Layer, error) {
 	if sm.azureClient == nil {
 		return nil, fmt.Errorf("Azure client not initialized")
 	}
@@ -203,56 +263,74 @@ func (sm *StateManager) loadListFromBlob() ([]string, error) {
 		return nil, fmt.Errorf("failed to reset file pointer: %w", err)
 	}
 
-	var list []string
+	var list []*Layer
 	scanner := bufio.NewScanner(tmpFile)
 	for scanner.Scan() {
-		list = append(list, scanner.Text())
+		line := scanner.Text()
+
+		// Create a Layer object from the line
+		layer, err := ParseLayer(line)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse layer from line: %w", err)
+		}
+
+		list = append(list, layer)
 	}
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read downloaded list: %w", err)
 	}
 
-	log.Info().Msgf("Loaded %d items from Azure Blob Storage", len(list))
+	log.Info().Msgf("Loaded %d layers from Azure Blob Storage", len(list))
 	return list, nil
+
+}
+
+func ParseLayer(line string) (*Layer, error) {
+	var layer Layer
+	err := json.Unmarshal([]byte(line), &layer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal layer: %w", err)
+	}
+	return &layer, nil
 }
 
 // seedList writes a list of items to a file, creating the file if it does not exist.
-func (sm *StateManager) seedList(items []string) error {
+func (sm *StateManager) seedList(items []*Layer) error {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(sm.listFile), os.ModePerm); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	file, err := os.Create(sm.listFile)
+	// Marshal the entire slice of Layer objects to JSON
+	layersJSON, err := json.Marshal(items)
 	if err != nil {
-		return fmt.Errorf("failed to create list file: %w", err)
+		return fmt.Errorf("failed to marshal layers: %w", err)
 	}
-	defer file.Close()
 
-	for _, item := range items {
-		if _, err := file.WriteString(item + "\n"); err != nil {
-			return fmt.Errorf("failed to write to list file: %w", err)
-		}
+	// Write the JSON to file in a single operation
+	if err := os.WriteFile(sm.listFile, layersJSON, 0644); err != nil {
+		return fmt.Errorf("failed to write to list file: %w", err)
 	}
 
 	log.Info().Msg("List seeded successfully.")
 	return nil
 }
 
-func (sm *StateManager) seedListToBlob(items []string) error {
+func (sm *StateManager) layersToBlob(items []*Layer) error {
 	if sm.azureClient == nil {
 		return fmt.Errorf("Azure client not initialized")
 	}
 
-	var data strings.Builder
-	for _, item := range items {
-		data.WriteString(item + "\n")
+	// Marshal the entire slice of Layer objects to JSON
+	layersJSON, err := json.Marshal(items)
+	if err != nil {
+		return fmt.Errorf("failed to marshal layers: %w", err)
 	}
 
 	// Upload to Azure Blob Storage
-	reader := strings.NewReader(data.String())
-	_, err := sm.azureClient.UploadStream(
+	reader := bytes.NewReader(layersJSON)
+	_, err = sm.azureClient.UploadStream(
 		context.TODO(),
 		sm.config.ContainerName,
 		sm.getListBlobPath(),
@@ -269,87 +347,19 @@ func (sm *StateManager) seedListToBlob(items []string) error {
 }
 
 // loadList reads the list of items from the list file and returns them as a slice of strings.
-func (sm *StateManager) loadList() ([]string, error) {
-	file, err := os.Open(sm.listFile)
+func (sm *StateManager) loadList() ([]*Layer, error) {
+	data, err := os.ReadFile(sm.listFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open list file: %w", err)
-	}
-	defer file.Close()
-
-	var list []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		list = append(list, scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read list file: %w", err)
 	}
 
-	return list, nil
-}
-
-// LoadProgress retrieves the current progress index from the progress file.
-func (sm *StateManager) LoadProgress() (int, error) {
-	if sm.shouldUseAzure() {
-		return sm.loadProgressFromBlob()
-	} else if sm.shouldUseDapr() {
-		return sm.loadProgressFromState()
+	var layers []*Layer
+	if err := json.Unmarshal(data, &layers); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal layers: %w", err)
 	}
 
-	// Ensure progress directory exists
-	progressDir := filepath.Dir(sm.progressFile)
-	if err := os.MkdirAll(progressDir, os.ModePerm); err != nil {
-		return 0, fmt.Errorf("failed to create progress directory: %w", err)
-	}
-
-	// Local file loading
-	if _, err := os.Stat(sm.progressFile); os.IsNotExist(err) {
-		return 0, nil // Start from the beginning if no progress file
-	}
-
-	data, err := os.ReadFile(sm.progressFile)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read progress file: %w", err)
-	}
-
-	progress, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid progress format: %w", err)
-	}
-
-	log.Info().Msgf("Loaded progress for crawl '%s': %d", sm.config.CrawlID, progress)
-	return progress, nil
-}
-
-// SaveProgress writes the given progress index to the progress file.
-func (sm *StateManager) SaveProgress(index int) error {
-	if sm.shouldUseAzure() {
-		return sm.saveProgressToBlob(index)
-	} else if sm.shouldUseDapr() {
-		return sm.saveProgressToState(index)
-	}
-
-	// Ensure directory exists
-	progressDir := filepath.Dir(sm.progressFile)
-	if err := os.MkdirAll(progressDir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create progress directory: %w", err)
-	}
-
-	// Local file saving
-	file, err := os.Create(sm.progressFile)
-	if err != nil {
-		return fmt.Errorf("failed to create progress file: %w", err)
-	}
-	defer file.Close()
-
-	_, err = file.WriteString(strconv.Itoa(index) + "\n")
-	if err != nil {
-		return fmt.Errorf("failed to write progress: %w", err)
-	}
-
-	log.Info().Msgf("Saved progress for crawl '%s': %d", sm.config.CrawlID, index)
-	return nil
+	log.Info().Msgf("Loaded %d layers from file", len(layers))
+	return layers, nil
 }
 
 func (sm *StateManager) loadDaprState() (DaprStateStore, error) {
@@ -372,107 +382,6 @@ func (sm *StateManager) saveDaprState(store DaprStateStore) error {
 	if err != nil {
 		return err
 	}
-	return nil
-}
-func (sm *StateManager) loadProgressFromState() (int, error) {
-
-	result, err := sm.loadDaprState()
-
-	return result.Progress, err
-}
-
-func (sm *StateManager) saveProgressToState(index int) error {
-	s, err := sm.loadDaprState()
-	if err != nil {
-		return err
-	}
-	s.Progress = index
-	err = sm.saveDaprState(s)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// loadProgressFromBlob downloads and reads the progress file from Azure Blob Storage.
-func (sm *StateManager) loadProgressFromBlob() (int, error) {
-	if sm.azureClient == nil {
-		return 0, fmt.Errorf("Azure client not initialized")
-	}
-
-	// Create a temporary file to download the blob
-	tmpFile, err := os.CreateTemp("", "progress-*.txt")
-	if err != nil {
-		return 0, fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name()) // Clean up after reading
-	defer tmpFile.Close()
-
-	// Check if blob exists
-	exists, err := sm.blobExists(sm.config.ContainerName, sm.getProgressBlobPath())
-	if err != nil {
-		return 0, fmt.Errorf("failed to check if progress blob exists: %w", err)
-	}
-
-	if !exists {
-		return 0, nil // Start from 0 if the blob doesn't exist
-	}
-
-	// Download blob to file
-	_, err = sm.azureClient.DownloadFile(
-		context.TODO(),
-		sm.config.ContainerName,
-		sm.getProgressBlobPath(),
-		tmpFile,
-		nil,
-	)
-
-	if err != nil {
-		return 0, fmt.Errorf("failed to download progress file: %w", err)
-	}
-
-	// Read and parse the downloaded file
-	if _, err := tmpFile.Seek(0, 0); err != nil {
-		return 0, fmt.Errorf("failed to reset file pointer: %w", err)
-	}
-
-	data, err := io.ReadAll(tmpFile)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read progress data: %w", err)
-	}
-
-	progress, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, fmt.Errorf("invalid progress format: %w", err)
-	}
-
-	log.Info().Msgf("Loaded progress for crawl '%s' from Azure: %d", sm.config.CrawlID, progress)
-	return progress, nil
-}
-
-// saveProgressToBlob uploads the current progress index to Azure Blob Storage.
-func (sm *StateManager) saveProgressToBlob(index int) error {
-	if sm.azureClient == nil {
-		return fmt.Errorf("Azure client not initialized")
-	}
-
-	// Write progress to an in-memory buffer
-	data := []byte(strconv.Itoa(index) + "\n")
-	reader := bytes.NewReader(data)
-
-	_, err := sm.azureClient.UploadStream(
-		context.TODO(),
-		sm.config.ContainerName,
-		sm.getProgressBlobPath(),
-		reader,
-		nil,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to upload progress to Azure: %w", err)
-	}
-
-	log.Info().Msgf("Progress for crawl '%s' saved to Azure: %d", sm.config.CrawlID, index)
 	return nil
 }
 
@@ -536,6 +445,7 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 		if err != nil {
 			return err
 		}
+		return nil
 	}
 
 	// Local Storage logic

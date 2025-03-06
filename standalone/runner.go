@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"os"
 	"strings"
+	"time"
 )
 
 // StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,
@@ -104,33 +105,47 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	}
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	list, err := sm.SeedSetup(stringList)
-	// Load progress
-	progress, err := sm.LoadProgress()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to load progress")
-	}
-	// Process remaining items
-	for i := progress; i < len(list); i++ {
-		item := list[i]
-		log.Info().Msgf("Processing item: %s", item)
 
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", item, r)
-					// Continue to the next item
-				}
-			}()
+	for _, l := range list {
+		for _, la := range l.Pages {
+			if la.Status != "fetched" {
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
+							// Continue to the next item
+						}
+					}()
 
-			if err = crawl.Run(crawlid, item, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
-				log.Error().Stack().Err(err).Msgf("Error processing item %s", item)
+					la.Timestamp = time.Now()
+					if outlinks, err := crawl.Run(crawlid, &la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
+						log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
+						la.Status = "error"
+					} else {
+						la.Status = "fetched"
+						pag := make([]state.Page, len(outlinks))
+						for i, ol := range outlinks {
+							pag[i] = *ol
+						}
+
+						if len(list) >= l.Depth {
+							existing := list[l.Depth+1]
+							existing.Pages = append(existing.Pages, pag...)
+						} else {
+							layer := state.Layer{
+								Depth: l.Depth + 1,
+								Pages: pag,
+							}
+							list = append(list, &layer)
+						}
+					}
+
+					err := sm.StoreLayers(list)
+					if err != nil {
+						log.Error().Stack().Err(err).Msg("Failed to store layers")
+					}
+				}()
 			}
-		}()
-
-		// Update progress
-		progress = i + 1
-		if err = sm.SaveProgress(progress); err != nil {
-			log.Fatal().Err(err).Msgf("Failed to save progress: %v", err)
 		}
 	}
 

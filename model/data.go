@@ -64,6 +64,8 @@ type Post struct {
 	MediaURL                string            `json:"media_url"`
 	Comments                []Comment         `json:"comments"`
 	Reactions               map[string]int    `json:"reactions"`
+	Outlinks                []string          `json:"outlinks"`
+	CaptureTime             time.Time         `json:"capture_time"`
 }
 type Comment struct {
 	Text       string         `json:"text"`

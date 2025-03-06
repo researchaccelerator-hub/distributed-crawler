@@ -1,11 +1,59 @@
 package telegramhelper
 
 import (
+	"fmt"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
 )
+
+func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelUsername string) (int, error) {
+	// First, resolve the username to get the chat ID
+	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+		Username: channelUsername,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve channel username: %w", err)
+	}
+
+	// Get full chat info based on the chat type
+	chatType := chat.Type
+	var memberCount int
+
+	switch v := chatType.(type) {
+	case *client.ChatTypeSupergroup:
+		// For channels and supergroups
+		supergroupId := v.SupergroupId
+
+		// Get supergroup full info
+		fullInfo, err := tdlibClient.GetSupergroupFullInfo(&client.GetSupergroupFullInfoRequest{
+			SupergroupId: supergroupId,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("failed to get supergroup info: %w", err)
+		}
+		memberCount = int(fullInfo.MemberCount)
+
+	case *client.ChatTypeBasicGroup:
+		// For basic groups
+		basicGroupId := v.BasicGroupId
+
+		// Get basic group full info
+		fullInfo, err := tdlibClient.GetBasicGroupFullInfo(&client.GetBasicGroupFullInfoRequest{
+			BasicGroupId: basicGroupId,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("failed to get basic group info: %w", err)
+		}
+		memberCount = len(fullInfo.Members)
+
+	default:
+		return 0, fmt.Errorf("chat is not a group or channel")
+	}
+
+	return memberCount, nil
+}
 
 // GetMessageCount retrieves the total number of messages in a specified chat.
 // It uses the provided tdlibClient to fetch chat history in batches of up to 100 messages,
@@ -135,31 +183,20 @@ func GetTotalChannelViews(tdlibClient crawler.TDLibClient, channelID int64, chan
 	return int(totalViews), nil
 }
 
-/*
-GetMessageComments retrieves comments from a message thread in a Telegram chat.
-
-Parameters:
-  - tdlibClient: A pointer to the TDLib client used to interact with Telegram.
-  - chatID: The ID of the chat containing the message.
-  - messageID: The ID of the message whose comments are to be fetched.
-
-Returns:
-  - A slice of Comment structs representing the comments in the message thread.
-  - An error if the operation fails.
-
-The function fetches comments in batches of up to 100 and continues until no more comments are available.
-It extracts the text, reactions, view count, and reply count for each comment.
-*/
+// GetMessageComments retrieves comments from a message thread in a Telegram chat.
+//
+// Parameters:
+// - tdlibClient: A pointer to the TDLib client used to interact with Telegram.
+// - chatID: The ID of the chat containing the message.
+// - messageID: The ID of the message whose comments are to be fetched.
+//
+// Returns:
+// - A slice of Comment structs representing the comments in the message thread.
+// - An error if the operation fails.
+//
+// The function fetches comments in batches of up to 100 and continues until no more comments are available.
+// It extracts the text, reactions, view count, and reply count for each comment.
 func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) ([]model.Comment, error) {
-	// Fetch the message thread
-	//thread, err := tdlibClient.GetMessageThread(&client.GetMessageThreadRequest{
-	//	ChatId:    chatID,
-	//	MessageId: messageID,
-	//})
-	//if err != nil {
-	//	return nil, fmt.Errorf("failed to get message thread: %w", err)
-	//}
-	//fmt.Printf("%s", thread)
 	// Fetch the comments in the thread
 	var comments []model.Comment
 	var fromMessageId int64 = 0

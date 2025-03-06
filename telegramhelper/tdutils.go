@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -454,6 +455,7 @@ var ParseMessage = func(
 		log.Debug().Msg("Unknown message content type")
 	}
 
+	outlinks := extractChannelLinksFromMessage(message)
 	reactions := make(map[string]int)
 	if message.InteractionInfo != nil && message.InteractionInfo.Reactions != nil &&
 		len(message.InteractionInfo.Reactions.Reactions) > 0 {
@@ -499,6 +501,8 @@ var ParseMessage = func(
 		AllText:        "",
 		ThumbURL:       thumbnailPath,
 		MediaURL:       videoPath,
+		Outlinks:       outlinks,
+		CaptureTime:    time.Now(),
 		ChannelData: model.ChannelData{
 			ChannelID:           message.ChatId,
 			ChannelName:         chat.Title,
@@ -573,4 +577,84 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) (
 
 	log.Info().Msgf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
 	return downloadedFile.Local.Path, nil
+}
+
+func extractChannelLinksFromMessage(message *client.Message) []string {
+	// Hold unique channel names
+	channelNamesMap := make(map[string]bool)
+
+	// Regex to identify Telegram channel links in text
+	channelLinkRegex := regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]+)`)
+
+	// Check if it's a text message
+	var messageText *client.MessageText
+
+	// Type assertion with proper type checking
+	switch content := message.Content.(type) {
+	case *client.MessageText:
+		messageText = content
+	default:
+		return []string{} // Not a text message
+	}
+
+	// Process text entities if available
+	if messageText != nil && messageText.Text != nil && messageText.Text.Entities != nil {
+		for _, entity := range messageText.Text.Entities {
+			switch entityType := entity.Type.(type) {
+			case *client.TextEntityTypeTextUrl:
+				// Extract URL from text link
+				url := entityType.Url
+				if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
+					// Extract just the channel name (group 2 from regex)
+					channelName := matches[2]
+					channelNamesMap[channelName] = true
+				}
+
+			case *client.TextEntityTypeMention:
+				// Extract mention
+				offset := entity.Offset
+				length := entity.Length
+				if int(offset+length) <= len(messageText.Text.Text) {
+					mention := messageText.Text.Text[offset : offset+length]
+					if strings.HasPrefix(mention, "@") {
+						// Remove the @ prefix
+						channelNamesMap[mention[1:]] = true
+					}
+				}
+
+			case *client.TextEntityTypeUrl:
+				// Extract URL directly from text
+				offset := entity.Offset
+				length := entity.Length
+				if int(offset+length) <= len(messageText.Text.Text) {
+					url := messageText.Text.Text[offset : offset+length]
+					if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
+						// Extract just the channel name (group 2 from regex)
+						channelName := matches[2]
+						channelNamesMap[channelName] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Also check the plain text for channel links using regex
+	if messageText != nil && messageText.Text != nil {
+		matches := channelLinkRegex.FindAllStringSubmatch(messageText.Text.Text, -1)
+		for _, match := range matches {
+			if len(match) >= 3 {
+				// Extract just the channel name (group 2 from regex)
+				channelName := match[2]
+				channelNamesMap[channelName] = true
+			}
+		}
+	}
+
+	// Convert map to slice
+	var channelNames []string
+	for name := range channelNamesMap {
+		channelNames = append(channelNames, name)
+	}
+
+	return channelNames
 }
