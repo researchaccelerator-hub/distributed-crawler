@@ -13,7 +13,7 @@ import (
 func Run(crawlID, channelUsername, storagePrefix string, sm state.StateManager, cfg common.CrawlerConfig) error {
 	// Initialize Telegram client
 	service := &telegramhelper.RealTelegramService{}
-	tdlibClient, err := service.InitializeClient(storagePrefix)
+	tdlibClient, err := service.InitializeClientWithConfig(storagePrefix, cfg)
 	if err != nil {
 		log.Error().Err(err).Stack().Msg("Failed to initialize Telegram client")
 		return err
