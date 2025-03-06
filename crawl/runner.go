@@ -11,7 +11,7 @@ import (
 )
 
 // Run connects to a Telegram channel and crawls its messages.
-func Run(crawlID string, p *state.Page, storagePrefix string, sm state.StateManager, cfg common.CrawlerConfig) ([]*state.Page, error) {
+func Run(p *state.Page, storagePrefix string, sm state.StateManager, cfg common.CrawlerConfig) ([]*state.Page, error) {
 	// Initialize Telegram client
 	service := &telegramhelper.RealTelegramService{}
 	tdlibClient, err := service.InitializeClientWithConfig(storagePrefix, cfg)
@@ -28,13 +28,13 @@ func Run(crawlID string, p *state.Page, storagePrefix string, sm state.StateMana
 	if err != nil {
 		return nil, err
 	}
-	if channelInfo.memberCount < 3 {
+	if cfg.MinUsers > 0 && channelInfo.memberCount < int32(cfg.MinUsers) {
 		log.Info().Msg("Not enough members in the channel, considering it private and skipping.")
 		return nil, nil
 	}
 
 	// Process all messages in the channel
-	pages, err := processAllMessages(tdlibClient, channelInfo, crawlID, p.URL, sm, p, cfg)
+	pages, err := processAllMessages(tdlibClient, channelInfo, cfg.CrawlID, p.URL, sm, p, cfg)
 	if err != nil {
 		return nil, err
 	}

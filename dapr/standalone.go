@@ -95,15 +95,16 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	for _, url := range stringList {
 		seenURLs[url] = true
 	}
-	crawlid := common.GenerateCrawlID()
-	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
+	crawlexecid := common.GenerateCrawlID()
+	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
 	cfg := state.Config{
-		StorageRoot:   crawlCfg.StorageRoot,
-		ContainerName: crawlid,
-		BlobNameRoot:  "",
-		JobID:         "",
-		CrawlID:       crawlid,
-		DAPREnabled:   crawlCfg.DaprMode,
+		StorageRoot:      crawlCfg.StorageRoot,
+		ContainerName:    crawlCfg.CrawlID,
+		BlobNameRoot:     "",
+		JobID:            "",
+		CrawlID:          crawlCfg.CrawlID,
+		DAPREnabled:      crawlCfg.DaprMode,
+		CrawlExecutionID: crawlexecid,
 	}
 	sm, err := state.NewStateManager(cfg)
 	if err != nil {
@@ -125,7 +126,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 						}
 					}()
 					la.Timestamp = time.Now()
-					if outlinks, err := crawl.Run(crawlid, &la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
+					if outlinks, err := crawl.Run(&la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
 						log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
 						la.Status = "error"
 					} else {

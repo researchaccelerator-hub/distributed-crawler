@@ -16,6 +16,8 @@ type CrawlerConfig struct {
 	TDLibDatabaseURL string
 	MinPostDate      time.Time
 	DaprJobMode      bool
+	MinUsers         int
+	CrawlID          string
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

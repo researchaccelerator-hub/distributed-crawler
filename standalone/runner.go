@@ -90,14 +90,15 @@ func readURLsFromFile(filename string) ([]string, error) {
 //   - crawlCfg: A CrawlerConfig struct containing configuration settings for the crawler.
 func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
-	crawlid := common.GenerateCrawlID()
-	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
+	crawlexecid := common.GenerateCrawlID()
+	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
 	cfg := state.Config{
-		StorageRoot:   crawlCfg.StorageRoot,
-		ContainerName: "",
-		BlobNameRoot:  "",
-		JobID:         "",
-		CrawlID:       crawlid,
+		StorageRoot:      crawlCfg.StorageRoot,
+		ContainerName:    "",
+		BlobNameRoot:     "",
+		JobID:            "",
+		CrawlID:          crawlCfg.CrawlID,
+		CrawlExecutionID: crawlexecid,
 	}
 	sm, err := state.NewStateManager(cfg)
 	if err != nil {
@@ -118,7 +119,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 					}()
 
 					la.Timestamp = time.Now()
-					if outlinks, err := crawl.Run(crawlid, &la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
+					if outlinks, err := crawl.Run(&la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
 						log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
 						la.Status = "error"
 					} else {

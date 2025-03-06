@@ -22,6 +22,8 @@ var (
 	crawlType    string
 	minPostDate  string
 	daprMode     string
+	minUsers     int
+	crawlID      string
 )
 
 func main() {
@@ -76,6 +78,8 @@ var rootCmd = &cobra.Command{
 		crawlerCfg.OutputFormat = viper.GetString("output.format")
 		crawlerCfg.StorageRoot = viper.GetString("storage.root")
 		crawlerCfg.TDLibDatabaseURL = viper.GetString("tdlib.database_url")
+		crawlerCfg.MinUsers = viper.GetInt("crawler.minusers")
+		crawlerCfg.CrawlID = viper.GetString("crawler.crawlid")
 
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
@@ -93,7 +97,7 @@ var rootCmd = &cobra.Command{
 		// Override with command line flags if provided
 		if cmd.Flags().Changed("dapr-mode") {
 			crawlerCfg.DaprJobMode = daprMode == "job"
-		} 
+		}
 
 		return nil
 	},
@@ -134,6 +138,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.StorageRoot, "storage-root", "/tmp/crawl", "Storage root directory")
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive")
+	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 0, "Minimum number of users in a channel to crawl")
+	rootCmd.PersistentFlags().StringVar(&crawlID, "crawl-id", "", "Unique identifier for this crawl operation")
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
@@ -152,6 +158,9 @@ func init() {
 	viper.BindPFlag("storage.root", rootCmd.PersistentFlags().Lookup("storage-root"))
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
+	viper.BindPFlag("crawler.minusers", rootCmd.PersistentFlags().Lookup("min-users"))
+	viper.BindPFlag("crawler.crawlid", rootCmd.PersistentFlags().Lookup("crawl-id"))
+
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
 }

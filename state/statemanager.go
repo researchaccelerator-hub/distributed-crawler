@@ -41,13 +41,14 @@ type Layer struct {
 
 // Config holds the configuration for StateManager
 type Config struct {
-	StorageRoot   string
-	ContainerName string
-	BlobNameRoot  string
-	JobID         string
-	CrawlID       string
-	DAPREnabled   bool
-	MaxLayers     int
+	StorageRoot      string
+	ContainerName    string
+	BlobNameRoot     string
+	JobID            string
+	CrawlID          string
+	CrawlExecutionID string
+	DAPREnabled      bool
+	MaxLayers        int
 }
 
 // StateManager encapsulates state management with a configurable storage root prefix.
@@ -432,9 +433,11 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 		if err != nil {
 			return err
 		}
-
-		metadata[fn] = sm.config.CrawlID + "/" + channelname + "/" + post.PostUID
-
+		fgen, err := generateStandardStorageLocation(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelname, post.PostUID, false)
+		if err != nil {
+			return err
+		}
+		metadata[fn] = fgen
 		req := daprc.InvokeBindingRequest{
 			Name:      "crawlstorage",
 			Operation: "create",
@@ -449,10 +452,7 @@ func (sm *StateManager) StoreData(channelname string, post model.Post) error {
 	}
 
 	// Local Storage logic
-	channelDir := filepath.Join(sm.config.StorageRoot, "crawls", sm.config.CrawlID, channelname)
-	if err := os.MkdirAll(channelDir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create directory for channel %s: %w", channelname, err)
-	}
+	channelDir, err := generateStandardStorageLocation(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelname, post.PostUID, true)
 
 	jsonlFile := filepath.Join(channelDir, "data.jsonl")
 	file, err := os.OpenFile(jsonlFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -503,15 +503,10 @@ func (sm *StateManager) UploadBlobFileAndDelete(channelid, rawURL, filePath stri
 			log.Warn().Err(err).Msg("failed to convert URL to blob path, proceeding with local storage only")
 		} else {
 			fp = fp + "_" + filename
-			blobName := filepath.Join(
-				sm.config.BlobNameRoot,
-				sm.config.JobID,
-				sm.config.CrawlID,
-				"media",
-				channelid,
-				fp,
-			)
-
+			blobName, err := generateStandardStorageLocation(sm.config.BlobNameRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, "media", channelid+"/"+fp, false)
+			if err != nil {
+				return err
+			}
 			// Upload to Azure
 			_, err = sm.azureClient.UploadFile(
 				context.TODO(),
@@ -538,8 +533,11 @@ func (sm *StateManager) UploadBlobFileAndDelete(channelid, rawURL, filePath stri
 		if err != nil {
 			return err
 		}
-		metadata[fn] = sm.config.CrawlID + "/" + channelid + "/" + filename
-
+		fgen, err := generateStandardStorageLocation(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelid, filename, false)
+		if err != nil {
+			return err
+		}
+		metadata[fn] = fgen
 		req := daprc.InvokeBindingRequest{
 			Name:      "crawlstorage",
 			Operation: "create",
@@ -552,23 +550,14 @@ func (sm *StateManager) UploadBlobFileAndDelete(channelid, rawURL, filePath stri
 		}
 		log.Info().Msgf("%v", r)
 	} else {
-		// Always store locally regardless of Azure upload result
-		outputDir := filepath.Join(sm.config.StorageRoot, sm.config.CrawlID)
-		if outputDir == "" {
-			outputDir = "output" // Default directory if not specified
-		}
-
-		// Create media directory structure
-		mediaDir := filepath.Join(outputDir, "media", channelid)
-		if err := os.MkdirAll(mediaDir, 0755); err != nil {
-			return fmt.Errorf("failed to create media directory: %w", err)
-		}
 
 		// Create a new filename by sanitizing the rawURL to create a unique but readable name
 		sanitizedURL := sanitizeURLForFilename(rawURL)
 		localFilename := sanitizedURL + "_" + filename
-		localFilePath := filepath.Join(mediaDir, localFilename)
-
+		localFilePath, err := generateStandardStorageLocation(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelid, localFilename, true)
+		if err != nil {
+			return err
+		}
 		// Write file locally
 		if err := os.WriteFile(localFilePath, fileContent, 0644); err != nil {
 			return fmt.Errorf("failed to write local file copy: %w", err)

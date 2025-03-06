@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	daprc "github.com/dapr/go-sdk/client"
+	"os"
+	"path/filepath"
 )
 
 func checkComponentType(ctx context.Context, client daprc.Client, componentName string) (string, error) {
@@ -47,4 +49,16 @@ func fetchFileNamingComponent(client daprc.Client, componentName string) (string
 	} else {
 		return "unknown", nil
 	}
+}
+
+func generateStandardStorageLocation(storageroot string, crawlid string, crawlexecutionid string, channelname string, postid string, local bool) (string, error) {
+	if local {
+		path := filepath.Join(storageroot, crawlid, crawlexecutionid, channelname)
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return "", fmt.Errorf("failed to create media directory: %w", err)
+		}
+
+		return filepath.Join(storageroot, crawlid, crawlexecutionid, channelname, postid), nil
+	}
+	return storageroot + "/" + crawlid + "/" + crawlexecutionid + "/" + channelname + "/" + postid, nil
 }
