@@ -1,0 +1,25 @@
+{
+    "app_name": "tdlib-scraper",
+    "deploy_type": "GHA",
+    "sequential_build": true,
+    "builds": [
+        {
+            "image_name": "tdlib-scraper",
+            "context": ".",
+            "dockerfile": "Dockerfile"
+        }
+        // ,
+        // {
+        //     "image_name": "tdlib",
+        //     "context": ".",
+        //     "dockerfile": "Dockerfile.tdlib",
+        //     "tag_override": "latest"
+        // }
+    ],
+    "deploy_patches": [
+        {
+             "path": ".[0].value",
+             "value": "acrnetcus.azurecr.io/tdlib-scraper:%IMAGE_TAG%"
+        }
+    ]
+}
