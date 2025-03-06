@@ -85,12 +85,15 @@ var rootCmd = &cobra.Command{
 				return fmt.Errorf("invalid min-post-date format, must be YYYY-MM-DD: %v", err)
 			}
 			crawlerCfg.MinPostDate = parsedTime
+		} else {
+			// Set to zero time if not specified
+			crawlerCfg.MinPostDate = time.Time{}
 		}
 
 		// Override with command line flags if provided
 		if cmd.Flags().Changed("dapr-mode") {
 			crawlerCfg.DaprJobMode = daprMode == "job"
-		}
+		} 
 
 		return nil
 	},
@@ -149,7 +152,6 @@ func init() {
 	viper.BindPFlag("storage.root", rootCmd.PersistentFlags().Lookup("storage-root"))
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
-
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
 }
