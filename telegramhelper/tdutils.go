@@ -309,7 +309,7 @@ func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath,
 // channel name, file ID, and post link as inputs. If the file ID is empty, it returns
 // immediately with no error. The function returns the file ID upon successful upload,
 // or an error if any step fails.
-func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManager, crawlid, channelName, fileID, postLink string) (string, error) {
+func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManagementInterface, crawlid, channelName, fileID, postLink string) (string, error) {
 	if fileID == "" {
 		return "", nil
 	}
@@ -364,7 +364,7 @@ var ParseMessage = func(
 	viewcount int,
 	channelName string,
 	tdlibClient crawler.TDLibClient, // our interface type
-	sm state.StateManager,
+	sm state.StateManagementInterface,
 	cfg common.CrawlerConfig,
 ) (post model.Post, err error) {
 	// original implementation...

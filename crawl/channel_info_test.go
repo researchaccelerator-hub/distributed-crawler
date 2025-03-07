@@ -22,6 +22,7 @@ func TestGetChannelInfo(t *testing.T) {
 		setupMocks          func(*MockTDLibClient)
 		getTotalViewsFn     func(crawler.TDLibClient, int64, string) (int, error)
 		getMessageCountFn   func(crawler.TDLibClient, int64, string) (int, error)
+		getMemberCountFn    func(client crawler.TDLibClient, channelUsername string) (int, error)
 		expectedError       bool
 		expectedErrorMsg    string
 		expectedChannelInfo func() *channelInfo
@@ -38,6 +39,9 @@ func TestGetChannelInfo(t *testing.T) {
 				return 0, nil
 			},
 			getMessageCountFn: func(client crawler.TDLibClient, chatID int64, channelUsername string) (int, error) {
+				return 0, nil
+			},
+			getMemberCountFn: func(client crawler.TDLibClient, channelUsername string) (int, error) {
 				return 0, nil
 			},
 			expectedError:    true,
@@ -408,7 +412,7 @@ func TestGetChannelInfo(t *testing.T) {
 			tc.setupMocks(mockClient)
 
 			// Call the function with mock helpers
-			info, err := getChannelInfoWithDeps(mockClient, tc.channelUsername, tc.getTotalViewsFn, tc.getMessageCountFn)
+			info, err := getChannelInfoWithDeps(mockClient, tc.channelUsername, tc.getTotalViewsFn, tc.getMessageCountFn, tc.getMemberCountFn)
 
 			// Assert results
 			if tc.expectedError {

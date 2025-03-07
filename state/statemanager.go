@@ -22,6 +22,23 @@ import (
 	"time"
 )
 
+type StateManagementInterface interface {
+	// Core methods used by the processor
+	UpdateStatePage(Page)
+	UpdateStateMessage(messageId int64, chatId int64, owner *Page, status string)
+	StoreState()
+	AppendLayerAndPersist(pages []*Page)
+
+	// Additional methods that might be called
+	StateSetup(seedlist []string) (DaprStateStore, error)
+	StoreLayers(layers []*Layer) error
+	StoreData(channelname string, post model.Post) error
+	UploadBlobFileAndDelete(channelid, rawURL, filePath string) error
+	UploadStateToStorage(channelid string) error
+	UpdateCrawlManagement(management CrawlManagement) error
+	GetLayers(ids []string) ([]*Layer, error)
+	GetLastPreviousCrawlId() ([]string, error)
+}
 type Message struct {
 	ChatId    int64
 	MessageId int64
