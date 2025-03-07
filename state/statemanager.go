@@ -441,7 +441,40 @@ func (sm *StateManager) saveDaprStateToFile(store DaprStateStore, channelid stri
 	if err != nil {
 		return err
 	}
-	fgen, err := generateStandardStorageLocationForChannels(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelid, false)
+	fgen, err := generateStandardStorageLocation(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelid, "state.json", false)
+	if err != nil {
+		return err
+	}
+	metadata[fn] = fgen
+	req := daprc.InvokeBindingRequest{
+		Name:      "crawlstorage",
+		Operation: "create",
+		Data:      byteArray,
+		Metadata:  metadata,
+	}
+	_, err = client.InvokeBinding(context.Background(), &req)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (sm *StateManager) savePageToFile(store Page, channelid string) error {
+	sbytes, err := json.Marshal(store)
+	if err != nil {
+		return err
+	}
+
+	client := *sm.daprClient
+
+	data := base64.StdEncoding.EncodeToString(sbytes)
+	metadata := make(map[string]string)
+	byteArray := []byte(data)
+	fn, err := fetchFileNamingComponent(client, "crawlstorage")
+	if err != nil {
+		return err
+	}
+	fgen, err := generateStandardStorageLocation(sm.config.StorageRoot, sm.config.CrawlID, sm.config.CrawlExecutionID, channelid, "state.json", false)
 	if err != nil {
 		return err
 	}
@@ -935,9 +968,28 @@ func (sm *StateManager) StoreState() {
 		panic("not implemented")
 	}
 }
+func GetPageFromLayers(layers []*Layer, pageID string) (Page, error) {
+	// Iterate through all layers
+	for _, layer := range layers {
+		// Iterate through all pages in the current layer
+		for i := range layer.Pages {
+			// Check if this is the page we're looking for
+			if layer.Pages[i].URL == pageID {
+				return layer.Pages[i], nil
+			}
+		}
+	}
 
+	// If we get here, the page wasn't found in any layer
+	return Page{}, fmt.Errorf("page with ID %s not found in any layer", pageID)
+}
 func (sm *StateManager) UploadStateToStorage(channelid string) error {
-	err := sm.saveDaprStateToFile(sm.StateStore, channelid)
+	state := sm.StateStore
+	p, err := GetPageFromLayers(state.Layers, channelid)
+	if err != nil {
+		return err
+	}
+	err = sm.savePageToFile(p, channelid)
 	if err != nil {
 		return err
 	}

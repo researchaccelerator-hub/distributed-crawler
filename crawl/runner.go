@@ -329,6 +329,9 @@ func processAllMessagesWithProcessor(
 				sm.UpdateStateMessage(message.MessageId, message.ChatId, owner, "failed")
 			} else {
 				sm.UpdateStateMessage(message.MessageId, message.ChatId, owner, "fetched")
+				if err != nil {
+					return nil, err
+				}
 				for _, o := range outlinks {
 					page := &state.Page{
 						URL:      o,

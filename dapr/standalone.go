@@ -160,8 +160,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 					log.Error().Stack().Err(err).Msgf("Error processing item %s", page.URL)
 					page.Status = "error"
 				} else {
+					err = sm.UploadStateToStorage(page.URL)
+					if err != nil {
+						log.Error().Stack().Err(err).Msgf("Error uploading item %s", page.URL)
+					}
 					sm.AppendLayerAndPersist(discoveredChannels)
-					// TODO append list object for next iteration
 				}
 
 			}()
