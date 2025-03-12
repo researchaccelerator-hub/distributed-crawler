@@ -146,7 +146,7 @@ var rootCmd = &cobra.Command{
 				fmt.Printf("Using cutoff date: %s based on time-ago: %s\n",
 					cutoffTime.Format("2006-01-02 15:04:05"),
 					timeAgoStr)
-				
+
 			} else {
 				fmt.Println("Warning: Both min-post-date and time-ago specified; using min-post-date")
 			}
@@ -197,7 +197,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "1m", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive")
-	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 0, "Minimum number of users in a channel to crawl")
+	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 100, "Minimum number of users in a channel to crawl")
 	rootCmd.PersistentFlags().StringVar(&crawlID, "crawl-id", "", "Unique identifier for this crawl operation")
 
 	// Standalone mode specific flags

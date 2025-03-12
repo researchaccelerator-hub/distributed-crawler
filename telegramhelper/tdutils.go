@@ -93,6 +93,8 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 1}
+		tdlibClient.SetLogVerbosityLevel(&verb)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
@@ -314,7 +316,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 		return "", nil
 	}
 
-	path, err := fetchfilefromtelegram(tdlibClient, fileID)
+	path, remoteid, err := fetchfilefromtelegram(tdlibClient, sm, fileID)
 	if err != nil {
 		log.Error().Err(err).Str("fileID", fileID).Msg("Failed to fetch file from Telegram")
 		return "", err
@@ -324,13 +326,18 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 		return "", fmt.Errorf("empty path returned from fetch operation")
 	}
 
-	err = sm.UploadBlobFileAndDelete(channelName, postLink, path)
+	_, err = sm.StoreFile(channelName, path, remoteid)
 	if err != nil {
 		log.Error().Err(err).Str("path", path).Msg("Failed to upload file to blob storage")
 		return "", err
 	}
 
-	return fileID, nil
+	err = sm.MarkMediaAsProcessed(remoteid)
+	if err != nil {
+		return "", err
+	}
+
+	return remoteid, nil
 }
 
 // ParseMessage processes a Telegram message and extracts relevant information to create a Post model.
@@ -522,12 +529,17 @@ var ParseMessage = func(
 		Comments:  comments,
 		Reactions: reactions,
 	}
-	storeErr := sm.StoreData(channelName, post)
+	storeErr := sm.StorePost(channelName, post)
 	if storeErr != nil {
 		log.Error().Err(storeErr).Msg("Failed to store data")
 		// Not returning error here as we still want to return the post
 	}
 	return post, nil
+}
+
+func checkFileCache(sm state.StateManagementInterface, uniqueid string) (string, bool, error) {
+	exists, err := sm.HasProcessedMedia(uniqueid)
+	return "", exists, err
 }
 
 // fetchfilefromtelegram retrieves and downloads a file from Telegram using the provided tdlib client and download ID.
@@ -540,7 +552,7 @@ var ParseMessage = func(
 //   - A string containing the local path of the downloaded file. Returns an empty string if an error occurs during fetching or downloading.
 //
 // The function includes error handling and logs relevant information, including any panics that are recovered.
-func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) (string, error) {
+func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManagementInterface, downloadid string) (string, string, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Info().Msgf("Recovered from panic: %v\n", r)
@@ -551,9 +563,16 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) (
 	f, err := tdlibClient.GetRemoteFile(&client.GetRemoteFileRequest{
 		RemoteFileId: downloadid,
 	})
+
 	if err != nil {
 		log.Error().Err(err).Stack().Msgf("Error fetching remote file: %v\n", downloadid)
-		return "", err
+		return "", "", err
+	}
+	if existingPath, exists, err := checkFileCache(sm, f.Remote.UniqueId); err != nil {
+		log.Error().Err(err).Stack().Msgf("Error checking file cache: %v\n", downloadid)
+	} else if exists {
+		log.Info().Msgf("File already downloaded at %s, skipping duplicate", existingPath)
+		return "", "", nil
 	}
 
 	// Download the file
@@ -566,17 +585,17 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, downloadid string) (
 	})
 	if err != nil {
 		log.Error().Stack().Err(err).Msgf("Error downloading file: %v\n", f.Id)
-		return "", err
+		return "", "", err
 	}
 
 	// Ensure the file path is valid
 	if downloadedFile.Local.Path == "" {
 		log.Debug().Msg("Downloaded file path is empty.")
-		return "", err
+		return "", "", err
 	}
 
 	log.Info().Msgf("Downloaded File Path: %s\n", downloadedFile.Local.Path)
-	return downloadedFile.Local.Path, nil
+	return downloadedFile.Local.Path, f.Remote.UniqueId, nil
 }
 
 func extractChannelLinksFromMessage(message *client.Message) []string {

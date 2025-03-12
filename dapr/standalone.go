@@ -1,14 +1,17 @@
 package dapr
 
 import (
+	"fmt"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -95,21 +98,22 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	for _, url := range stringList {
 		seenURLs[url] = true
 	}
-
+	connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to connect to crawler")
+	}
 	crawlexecid := common.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
 
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
-		ContainerName:    crawlCfg.CrawlID,
-		BlobNameRoot:     "",
 		JobID:            "",
 		CrawlID:          crawlCfg.CrawlID,
-		DAPREnabled:      crawlCfg.DaprMode,
 		CrawlExecutionID: crawlexecid,
 	}
 
-	sm, err := state.NewStateManager(cfg)
+	smfact := state.DefaultStateManagerFactory{}
+	sm, err := smfact.Create(cfg)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize state manager")
 		return
@@ -118,61 +122,187 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
 	// Get the existing layers or seed a new crawl
-	_, err = sm.StateSetup(stringList)
+	err = sm.Initialize(stringList)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to set up seed URLs")
 		return
 	}
 
-	// Process each layer
-	for layerIndex := 0; layerIndex < len(sm.StateStore.Layers); layerIndex++ {
-		layer := sm.StateStore.Layers[layerIndex]
-		log.Info().Msgf("Processing layer at depth %d with %d pages", layer.Depth, len(layer.Pages))
+	maxDepth, err := sm.GetMaxDepth()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get maximum depth, using 0")
+		maxDepth = 0
+	}
 
-		// Process each page in the current layer
-		for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
-			page := layer.Pages[pageIndex]
+	// Add 1 to maxDepth since it's 0-indexed but we need to loop maxDepth+1 times
+	loopMax := maxDepth + 1
 
-			// Skip already processed pages
-			if page.Status == "fetched" {
-				log.Debug().Msgf("Skipping already processed page: %s", page.URL)
-				continue
-			}
+	for depth := 0; depth < loopMax; depth++ {
+		pages, err := sm.GetLayerByDepth(depth)
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to get layer at depth %d", depth)
+			continue
+		}
 
-			// Create a closure for each page to handle possible panics
+		// Skip if there are no pages at this depth
+		if len(pages) == 0 {
+			log.Info().Msgf("No pages found at depth %d, skipping", depth)
+			continue
+		}
+
+		log.Info().Msgf("Processing layer at depth %d with %d pages", depth, len(pages))
+
+		// Create a Layer object if your processLayerInParallel expects it
+		layer := &state.Layer{
+			Depth: depth,
+			Pages: pages,
+		}
+
+		// Process pages in current layer in parallel with max 5 concurrent goroutines
+		processLayerInParallel(layer, 1, connect, sm, crawlCfg)
+
+		// Log progress after completing a layer
+		log.Info().Msgf("Completed layer at depth %d", depth)
+	}
+
+	completionMetadata := map[string]interface{}{
+		"status":          "completed",
+		"endTime":         time.Now(),
+		"previousCrawlID": cfg.CrawlExecutionID,
+	}
+
+	if err := sm.UpdateCrawlMetadata(cfg.CrawlID, completionMetadata); err != nil {
+		log.Warn().Err(err).Msg("Failed to update crawl completion metadata")
+	}
+	log.Info().Msg("All items processed successfully.")
+}
+
+// processLayerInParallel processes all pages in a layer with a maximum of maxWorkers concurrent goroutines.
+// It uses a semaphore pattern to limit concurrency and ensures all pages are processed before returning.
+func processLayerInParallel(layer *state.Layer, maxWorkers int, connect crawler.TDLibClient, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+	var wg sync.WaitGroup
+
+	// Create a channel to limit concurrency
+	semaphore := make(chan struct{}, maxWorkers)
+	// Create a mutex to protect shared state
+	var mutex sync.Mutex
+
+	// Map to collect all discovered channels
+	allDiscoveredChannels := make([]*state.Page, 0)
+
+	// Process each page in the current layer
+	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
+		page := layer.Pages[pageIndex]
+
+		// Skip already processed pages
+		if page.Status == "fetched" {
+			log.Debug().Msgf("Skipping already processed page: %s", page.URL)
+			continue
+		}
+
+		// Increment the wait group for each page to be processed
+		wg.Add(1)
+
+		// Acquire semaphore slot
+		semaphore <- struct{}{}
+
+		// Process page in goroutine
+		go func(pageToProcess *state.Page) {
+			defer wg.Done()
+			defer func() {
+				// Release semaphore slot
+				<-semaphore
+			}()
+
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", page.URL, r)
-						page.Status = "error"
-						// Save progress after recovery
-						if err := sm.StoreLayers(sm.StateStore.Layers); err != nil {
-							log.Error().Stack().Err(err).Msg("Failed to store layers after panic recovery")
+						log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", pageToProcess.URL, r)
+
+						// Update the page status to error
+						pageToProcess.Status = "error"
+						pageToProcess.Error = fmt.Sprintf("Panic: %v", r)
+
+						// Update the page in the state manager
+						if err := sm.UpdatePage(*pageToProcess); err != nil {
+							log.Error().Err(err).Msg("Failed to update page status after panic")
 						}
+
+						// Save state after recovery
+						mutex.Lock()
+						if err := sm.SaveState(); err != nil {
+							log.Error().Stack().Err(err).Msg("Failed to save state after panic recovery")
+						}
+						mutex.Unlock()
 					}
 				}()
 
-				page.Timestamp = time.Now()
+				pageToProcess.Timestamp = time.Now()
 
 				// Run the crawler for this page
-				discoveredChannels, err := crawl.RunForChannel(&page, crawlCfg.StorageRoot, *sm, crawlCfg)
+				discoveredChannels, err := crawl.RunForChannel(connect, pageToProcess, crawlCfg.StorageRoot, sm, crawlCfg)
 				if err != nil {
-					log.Error().Stack().Err(err).Msgf("Error processing item %s", page.URL)
-					page.Status = "error"
-				} else {
-					err = sm.UploadStateToStorage(page.URL)
-					if err != nil {
-						log.Error().Stack().Err(err).Msgf("Error uploading item %s", page.URL)
+					log.Error().Stack().Err(err).Msgf("Error processing item %s", pageToProcess.URL)
+					pageToProcess.Status = "error"
+					pageToProcess.Error = err.Error()
+
+					// Update the page in the state manager
+					if updateErr := sm.UpdatePage(*pageToProcess); updateErr != nil {
+						log.Error().Err(updateErr).Msg("Failed to update page status after error")
 					}
-					sm.AppendLayerAndPersist(discoveredChannels)
+				} else {
+					mutex.Lock()
+					defer mutex.Unlock()
+
+					pageToProcess.Status = "fetched"
+					if updateErr := sm.UpdatePage(*pageToProcess); updateErr != nil {
+						log.Error().Err(updateErr).Msg("Failed to update page status after successful processing")
+					}
+
+					// Save the entire state
+					if err := sm.SaveState(); err != nil {
+						log.Error().Stack().Err(err).Msgf("Error saving state after processing channel %s", pageToProcess.URL)
+					}
+
+					// Collect discovered channels
+					allDiscoveredChannels = append(allDiscoveredChannels, discoveredChannels...)
 				}
-
 			}()
-		}
-
-		// Log progress after completing a layer
-		log.Info().Msgf("Completed layer at depth %d", layer.Depth)
+		}(&page)
 	}
 
-	log.Info().Msg("All items processed successfully.")
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	// After all pages in the layer are processed, append the new layer with all discovered channels
+	if len(allDiscoveredChannels) > 0 {
+		currentDepth := layer.Depth
+		newPages := make([]state.Page, 0, len(allDiscoveredChannels))
+		for _, channel := range allDiscoveredChannels {
+			parentID := ""
+			if channel.ParentID != "" {
+				parentID = channel.ParentID
+			}
+			// Create a new Page for each discovered channel
+			page := state.Page{
+				URL:       channel.URL,      // Assuming channel has a URL field
+				Depth:     currentDepth + 1, // Set depth one level deeper than current
+				Status:    "unfetched",
+				Timestamp: time.Now(),
+				ParentID:  parentID, // Set parent ID to the current page being processed
+				// Any other fields you need to set
+			}
+			newPages = append(newPages, page)
+		}
+		if err := sm.AddLayer(newPages); err != nil {
+			log.Error().Err(err).Msg("Failed to add discovered channels as new layer")
+		} else {
+			log.Info().Int("count", len(newPages)).Msg("Added new channels to be processed")
+
+			// Save state after adding new pages
+			if err := sm.SaveState(); err != nil {
+				log.Error().Err(err).Msg("Failed to save state after adding new layer")
+			}
+		}
+	}
 }

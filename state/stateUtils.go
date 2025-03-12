@@ -51,6 +51,17 @@ func fetchFileNamingComponent(client daprc.Client, componentName string) (string
 	}
 }
 
+func generateStandardSharedStorageLocation(storageroot string, crawlid string, foldername string, filename string, local bool) (string, error) {
+	if local {
+		path := filepath.Join(storageroot, crawlid, foldername)
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return "", fmt.Errorf("failed to create media directory: %w", err)
+		}
+
+		return filepath.Join(storageroot, crawlid), nil
+	}
+	return storageroot + "/" + crawlid + "/" + foldername + "/" + filename, nil
+}
 func generateStandardStorageLocation(storageroot string, crawlid string, crawlexecutionid string, channelname string, postid string, local bool) (string, error) {
 	if local {
 		path := filepath.Join(storageroot, crawlid, crawlexecutionid, channelname)

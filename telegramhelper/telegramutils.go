@@ -8,6 +8,51 @@ import (
 	"github.com/zelenin/go-tdlib/client"
 )
 
+func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, channelname string) ([]*client.Message, error) {
+	log.Info().Msgf("Fetching all messages for channel %s", channelname)
+	var allMessages []*client.Message
+	var fromMessageId int64 = 0 // Start from the latest message
+	var oldestMessageId int64 = 0
+
+	for {
+		log.Info().Msgf("Fetching message batch for channel %s starting from ID %d", channelname, fromMessageId)
+		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
+			ChatId:        chatID,
+			FromMessageId: fromMessageId,
+			Limit:         100, // Fetch up to 100 messages at a time
+		})
+		if err != nil {
+			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", channelname)
+			return nil, err
+		}
+
+		// If no messages are returned, break
+		if len(chatHistory.Messages) == 0 {
+			break
+		}
+
+		// Add messages to our collection
+		allMessages = append(allMessages, chatHistory.Messages...)
+
+		// Get the ID of the oldest message in this batch
+		lastMessageId := chatHistory.Messages[len(chatHistory.Messages)-1].Id
+
+		// If we're seeing the same oldest message ID as before, we've reached the end
+		if lastMessageId == oldestMessageId {
+			break
+		}
+
+		// Save the oldest message ID for comparison in the next iteration
+		oldestMessageId = lastMessageId
+
+		// Set the next fromMessageId to fetch the next batch
+		fromMessageId = lastMessageId
+	}
+
+	log.Info().Msgf("Fetched a total of %d messages for channel %s", len(allMessages), channelname)
+	return allMessages, nil
+}
+
 func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelUsername string) (int, error) {
 	// First, resolve the username to get the chat ID
 	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
@@ -69,48 +114,10 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelUsername stri
 //
 //	An integer representing the total number of messages in the chat, or an error if the
 //	operation fails.
-func GetMessageCount(tdlibClient crawler.TDLibClient, chatID int64, channelname string) (int, error) {
+func GetMessageCount(tdlibClient crawler.TDLibClient, messages []*client.Message, chatID int64, channelname string) (int, error) {
 	log.Info().Msgf("Getting message count for channel %s", channelname)
-	messageCount := 0
-	var fromMessageId int64 = 0 // Start from the latest message (ID = 0)
-	var oldestMessageId int64 = 0
 
-	for {
-		log.Info().Msgf("Getting message count for channel %s and batch %d", channelname, fromMessageId)
-		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
-			ChatId:        chatID,
-			FromMessageId: fromMessageId, // Continue from the last message ID
-			Limit:         100,           // Fetch up to 100 messages at a time
-		})
-		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", channelname)
-			return 0, err
-		}
-
-		// If no messages are returned, break
-		if len(chatHistory.Messages) == 0 {
-			break
-		}
-
-		// Increment the message count
-		messageCount += len(chatHistory.Messages)
-
-		// Get the ID of the oldest message in this batch
-		lastMessageId := chatHistory.Messages[len(chatHistory.Messages)-1].Id
-
-		// If we're seeing the same oldest message ID as before, we've reached the end
-		if lastMessageId == oldestMessageId {
-			break
-		}
-
-		// Save the oldest message ID for comparison in the next iteration
-		oldestMessageId = lastMessageId
-
-		// Set the next fromMessageId to fetch the next batch
-		fromMessageId = lastMessageId
-	}
-
-	return messageCount, nil
+	return len(messages), nil
 }
 
 // GetViewCount retrieves the view count from a given message's InteractionInfo.
@@ -158,36 +165,15 @@ func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int
 // Returns:
 //
 //	An integer representing the total number of views across all messages in the channel, or an error if the operation fails.
-func GetTotalChannelViews(tdlibClient crawler.TDLibClient, channelID int64, channelname string) (int, error) {
+func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Message, channelID int64, channelname string) (int, error) {
 	var totalViews int64
-	var lastMessageID int64 = 0 // Start from the most recent message
 	log.Info().Msgf("Getting total views for channel %s", channelname)
-	for {
-		// Fetch a batch of messages
-		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
-			ChatId:        channelID,
-			FromMessageId: lastMessageID,
-			Limit:         100, // Fetch up to 100 messages at a time
-		})
-		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get chat history %s: %v", channelname, err)
-			return 0, err
+	for _, m := range messages {
+
+		if m.InteractionInfo != nil {
+			totalViews += int64(m.InteractionInfo.ViewCount)
 		}
 
-		// Stop if no more messages are returned
-		if len(chatHistory.Messages) == 0 {
-			break
-		}
-
-		// Aggregate views from the current batch
-		for _, message := range chatHistory.Messages {
-			if message.InteractionInfo != nil {
-				totalViews += int64(message.InteractionInfo.ViewCount)
-			}
-		}
-
-		// Update the lastMessageID to continue fetching older messages
-		lastMessageID = chatHistory.Messages[len(chatHistory.Messages)-1].Id
 	}
 
 	log.Info().Msgf("Total views for channel %s: %d", channelname, totalViews)
@@ -263,6 +249,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 			comments = append(comments, comment)
 		}
 
+		break
 		// Update `fromMessageId` to fetch older comments
 		fromMessageId = threadHistory.Messages[len(threadHistory.Messages)-1].Id
 	}
