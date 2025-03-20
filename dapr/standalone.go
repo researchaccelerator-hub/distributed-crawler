@@ -128,41 +128,56 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		return
 	}
 
-	maxDepth, err := sm.GetMaxDepth()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get maximum depth, using 0")
-		maxDepth = 0
-	}
+	// Process layers iteratively, with potential for new layers to be added during execution
+	depth := 0
+	for {
+		// Check current maximum depth at the beginning of each iteration
+		maxDepth, err := sm.GetMaxDepth()
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get maximum depth, using 0")
+			maxDepth = 0
+		}
 
-	// Add 1 to maxDepth since it's 0-indexed but we need to loop maxDepth+1 times
-	loopMax := maxDepth + 1
+		// If we've processed all layers up to the current maximum depth, we're done
+		if depth > maxDepth {
+			log.Info().Msgf("Processed all layers up to maximum depth %d", maxDepth)
+			break
+		}
 
-	for depth := 0; depth < loopMax; depth++ {
+		// Get the current layer to process
 		pages, err := sm.GetLayerByDepth(depth)
 		if err != nil {
 			log.Error().Err(err).Msgf("Failed to get layer at depth %d", depth)
+			depth++
 			continue
 		}
 
 		// Skip if there are no pages at this depth
 		if len(pages) == 0 {
 			log.Info().Msgf("No pages found at depth %d, skipping", depth)
+			depth++
 			continue
 		}
 
+		if depth > crawlCfg.MaxDepth {
+			break
+		}
 		log.Info().Msgf("Processing layer at depth %d with %d pages", depth, len(pages))
 
-		// Create a Layer object if your processLayerInParallel expects it
+		// Create a Layer object
 		layer := &state.Layer{
 			Depth: depth,
 			Pages: pages,
 		}
 
-		// Process pages in current layer in parallel with max 5 concurrent goroutines
-		processLayerInParallel(layer, 1, connect, sm, crawlCfg)
+		// Process pages in current layer in parallel
+		processLayerInParallel(layer, crawlCfg.Concurrency, connect, sm, crawlCfg)
 
 		// Log progress after completing a layer
 		log.Info().Msgf("Completed layer at depth %d", depth)
+
+		// Move to the next depth
+		depth++
 	}
 
 	completionMetadata := map[string]interface{}{
@@ -172,7 +187,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	}
 
 	if err := sm.UpdateCrawlMetadata(cfg.CrawlID, completionMetadata); err != nil {
-		log.Warn().Err(err).Msg("Failed to update crawl completion metadata")
+		log.Panic().Err(err).Msg("Failed to update crawl completion metadata")
 	}
 	log.Info().Msg("All items processed successfully.")
 }
@@ -231,7 +246,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, connect crawler.
 						// Save state after recovery
 						mutex.Lock()
 						if err := sm.SaveState(); err != nil {
-							log.Error().Stack().Err(err).Msg("Failed to save state after panic recovery")
+							log.Panic().Stack().Err(err).Msg("Failed to save state after panic recovery")
 						}
 						mutex.Unlock()
 					}
@@ -261,7 +276,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, connect crawler.
 
 					// Save the entire state
 					if err := sm.SaveState(); err != nil {
-						log.Error().Stack().Err(err).Msgf("Error saving state after processing channel %s", pageToProcess.URL)
+						log.Panic().Stack().Err(err).Msgf("Error saving state after processing channel %s", pageToProcess.URL)
 					}
 
 					// Collect discovered channels
@@ -301,7 +316,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, connect crawler.
 
 			// Save state after adding new pages
 			if err := sm.SaveState(); err != nil {
-				log.Error().Err(err).Msg("Failed to save state after adding new layer")
+				log.Panic().Err(err).Msg("Failed to save state after adding new layer")
 			}
 		}
 	}

@@ -19,6 +19,9 @@ type CrawlerConfig struct {
 	DaprJobMode      bool
 	MinUsers         int
 	CrawlID          string
+	MaxComments      int
+	MaxPosts         int
+	MaxDepth         int
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

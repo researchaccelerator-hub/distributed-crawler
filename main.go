@@ -118,6 +118,9 @@ var rootCmd = &cobra.Command{
 		crawlerCfg.TDLibDatabaseURL = viper.GetString("tdlib.database_url")
 		crawlerCfg.MinUsers = viper.GetInt("crawler.minusers")
 		crawlerCfg.CrawlID = viper.GetString("crawler.crawlid")
+		crawlerCfg.MaxComments = viper.GetInt("crawler.maxcomments")
+		crawlerCfg.MaxComments = viper.GetInt("crawler.maxposts")
+		crawlerCfg.MaxComments = viper.GetInt("crawler.maxdepth")
 
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
@@ -199,6 +202,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive")
 	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 100, "Minimum number of users in a channel to crawl")
 	rootCmd.PersistentFlags().StringVar(&crawlID, "crawl-id", "", "Unique identifier for this crawl operation")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxComments, "max-comments", -1, "The maximum number of comments to crawl")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxDepth, "max-depth", -1, "The maximum depth of the crawl")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPosts, "max-posts", -1, "The maximum posts to collect")
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
@@ -220,6 +226,9 @@ func init() {
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
 	viper.BindPFlag("crawler.minusers", rootCmd.PersistentFlags().Lookup("min-users"))
 	viper.BindPFlag("crawler.crawlid", rootCmd.PersistentFlags().Lookup("crawl-id"))
+	viper.BindPFlag("crawler.maxcomments", rootCmd.PersistentFlags().Lookup("max-comments"))
+	viper.BindPFlag("crawler.maxposts", rootCmd.PersistentFlags().Lookup("max-posts"))
+	viper.BindPFlag("crawler.maxdepth", rootCmd.PersistentFlags().Lookup("max-depth"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)

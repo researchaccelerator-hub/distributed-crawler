@@ -4,25 +4,30 @@ import (
 	"fmt"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
+	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"time"
 )
 
-func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, channelname string) ([]*client.Message, error) {
-	log.Info().Msgf("Fetching all messages for channel %s", channelname)
+func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPosts int) ([]*client.Message, error) {
+	log.Info().Msgf("Fetching messages for channel %s since %s", page.URL, minPostDate.Format("2006-01-02 15:04:05"))
 	var allMessages []*client.Message
 	var fromMessageId int64 = 0 // Start from the latest message
 	var oldestMessageId int64 = 0
 
+	// Convert minPostDate to Unix timestamp for comparison
+	minPostUnix := minPostDate.Unix()
+
 	for {
-		log.Info().Msgf("Fetching message batch for channel %s starting from ID %d", channelname, fromMessageId)
+		log.Info().Msgf("Fetching message batch for channel %s starting from ID %d at depth: %v", page.URL, fromMessageId, page.Depth)
 		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 			ChatId:        chatID,
 			FromMessageId: fromMessageId,
 			Limit:         100, // Fetch up to 100 messages at a time
 		})
 		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", channelname)
+			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", page.URL)
 			return nil, err
 		}
 
@@ -31,8 +36,28 @@ func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, channel
 			break
 		}
 
-		// Add messages to our collection
-		allMessages = append(allMessages, chatHistory.Messages...)
+		// Check messages and add only those newer than minPostDate
+		reachedOldMessages := false
+		for _, msg := range chatHistory.Messages {
+			// Compare message timestamp with minPostDate
+			if int64(msg.Date) < minPostUnix {
+				log.Info().Msgf("Reached messages older than minimum date (message date: %v, min date: %v)",
+					time.Unix(int64(msg.Date), 0).Format("2006-01-02 15:04:05"),
+					minPostDate.Format("2006-01-02 15:04:05"))
+				reachedOldMessages = true
+				break
+			}
+			allMessages = append(allMessages, msg)
+			if maxPosts > -1 && len(allMessages) == maxPosts {
+				reachedOldMessages = true
+				break
+			}
+		}
+
+		// If we've reached messages older than minPostDate, break out of the loop
+		if reachedOldMessages {
+			break
+		}
 
 		// Get the ID of the oldest message in this batch
 		lastMessageId := chatHistory.Messages[len(chatHistory.Messages)-1].Id
@@ -49,7 +74,8 @@ func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, channel
 		fromMessageId = lastMessageId
 	}
 
-	log.Info().Msgf("Fetched a total of %d messages for channel %s", len(allMessages), channelname)
+	log.Info().Msgf("Fetched a total of %d messages for channel %s since %s",
+		len(allMessages), page.URL, minPostDate.Format("2006-01-02 15:04:05"))
 	return allMessages, nil
 }
 
@@ -193,11 +219,11 @@ func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Me
 //
 // The function fetches comments in batches of up to 100 and continues until no more comments are available.
 // It extracts the text, reactions, view count, and reply count for each comment.
-func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) ([]model.Comment, error) {
+func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string, maxcomments int) ([]model.Comment, error) {
 	// Fetch the comments in the thread
 	var comments []model.Comment
 	var fromMessageId int64 = 0
-
+	done := false
 	for {
 		threadHistory, err := tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
 			ChatId:        chatID,
@@ -247,9 +273,15 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 			// Add to the comments slice
 			comments = append(comments, comment)
+			if maxcomments > -1 && len(comments) >= maxcomments {
+				done = true
+				break
+			}
 		}
 
-		break
+		if done {
+			break
+		}
 		// Update `fromMessageId` to fetch older comments
 		fromMessageId = threadHistory.Messages[len(threadHistory.Messages)-1].Id
 	}

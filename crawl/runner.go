@@ -31,7 +31,7 @@ func Connect(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClien
 func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
 
 	// Get channel information
-	channelInfo, messages, err := getChannelInfo(tdlibClient, p.URL)
+	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -131,30 +131,32 @@ type MessageCountGetter func(client crawler.TDLibClient, messages []*client.Mess
 // MemberCountGetter is a function type for retrieving message count
 type MemberCountGetter func(client crawler.TDLibClient, channelUsername string) (int, error)
 
-func getChannelInfo(tdlibClient crawler.TDLibClient, channelUsername string) (*channelInfo, []*client.Message, error) {
+func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cfg common.CrawlerConfig) (*channelInfo, []*client.Message, error) {
 	return getChannelInfoWithDeps(
 		tdlibClient,
-		channelUsername,
+		page,
 		telegramhelper.GetTotalChannelViews,
 		telegramhelper.GetMessageCount,
 		telegramhelper.GetChannelMemberCount,
+		cfg,
 	)
 }
 
 // getChannelInfoWithDeps is the dependency-injected version of getChannelInfo
 func getChannelInfoWithDeps(
 	tdlibClient crawler.TDLibClient,
-	channelUsername string,
+	page *state.Page,
 	getTotalViewsFn TotalViewsGetter,
 	getMessageCountFn MessageCountGetter,
 	getMemberCountFn MemberCountGetter,
+	cfg common.CrawlerConfig,
 ) (*channelInfo, []*client.Message, error) {
 	// Search for the channel
 	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
-		Username: channelUsername,
+		Username: page.URL,
 	})
 	if err != nil {
-		log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", channelUsername)
+		log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
 		return nil, nil, err
 	}
 
@@ -162,18 +164,18 @@ func getChannelInfoWithDeps(
 		ChatId: chat.Id,
 	})
 	if err != nil {
-		log.Error().Err(err).Stack().Msgf("Failed to get chat details for: %v", channelUsername)
+		log.Error().Err(err).Stack().Msgf("Failed to get chat details for: %v", page.URL)
 		return nil, nil, err
 	}
 
-	mess, err := telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, channelUsername)
+	mess, err := telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts)
 
 	// Get channel stats
 	totalViews := 0
 	if getTotalViewsFn != nil {
-		totalViewsVal, err := getTotalViewsFn(tdlibClient, mess, chat.Id, channelUsername)
+		totalViewsVal, err := getTotalViewsFn(tdlibClient, mess, chat.Id, page.URL)
 		if err != nil {
-			log.Warn().Err(err).Msgf("Failed to get total views for channel: %v", channelUsername)
+			log.Warn().Err(err).Msgf("Failed to get total views for channel: %v", page.URL)
 			// Continue anyway, this is not critical
 		} else {
 			totalViews = totalViewsVal
@@ -182,9 +184,9 @@ func getChannelInfoWithDeps(
 
 	messageCount := 0
 	if getMessageCountFn != nil {
-		messageCountVal, err := getMessageCountFn(tdlibClient, mess, chat.Id, channelUsername)
+		messageCountVal, err := getMessageCountFn(tdlibClient, mess, chat.Id, page.URL)
 		if err != nil {
-			log.Warn().Err(err).Msgf("Failed to get message count for channel: %v", channelUsername)
+			log.Warn().Err(err).Msgf("Failed to get message count for channel: %v", page.URL)
 			// Continue anyway, this is not critical
 		} else {
 			messageCount = messageCountVal
@@ -193,9 +195,9 @@ func getChannelInfoWithDeps(
 
 	memberCount := 0
 	if getMemberCountFn != nil {
-		memberCountVal, err := getMemberCountFn(tdlibClient, channelUsername)
+		memberCountVal, err := getMemberCountFn(tdlibClient, page.URL)
 		if err != nil {
-			log.Warn().Err(err).Msgf("Failed to get member count for channel: %v", channelUsername)
+			log.Warn().Err(err).Msgf("Failed to get member count for channel: %v", page.URL)
 		} else {
 			memberCount = memberCountVal
 		}
@@ -210,7 +212,7 @@ func getChannelInfoWithDeps(
 				SupergroupId: supergroupType.SupergroupId,
 			})
 			if err != nil {
-				log.Warn().Err(err).Msgf("Failed to get supergroup info for: %v", channelUsername)
+				log.Warn().Err(err).Msgf("Failed to get supergroup info for: %v", page.URL)
 				// Continue anyway, this is not critical
 			}
 
@@ -220,7 +222,7 @@ func getChannelInfoWithDeps(
 				}
 				supergroupInfo, err = tdlibClient.GetSupergroupFullInfo(req)
 				if err != nil {
-					log.Warn().Err(err).Msgf("Failed to get supergroup full info for: %v", channelUsername)
+					log.Warn().Err(err).Msgf("Failed to get supergroup full info for: %v", page.URL)
 					// Continue anyway, this is not critical
 				}
 			}
@@ -328,9 +330,17 @@ func processAllMessagesWithProcessor(
 			} else {
 				sm.UpdateMessage(owner.ID, message.MessageID, message.ChatID, "fetched")
 
-				// Only process outlinks if we have them
 				if outlinks != nil {
+					// Get the current channel URL from the owner's URL
+					currentChannelURL := owner.URL
+
 					for _, o := range outlinks {
+						// Skip if the outlink is the same as the current channel
+						if o == currentChannelURL {
+							log.Debug().Msgf("Skipping self-reference outlink: %s", o)
+							continue
+						}
+
 						page := &state.Page{
 							URL:      o,
 							Status:   "unfetched",

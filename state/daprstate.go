@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	daprc "github.com/dapr/go-sdk/client"
@@ -28,6 +30,8 @@ type DaprStateManager struct {
 	stateStoreName string
 	storageBinding string
 	mediaCache     map[string]MediaCacheItem
+	urlCache       map[string]string // Maps URL -> "crawlID:pageID" for all known URLs
+	urlCacheMutex  sync.RWMutex      // Separate mutex for URL cache to reduce contention
 }
 
 // NewDaprStateManager creates a new DaprStateManager
@@ -57,7 +61,46 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 		stateStoreName:   stateStoreName,
 		storageBinding:   storageBinding,
 		mediaCache:       make(map[string]MediaCacheItem),
+		urlCache:         make(map[string]string),
 	}, nil
+}
+
+func (dsm *DaprStateManager) GetPage(id string) (Page, error) {
+	// First try memory
+	page, err := dsm.BaseStateManager.GetPage(id)
+	if err == nil {
+		return page, nil
+	}
+
+	// If not in memory, try DAPR
+	pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, id)
+	response, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		pageKey,
+		nil,
+	)
+
+	if err != nil {
+		return Page{}, fmt.Errorf("failed to get page from DAPR: %w", err)
+	}
+
+	if response.Value == nil {
+		return Page{}, fmt.Errorf("page with ID %s not found", id)
+	}
+
+	var daprPage Page
+	err = json.Unmarshal(response.Value, &daprPage)
+	if err != nil {
+		return Page{}, fmt.Errorf("failed to parse page data: %w", err)
+	}
+
+	// Cache the page in memory
+	dsm.mutex.Lock()
+	dsm.pageMap[id] = daprPage
+	dsm.mutex.Unlock()
+
+	return daprPage, nil
 }
 
 func (dsm *DaprStateManager) GetPreviousCrawls() ([]string, error) {
@@ -95,59 +138,278 @@ func (dsm *DaprStateManager) GetPreviousCrawls() ([]string, error) {
 
 // Initialize sets up the state in Dapr
 func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
-	// First check if we have state from a previous crawl
-	prevCrawls, err := dsm.GetPreviousCrawls()
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to get previous crawls, starting fresh")
-	}
+	// Try to load metadata and layer structure
+	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	metadataResponse, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		metadataKey,
+		nil,
+	)
 
-	startMetadata := map[string]interface{}{
-		"status":          "running",
-		"startTime":       time.Now(),
-		"previousCrawlID": prevCrawls,
-	}
+	if err == nil && metadataResponse.Value != nil {
+		// Metadata exists, load it
+		err = json.Unmarshal(metadataResponse.Value, &dsm.metadata)
+		if err != nil {
+			return fmt.Errorf("failed to parse metadata: %w", err)
+		}
 
-	if err := dsm.UpdateCrawlMetadata(dsm.config.CrawlID, startMetadata); err != nil {
-		log.Warn().Err(err).Msg("Failed to update crawl start metadata")
-	}
-	if len(prevCrawls) > 0 {
-		// Try to load state from the most recent previous crawl
-		for i := len(prevCrawls) - 1; i >= 0; i-- {
-			prevID := prevCrawls[i]
-			state, err := dsm.loadStateForCrawl(prevID)
-			if err == nil && len(state.Layers) > 0 {
-				// Found previous state, use it
-				dsm.SetState(state)
+		// Try each crawl ID in reverse order until we find one with a valid layer map
+		var loadedLayerMap bool = false
+		for i := len(dsm.metadata.PreviousCrawlID) - 1; i >= 0; i-- {
+			crawlID := dsm.metadata.PreviousCrawlID[i]
 
-				// Reset all pages to unfetched status
-				for _, layer := range dsm.state.Layers {
-					layer.mutex.Lock()
-					for i := range layer.Pages {
-						layer.Pages[i].Status = "unfetched"
-						layer.Pages[i].Error = ""
-					}
-					layer.mutex.Unlock()
+			// Load layer structure
+			layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+			layerMapResponse, err := (*dsm.client).GetState(
+				context.Background(),
+				dsm.stateStoreName,
+				layerMapKey,
+				nil,
+			)
+
+			if err == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+				// Layer map exists and is not empty, load it
+				err = json.Unmarshal(layerMapResponse.Value, &dsm.layerMap)
+				if err != nil {
+					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to parse layer map for crawl ID")
+					continue // Try next crawl ID
 				}
 
-				log.Info().Msgf("Loaded state from previous crawl %s with %d layers",
-					prevID, len(dsm.state.Layers))
+				// Load URL cache for this crawl
+				err = dsm.loadURLsForCrawl(crawlID)
+				if err != nil {
+					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load URLs for crawl")
+					continue // Try next crawl ID
+				}
 
-				// Update metadata to include this crawl
-				dsm.state.Metadata.PreviousCrawlID = append(dsm.state.Metadata.PreviousCrawlID, dsm.config.CrawlExecutionID)
+				// NEW CODE: Load all pages from this layer map into memory
+				err = dsm.loadPagesIntoMemory(crawlID)
+				if err != nil {
+					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load pages into memory")
+					continue // Try next crawl ID
+				}
 
-				// Save the updated state
-				return dsm.SaveState()
+				log.Info().Str("crawlID", crawlID).Msg("Successfully loaded existing state structure from DAPR")
+				loadedLayerMap = true
+				break // Successfully loaded a layer map, stop searching
 			}
+		}
+
+		if !loadedLayerMap {
+			log.Warn().Msg("Could not find any valid layer maps in previous crawls")
+		}
+
+		return nil
+	}
+
+	// Load URLs from all previous crawls
+	err = dsm.initializeURLCache()
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to initialize URL cache from previous crawls")
+	}
+
+	// Filter out seed URLs that we've already seen in previous crawls
+	dsm.urlCacheMutex.RLock()
+	uniqueSeedURLs := make([]string, 0)
+	for _, url := range seedURLs {
+		if _, exists := dsm.urlCache[url]; !exists {
+			uniqueSeedURLs = append(uniqueSeedURLs, url)
+		} else {
+			log.Debug().Str("url", url).Msg("Skipping seed URL already processed in previous crawl")
+		}
+	}
+	dsm.urlCacheMutex.RUnlock()
+
+	log.Info().Int("originalCount", len(seedURLs)).Int("uniqueCount", len(uniqueSeedURLs)).Msg("Filtered seed URLs against previous crawls")
+
+	// Create pages from the unique seed URLs
+	pages := make([]Page, 0, len(uniqueSeedURLs))
+	for _, url := range uniqueSeedURLs {
+		pages = append(pages, Page{
+			ID:        uuid.New().String(),
+			URL:       url,
+			Depth:     0,
+			Status:    "unfetched",
+			Timestamp: time.Now(),
+		})
+	}
+
+	// Add initial pages
+	if err := dsm.AddLayer(pages); err != nil {
+		return fmt.Errorf("failed to add seed pages: %w", err)
+	}
+
+	// Save the state
+	return dsm.SaveState()
+}
+
+func (dsm *DaprStateManager) initializeURLCache() error {
+	// Get the list of previous crawl IDs
+	previousCrawlIDs, err := dsm.GetPreviousCrawls()
+	if err != nil {
+		return fmt.Errorf("failed to get previous crawl IDs: %w", err)
+	}
+
+	// Load URLs from each previous crawl
+	for _, crawlID := range previousCrawlIDs {
+		err = dsm.loadURLsForCrawl(crawlID)
+		if err != nil {
+			log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load URLs for crawl")
 		}
 	}
 
-	// No previous state found or loadable, initialize with seed URLs
-	err = dsm.BaseStateManager.Initialize(seedURLs)
+	// Also load URLs from the current crawl if any exist
+	err = dsm.loadURLsForCrawl(dsm.config.CrawlExecutionID)
 	if err != nil {
-		return err
+		log.Warn().Err(err).Str("crawlID", dsm.config.CrawlID).Msg("Failed to load URLs for current crawl")
 	}
 
-	// Save the initialized state
+	log.Info().Int("urlCount", len(dsm.urlCache)).Msg("URL cache initialized from previous crawls")
+	return nil
+}
+
+func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
+	// Load the layer map for this crawl
+	layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+	layerMapResponse, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		layerMapKey,
+		nil,
+	)
+
+	if err != nil || layerMapResponse.Value == nil {
+		return fmt.Errorf("failed to load layer map for crawl %s: %w", crawlID, err)
+	}
+
+	var layerMap map[int][]string
+	err = json.Unmarshal(layerMapResponse.Value, &layerMap)
+	if err != nil {
+		return fmt.Errorf("failed to parse layer map for crawl %s: %w", crawlID, err)
+	}
+
+	// Track how many URLs we add
+	addedCount := 0
+
+	// For each layer, get all page IDs
+	for _, pageIDs := range layerMap {
+		for _, pageID := range pageIDs {
+			// Fetch the page from Dapr
+			pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
+			pageResponse, err := (*dsm.client).GetState(
+				context.Background(),
+				dsm.stateStoreName,
+				pageKey,
+				nil,
+			)
+
+			if err != nil || pageResponse.Value == nil {
+				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
+				continue
+			}
+
+			var page Page
+			err = json.Unmarshal(pageResponse.Value, &page)
+			if err != nil {
+				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
+				continue
+			}
+
+			// Add URL to cache
+			dsm.urlCacheMutex.Lock()
+			dsm.urlCache[page.URL] = fmt.Sprintf("%s:%s", crawlID, page.ID)
+			dsm.urlCacheMutex.Unlock()
+
+			addedCount++
+		}
+	}
+
+	log.Debug().Str("crawlID", crawlID).Int("urlCount", addedCount).Msg("Loaded URLs for crawl")
+	return nil
+}
+
+func (dsm *DaprStateManager) AddLayer(pages []Page) error {
+	if len(pages) == 0 {
+		return nil
+	}
+
+	dsm.mutex.Lock()
+	defer dsm.mutex.Unlock()
+
+	// Determine the depth
+	depth := pages[0].Depth
+
+	// Initialize the layer if it doesn't exist
+	if _, exists := dsm.layerMap[depth]; !exists {
+		dsm.layerMap[depth] = make([]string, 0)
+	}
+
+	// Track the IDs of pages we're actually adding (after deduplication)
+	addedIDs := make([]string, 0)
+	duplicateCount := 0
+
+	// Save each page individually
+	for i := range pages {
+		// Check if URL already exists in any crawl using our cached map
+		dsm.urlCacheMutex.RLock()
+		existingID, exists := dsm.urlCache[pages[i].URL]
+		dsm.urlCacheMutex.RUnlock()
+
+		if exists {
+			log.Debug().Msgf("Skipping duplicate URL: %s (already exists with ID: %s)", pages[i].URL, existingID)
+			duplicateCount++
+			continue
+		}
+
+		// Ensure the page has an ID
+		if pages[i].ID == "" {
+			pages[i].ID = uuid.New().String()
+		}
+
+		// Set timestamp if not already set
+		if pages[i].Timestamp.IsZero() {
+			pages[i].Timestamp = time.Now()
+		}
+
+		// Store the page in memory
+		dsm.pageMap[pages[i].ID] = pages[i]
+
+		// Add URL to our URL cache for future deduplication
+		dsm.urlCacheMutex.Lock()
+		dsm.urlCache[pages[i].URL] = fmt.Sprintf("%s:%s", dsm.config.CrawlExecutionID, pages[i].ID)
+		dsm.urlCacheMutex.Unlock()
+
+		// Add to layer map
+		dsm.layerMap[depth] = append(dsm.layerMap[depth], pages[i].ID)
+
+		// Marshal page data for Dapr
+		pageData, err := json.Marshal(pages[i])
+		if err != nil {
+			return fmt.Errorf("failed to marshal page: %w", err)
+		}
+
+		// Save page to Dapr
+		pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, pages[i].ID)
+		err = (*dsm.client).SaveState(
+			context.Background(),
+			dsm.stateStoreName,
+			pageKey,
+			pageData,
+			nil,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to save page to Dapr: %w", err)
+		}
+
+		// Track this ID as successfully added
+		addedIDs = append(addedIDs, pages[i].ID)
+	}
+
+	log.Debug().Msgf("Added %d unique pages to depth %d (filtered out %d duplicates from current and previous crawls)",
+		len(addedIDs), depth, duplicateCount)
+
+	// Save the updated layer structure
 	return dsm.SaveState()
 }
 
@@ -158,9 +420,9 @@ func (dsm *DaprStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 		return err
 	}
 
-	// Get the current metadata from the base state
+	// Get the current metadata from the base state manager
 	dsm.mutex.RLock()
-	metadataCopy := dsm.state.Metadata
+	metadataCopy := dsm.metadata // Use the direct metadata field instead of state.Metadata
 	dsm.mutex.RUnlock()
 
 	// Marshal metadata to JSON
@@ -170,7 +432,7 @@ func (dsm *DaprStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 	}
 
 	// Store metadata in DAPR using appropriate key
-	metadataKey := dsm.config.CrawlID
+	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
 	err = (*dsm.client).SaveState(
 		context.Background(),
 		dsm.stateStoreName,
@@ -189,28 +451,44 @@ func (dsm *DaprStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 
 // SaveState persists the current state to Dapr
 func (dsm *DaprStateManager) SaveState() error {
-	state := dsm.GetState()
-	state.LastUpdated = time.Now()
-
-	stateData, err := json.Marshal(state)
+	// Save metadata
+	metadataData, err := json.Marshal(dsm.metadata)
 	if err != nil {
-		return fmt.Errorf("failed to marshal state: %w", err)
+		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	stateKey := dsm.getStateKey(dsm.config.CrawlExecutionID)
+	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
 	err = (*dsm.client).SaveState(
 		context.Background(),
 		dsm.stateStoreName,
-		stateKey,
-		stateData,
+		metadataKey,
+		metadataData,
 		nil,
 	)
 
 	if err != nil {
-		return fmt.Errorf("failed to save state to Dapr: %w", err)
+		return fmt.Errorf("failed to save metadata: %w", err)
 	}
 
-	log.Debug().Str("key", stateKey).Msg("State saved to Dapr")
+	// Save layer structure
+	layerMapData, err := json.Marshal(dsm.layerMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal layer map: %w", err)
+	}
+
+	layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
+	err = (*dsm.client).SaveState(
+		context.Background(),
+		dsm.stateStoreName,
+		layerMapKey,
+		layerMapData,
+		nil,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to save layer map: %w", err)
+	}
+
 	return nil
 }
 
@@ -225,7 +503,7 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 	postData = append(postData, '\n')
 
 	// Create storage path
-	storagePath, err := dsm.generateStoragePath(
+	storagePath, err := dsm.generateCrawlExecutableStoragePath(
 		channelID,
 		fmt.Sprintf("posts/%s.jsonl", post.PostUID),
 	)
@@ -354,6 +632,35 @@ func (dsm *DaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 	return exists, nil
 }
 
+func (dsm *DaprStateManager) UpdatePage(page Page) error {
+	// First update in memory
+	err := dsm.BaseStateManager.UpdatePage(page)
+	if err != nil {
+		return err
+	}
+
+	// Then save to DAPR
+	pageData, err := json.Marshal(page)
+	if err != nil {
+		return fmt.Errorf("failed to marshal page: %w", err)
+	}
+
+	pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, page.ID)
+	err = (*dsm.client).SaveState(
+		context.Background(),
+		dsm.stateStoreName,
+		pageKey,
+		pageData,
+		nil,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to save page to DAPR: %w", err)
+	}
+
+	return nil
+}
+
 // MarkMediaAsProcessed marks media as processed
 func (dsm *DaprStateManager) MarkMediaAsProcessed(mediaID string) error {
 	// Add to memory cache
@@ -440,4 +747,184 @@ func (dsm *DaprStateManager) generateStoragePath(channelID, subPath string) (str
 		channelID,
 		subPath,
 	), nil
+}
+
+// generateStoragePath creates a standardized storage path
+func (dsm *DaprStateManager) generateCrawlExecutableStoragePath(channelID, subPath string) (string, error) {
+	return fmt.Sprintf(
+		"%s/%s/%s/%s/%s/%s",
+		dsm.config.StorageRoot,
+		dsm.config.JobID,
+		dsm.config.CrawlID,
+		dsm.config.CrawlExecutionID,
+		channelID,
+		subPath,
+	), nil
+}
+
+func (dsm *DaprStateManager) loadURLsFromPreviousCrawls() (map[string]string, error) {
+	urlMap := make(map[string]string)
+
+	// Get the list of previous crawl IDs
+	previousCrawlIDs, err := dsm.GetPreviousCrawls()
+	if err != nil {
+		return urlMap, fmt.Errorf("failed to get previous crawl IDs: %w", err)
+	}
+
+	// Include the current crawl ID
+	crawlIDs := append(previousCrawlIDs, dsm.config.CrawlExecutionID)
+
+	for _, crawlID := range crawlIDs {
+		// For each crawl ID, load its layer map
+		layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+		layerMapResponse, err := (*dsm.client).GetState(
+			context.Background(),
+			dsm.stateStoreName,
+			layerMapKey,
+			nil,
+		)
+
+		if err != nil || layerMapResponse.Value == nil {
+			log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load layer map for previous crawl")
+			continue
+		}
+
+		var layerMap map[int][]string
+		err = json.Unmarshal(layerMapResponse.Value, &layerMap)
+		if err != nil {
+			log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to parse layer map for previous crawl")
+			continue
+		}
+
+		// For each layer, get all page IDs
+		for _, pageIDs := range layerMap {
+			for _, pageID := range pageIDs {
+				// Fetch the page from Dapr
+				pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
+				pageResponse, err := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					pageKey,
+					nil,
+				)
+
+				if err != nil || pageResponse.Value == nil {
+					log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page from previous crawl")
+					continue
+				}
+
+				var page Page
+				err = json.Unmarshal(pageResponse.Value, &page)
+				if err != nil {
+					log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data from previous crawl")
+					continue
+				}
+
+				// Add URL to deduplication map
+				urlMap[page.URL] = fmt.Sprintf("%s:%s", crawlID, page.ID) // Store crawlID:pageID to know where it came from
+			}
+		}
+	}
+
+	log.Info().Int("urlCount", len(urlMap)).Msg("Loaded URLs from previous crawls for deduplication")
+	return urlMap, nil
+}
+
+func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string) error {
+	loadedCount := 0
+
+	// For each layer in the layer map
+	for _, pageIDs := range dsm.layerMap {
+		// For each page ID in the layer
+		for _, pageID := range pageIDs {
+			// Check if we already have this page in memory
+			if _, exists := dsm.pageMap[pageID]; exists {
+				continue
+			}
+
+			// Fetch the page from Dapr
+			pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
+			pageResponse, err := (*dsm.client).GetState(
+				context.Background(),
+				dsm.stateStoreName,
+				pageKey,
+				nil,
+			)
+
+			if err != nil || pageResponse.Value == nil {
+				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
+				continue
+			}
+
+			var page Page
+			err = json.Unmarshal(pageResponse.Value, &page)
+			if err != nil {
+				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
+				continue
+			}
+
+			// Add page to in-memory page map
+			page.Status = "unfetched"
+
+			// Clear any previous messages or processing data
+			page.Messages = []Message{}
+
+			// Update the timestamp to current time
+			page.Timestamp = time.Now()
+			dsm.pageMap[pageID] = page
+			loadedCount++
+		}
+	}
+
+	log.Info().Str("crawlID", crawlID).Int("pageCount", loadedCount).Msg("Loaded pages into memory from DAPR")
+	return nil
+}
+
+func (dsm *DaprStateManager) GetLayerByDepth(depth int) ([]Page, error) {
+	// First, try to get pages from memory using the base implementation
+	pages, err := dsm.BaseStateManager.GetLayerByDepth(depth)
+
+	// If we got pages, return them
+	if err == nil && len(pages) > 0 {
+		return pages, nil
+	}
+
+	// If not successful, let's check if layer exists in Dapr
+	dsm.mutex.RLock()
+	ids, exists := dsm.layerMap[depth]
+	dsm.mutex.RUnlock()
+
+	if !exists {
+		return []Page{}, nil // Layer doesn't exist
+	}
+
+	// Layer exists but pages might not be in memory, fetch them from Dapr
+	pages = make([]Page, 0, len(ids))
+	for _, id := range ids {
+		// Try to get page from Dapr
+		page, err := dsm.GetPage(id)
+		if err != nil {
+			log.Warn().Err(err).Str("pageID", id).Int("depth", depth).Msg("Failed to fetch page for layer")
+			continue
+		}
+
+		// Reset status when fetching for a new crawl
+		if page.Status != "unfetched" {
+			page.Status = "unfetched"
+			page.Messages = []Message{}
+			page.Timestamp = time.Now()
+
+			// Save the updated page back to memory and Dapr
+			dsm.mutex.Lock()
+			dsm.pageMap[id] = page
+			dsm.mutex.Unlock()
+
+			// No need to save to Dapr here as it's a retrieval operation
+			// The status will be saved when the page is processed
+		}
+
+		pages = append(pages, page)
+	}
+
+	return pages, nil
 }

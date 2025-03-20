@@ -403,7 +403,7 @@ var ParseMessage = func(
 	comments := make([]model.Comment, 0)
 	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil &&
 		message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
-		fetchedComments, fetchErr := GetMessageComments(tdlibClient, chat.Id, message.Id, channelName)
+		fetchedComments, fetchErr := GetMessageComments(tdlibClient, chat.Id, message.Id, channelName, cfg.MaxComments)
 		if fetchErr != nil {
 			log.Error().Stack().Err(fetchErr).Msg("Failed to fetch comments")
 		} else {

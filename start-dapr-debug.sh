@@ -3,10 +3,10 @@
 if ! command -v dlv &> /dev/null; then
     echo "Delve debugger not found. Installing..."
     go install github.com/go-delve/delve/cmd/dlv@latest
-    
+
     # Add Go bin to PATH temporarily for this session
     export PATH=$PATH:$(go env GOPATH)/bin
-    
+
     if ! command -v dlv &> /dev/null; then
         echo "ERROR: Failed to install Delve. Please install manually with:"
         echo "    go install github.com/go-delve/delve/cmd/dlv@latest"
@@ -31,7 +31,7 @@ go build -gcflags "all=-N -l" -o ./bin/app
 
 echo "Starting Delve debugger..."
 # Pass your app arguments after the double dash
-dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls CryptoBotRU --crawl-id test24 &
+dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls CryptoBotRU --max-comments 1 --crawl-id test44 --tdlib-database-url http://tomb218.sg-host.com/tdlib.tgz --min-post-date 2024-01-01 --max-posts 500 --max-depth 1 &
 DLV_PID=$!
 
 # Give Delve a moment to initialize

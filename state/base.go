@@ -13,24 +13,32 @@ import (
 // BaseStateManager provides common functionality for all state manager implementations
 type BaseStateManager struct {
 	config Config
-	state  State
-	mutex  sync.RWMutex
+	//state  State
+	mutex sync.RWMutex
+
+	metadata    CrawlMetadata
+	lastUpdated time.Time
+
+	// Map of depth -> page IDs (to track layer structure)
+	layerMap map[int][]string
+
+	// Map of page ID -> Page (to store all pages)
+	pageMap map[string]Page
 }
 
 // NewBaseStateManager creates a new BaseStateManager
 func NewBaseStateManager(config Config) *BaseStateManager {
 	return &BaseStateManager{
 		config: config,
-		state: State{
-			Layers:      []*Layer{},
-			LastUpdated: time.Now(),
-			Metadata: CrawlMetadata{
-				CrawlID:     config.CrawlID,
-				ExecutionID: config.CrawlExecutionID,
-				StartTime:   time.Now(),
-				Status:      "running",
-			},
+		metadata: CrawlMetadata{
+			CrawlID:     config.CrawlID,
+			ExecutionID: config.CrawlExecutionID,
+			StartTime:   time.Now(),
+			Status:      "running",
 		},
+		lastUpdated: time.Now(),
+		layerMap:    make(map[int][]string),
+		pageMap:     make(map[string]Page),
 	}
 }
 
@@ -39,25 +47,25 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
 
+	// Create initial layer at depth 0
+	bsm.layerMap[0] = make([]string, 0, len(seedURLs))
+
 	// Create pages from seed URLs
-	pages := make([]Page, 0, len(seedURLs))
 	for _, url := range seedURLs {
-		pages = append(pages, Page{
+		page := Page{
 			ID:        uuid.New().String(),
 			URL:       url,
 			Depth:     0,
 			Status:    "unfetched",
 			Timestamp: time.Now(),
-		})
-	}
+		}
 
-	// Create initial layer
-	layer := &Layer{
-		Depth: 0,
-		Pages: pages,
-	}
+		// Store page in page map
+		bsm.pageMap[page.ID] = page
 
-	bsm.state.Layers = []*Layer{layer}
+		// Add page ID to layer 0
+		bsm.layerMap[0] = append(bsm.layerMap[0], page.ID)
+	}
 
 	log.Info().Msgf("Initialized state with %d seed URLs", len(seedURLs))
 	return nil
@@ -68,156 +76,139 @@ func (bsm *BaseStateManager) GetPage(id string) (Page, error) {
 	bsm.mutex.RLock()
 	defer bsm.mutex.RUnlock()
 
-	for _, layer := range bsm.state.Layers {
-		layer.mutex.RLock()
-		for _, page := range layer.Pages {
-			if page.ID == id {
-				layer.mutex.RUnlock()
-				return page, nil
-			}
-		}
-		layer.mutex.RUnlock()
+	page, exists := bsm.pageMap[id]
+	if !exists {
+		return Page{}, fmt.Errorf("page with ID %s not found", id)
 	}
 
-	return Page{}, fmt.Errorf("page with ID %s not found", id)
+	return page, nil
 }
 
 // UpdatePage updates a page's information
 func (bsm *BaseStateManager) UpdatePage(page Page) error {
-	bsm.mutex.RLock()
-	defer bsm.mutex.RUnlock()
+	bsm.mutex.Lock()
+	defer bsm.mutex.Unlock()
 
-	for _, layer := range bsm.state.Layers {
-		layer.mutex.Lock()
-		for i := range layer.Pages {
-			if layer.Pages[i].ID == page.ID {
-				// Update page fields but preserve Messages
-				messages := layer.Pages[i].Messages
-				layer.Pages[i] = page
-				layer.Pages[i].Messages = messages
-				layer.mutex.Unlock()
-				return nil
+	// Store or update the page
+	bsm.pageMap[page.ID] = page
+
+	// Update layer map if needed
+	found := false
+	for depth, ids := range bsm.layerMap {
+		if depth == page.Depth {
+			for _, id := range ids {
+				if id == page.ID {
+					found = true
+					break
+				}
 			}
+
+			if !found {
+				bsm.layerMap[depth] = append(bsm.layerMap[depth], page.ID)
+			}
+			break
 		}
-		layer.mutex.Unlock()
 	}
 
-	return fmt.Errorf("page with ID %s not found", page.ID)
+	return nil
 }
 
 // UpdateMessage updates or adds a message to a page
 func (bsm *BaseStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error {
-	bsm.mutex.RLock()
-	defer bsm.mutex.RUnlock()
+	bsm.mutex.Lock()
+	defer bsm.mutex.Unlock()
 
-	for _, layer := range bsm.state.Layers {
-		layer.mutex.Lock()
-		for i := range layer.Pages {
-			if layer.Pages[i].ID == pageID {
-				// Check if message already exists
-				found := false
-				for j := range layer.Pages[i].Messages {
-					if layer.Pages[i].Messages[j].ChatID == chatID &&
-						layer.Pages[i].Messages[j].MessageID == messageID {
-						// Update existing message
-						layer.Pages[i].Messages[j].Status = status
-						found = true
-						break
-					}
-				}
-
-				// Add new message if not found
-				if !found {
-					layer.Pages[i].Messages = append(layer.Pages[i].Messages, Message{
-						ChatID:    chatID,
-						MessageID: messageID,
-						Status:    status,
-						PageID:    pageID,
-					})
-				}
-
-				layer.mutex.Unlock()
-				return nil
-			}
-		}
-		layer.mutex.Unlock()
+	page, exists := bsm.pageMap[pageID]
+	if !exists {
+		return fmt.Errorf("page with ID %s not found", pageID)
 	}
 
-	return fmt.Errorf("page with ID %s not found", pageID)
+	// Check if message already exists
+	found := false
+	for i := range page.Messages {
+		if page.Messages[i].ChatID == chatID && page.Messages[i].MessageID == messageID {
+			// Update existing message
+			page.Messages[i].Status = status
+			found = true
+			break
+		}
+	}
+
+	// Add new message if not found
+	if !found {
+		page.Messages = append(page.Messages, Message{
+			ChatID:    chatID,
+			MessageID: messageID,
+			Status:    status,
+			PageID:    pageID,
+		})
+	}
+
+	// Update the page in the page map
+	bsm.pageMap[pageID] = page
+	return nil
 }
 
-// AddLayer adds a new layer of pages
+// AddLayer adds a new layer of pages, ensuring URLs are unique across all layers
 func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 	if len(pages) == 0 {
-		return nil // Nothing to add
+		return nil
 	}
 
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
 
-	// Determine the depth of the new layer
-	depth := 0
-	if len(pages) > 0 && pages[0].ParentID != "" {
-		// Find parent page to determine depth
-		for _, layer := range bsm.state.Layers {
-			for _, page := range layer.Pages {
-				if page.ID == pages[0].ParentID {
-					depth = layer.Depth + 1
-					break
-				}
-			}
-		}
+	// Create URL to existing page ID map for deduplication
+	existingURLs := make(map[string]string)
+	for id, page := range bsm.pageMap {
+		existingURLs[page.URL] = id
 	}
 
-	// Check if a layer at this depth already exists
-	var targetLayer *Layer
-	for _, layer := range bsm.state.Layers {
-		if layer.Depth == depth {
-			targetLayer = layer
-			break
-		}
+	// Determine the depth
+	depth := pages[0].Depth
+
+	// Initialize the layer if it doesn't exist
+	if _, exists := bsm.layerMap[depth]; !exists {
+		bsm.layerMap[depth] = make([]string, 0)
 	}
 
-	// Create a new layer if needed
-	if targetLayer == nil {
-		targetLayer = &Layer{
-			Depth: depth,
-			Pages: []Page{},
+	// Track the IDs of pages we're actually adding (after deduplication)
+	addedIDs := make([]string, 0)
+
+	// Process each page
+	for i := range pages {
+		// Check if URL already exists in any layer
+		if existingID, exists := existingURLs[pages[i].URL]; exists {
+			log.Debug().Msgf("Skipping duplicate URL: %s (already exists with ID: %s)", pages[i].URL, existingID)
+			continue
 		}
-		bsm.state.Layers = append(bsm.state.Layers, targetLayer)
+
+		// Ensure the page has an ID
+		if pages[i].ID == "" {
+			pages[i].ID = uuid.New().String()
+		}
+
+		// Set timestamp if not already set
+		if pages[i].Timestamp.IsZero() {
+			pages[i].Timestamp = time.Now()
+		}
+
+		// Store the page
+		bsm.pageMap[pages[i].ID] = pages[i]
+
+		// Add URL to our tracking map for future deduplication
+		existingURLs[pages[i].URL] = pages[i].ID
+
+		// Add to layer map
+		bsm.layerMap[depth] = append(bsm.layerMap[depth], pages[i].ID)
+
+		// Track this ID as successfully added
+		addedIDs = append(addedIDs, pages[i].ID)
 	}
 
-	// Add pages to the layer without duplicates
-	targetLayer.mutex.Lock()
-	defer targetLayer.mutex.Unlock()
+	log.Debug().Msgf("Added %d unique pages to depth %d (filtered out %d duplicates)",
+		len(addedIDs), depth, len(pages)-len(addedIDs))
 
-	// Build a map of existing URLs for quick lookup
-	existingURLs := make(map[string]bool)
-	for _, layer := range bsm.state.Layers {
-		for _, page := range layer.Pages {
-			existingURLs[page.URL] = true
-		}
-	}
-
-	// Add new pages that don't already exist
-	addedCount := 0
-	for _, page := range pages {
-		if !existingURLs[page.URL] {
-			// Ensure the page has a timestamp and ID
-			if page.Timestamp.IsZero() {
-				page.Timestamp = time.Now()
-			}
-			if page.ID == "" {
-				page.ID = uuid.New().String()
-			}
-
-			targetLayer.Pages = append(targetLayer.Pages, page)
-			existingURLs[page.URL] = true
-			addedCount++
-		}
-	}
-
-	log.Info().Msgf("Added %d new pages to layer at depth %d", addedCount, depth)
 	return nil
 }
 
@@ -226,18 +217,19 @@ func (bsm *BaseStateManager) GetLayerByDepth(depth int) ([]Page, error) {
 	bsm.mutex.RLock()
 	defer bsm.mutex.RUnlock()
 
-	for _, layer := range bsm.state.Layers {
-		if layer.Depth == depth {
-			layer.mutex.RLock()
-			// Create a copy of the pages slice to avoid concurrent access issues
-			pagesCopy := make([]Page, len(layer.Pages))
-			copy(pagesCopy, layer.Pages)
-			layer.mutex.RUnlock()
-			return pagesCopy, nil
+	ids, exists := bsm.layerMap[depth]
+	if !exists {
+		return []Page{}, nil
+	}
+
+	pages := make([]Page, 0, len(ids))
+	for _, id := range ids {
+		if page, exists := bsm.pageMap[id]; exists {
+			pages = append(pages, page)
 		}
 	}
 
-	return nil, fmt.Errorf("no layer found at depth %d", depth)
+	return pages, nil
 }
 
 // GetState returns a copy of the current state
@@ -245,25 +237,29 @@ func (bsm *BaseStateManager) GetState() State {
 	bsm.mutex.RLock()
 	defer bsm.mutex.RUnlock()
 
-	// Create a deep copy to avoid concurrent access issues
-	stateCopy := State{
-		Layers:      make([]*Layer, len(bsm.state.Layers)),
-		Metadata:    bsm.state.Metadata,
-		LastUpdated: bsm.state.LastUpdated,
+	state := State{
+		Metadata:    bsm.metadata,
+		LastUpdated: bsm.lastUpdated,
+		Layers:      make([]*Layer, 0),
 	}
 
-	for i, layer := range bsm.state.Layers {
-		layer.mutex.RLock()
-		layerCopy := &Layer{
-			Depth: layer.Depth,
-			Pages: make([]Page, len(layer.Pages)),
+	// Convert layer map and page map to layers
+	for depth, ids := range bsm.layerMap {
+		pages := make([]Page, 0, len(ids))
+		for _, id := range ids {
+			if page, exists := bsm.pageMap[id]; exists {
+				pages = append(pages, page)
+			}
 		}
-		copy(layerCopy.Pages, layer.Pages)
-		layer.mutex.RUnlock()
-		stateCopy.Layers[i] = layerCopy
+
+		layer := &Layer{
+			Depth: depth,
+			Pages: pages,
+		}
+		state.Layers = append(state.Layers, layer)
 	}
 
-	return stateCopy
+	return state
 }
 
 // SetState updates the entire state
@@ -271,8 +267,24 @@ func (bsm *BaseStateManager) SetState(state State) {
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
 
-	bsm.state = state
-	bsm.state.LastUpdated = time.Now()
+	// Update metadata and timestamp
+	bsm.metadata = state.Metadata
+	bsm.lastUpdated = time.Now()
+
+	// Clear existing maps
+	bsm.layerMap = make(map[int][]string)
+	bsm.pageMap = make(map[string]Page)
+
+	// Convert layers to layerMap and pageMap
+	for _, layer := range state.Layers {
+		depth := layer.Depth
+		bsm.layerMap[depth] = make([]string, 0, len(layer.Pages))
+
+		for _, page := range layer.Pages {
+			bsm.pageMap[page.ID] = page
+			bsm.layerMap[depth] = append(bsm.layerMap[depth], page.ID)
+		}
+	}
 }
 
 // GetPreviousCrawls returns a list of previous crawl IDs
@@ -280,7 +292,7 @@ func (bsm *BaseStateManager) GetPreviousCrawls() ([]string, error) {
 	bsm.mutex.RLock()
 	defer bsm.mutex.RUnlock()
 
-	return bsm.state.Metadata.PreviousCrawlID, nil
+	return bsm.metadata.PreviousCrawlID, nil
 }
 
 // UpdateCrawlMetadata updates the crawl metadata
@@ -289,7 +301,7 @@ func (bsm *BaseStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 	defer bsm.mutex.Unlock()
 
 	// Only update if it's the current crawl
-	if bsm.state.Metadata.CrawlID != crawlID {
+	if bsm.metadata.CrawlID != crawlID {
 		return errors.New("cannot update metadata for a different crawl ID")
 	}
 
@@ -298,26 +310,26 @@ func (bsm *BaseStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 		switch key {
 		case "status":
 			if status, ok := value.(string); ok {
-				bsm.state.Metadata.Status = status
+				bsm.metadata.Status = status
 			}
 		case "endTime":
 			if endTime, ok := value.(time.Time); ok {
-				bsm.state.Metadata.EndTime = endTime
+				bsm.metadata.EndTime = endTime
 			}
 		case "previousCrawlID":
 			if prevID, ok := value.(string); ok {
 				// Append the new ID to the existing array
-				bsm.state.Metadata.PreviousCrawlID = append(bsm.state.Metadata.PreviousCrawlID, prevID)
+				bsm.metadata.PreviousCrawlID = append(bsm.metadata.PreviousCrawlID, prevID)
 			} else if prevIDs, ok := value.([]string); ok {
 				// For backward compatibility, also handle array input
-				bsm.state.Metadata.PreviousCrawlID = append(bsm.state.Metadata.PreviousCrawlID, prevIDs...)
+				bsm.metadata.PreviousCrawlID = append(bsm.metadata.PreviousCrawlID, prevIDs...)
 			}
 		default:
 			// Ignore unknown fields
 		}
 	}
 
-	bsm.state.LastUpdated = time.Now()
+	bsm.lastUpdated = time.Now()
 	return nil
 }
 
@@ -326,15 +338,15 @@ func (bsm *BaseStateManager) GetMaxDepth() (int, error) {
 	bsm.mutex.RLock()
 	defer bsm.mutex.RUnlock()
 
-	if len(bsm.state.Layers) == 0 {
-		return -1, errors.New("no layers found")
+	maxDepth := -1
+	for depth := range bsm.layerMap {
+		if depth > maxDepth {
+			maxDepth = depth
+		}
 	}
 
-	maxDepth := -1
-	for _, layer := range bsm.state.Layers {
-		if layer.Depth > maxDepth {
-			maxDepth = layer.Depth
-		}
+	if maxDepth == -1 {
+		return -1, errors.New("no layers found")
 	}
 
 	return maxDepth, nil
