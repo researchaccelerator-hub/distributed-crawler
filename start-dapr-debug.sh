@@ -31,7 +31,7 @@ go build -gcflags "all=-N -l" -o ./bin/app
 
 echo "Starting Delve debugger..."
 # Pass your app arguments after the double dash
-dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls CryptoBotRU --max-comments 1 --crawl-id test44 --tdlib-database-url http://tomb218.sg-host.com/tdlib.tgz --min-post-date 2024-01-01 --max-posts 500 --max-depth 1 &
+dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode job --urls CryptoBotRU --max-comments 1 --crawl-id test44 --tdlib-database-url http://tomb218.sg-host.com/tdlib.tgz --min-post-date 2024-01-01 --max-posts 500 --max-depth 1 &
 DLV_PID=$!
 
 # Give Delve a moment to initialize
@@ -44,8 +44,8 @@ echo "Press Ctrl+C to stop both Dapr and Delve"
 # Start Dapr sidecar (this will run in foreground)
 # Note: When using dlv, the args are passed to dlv instead of here
 dapr run \
-    --app-id your-app-id \
-    --app-port 8080 \
+    --app-id distributed-scheduler \
+    --app-port 6481 \
     --dapr-http-port 3500 \
     --dapr-grpc-port 50001 \
     --log-level debug \
