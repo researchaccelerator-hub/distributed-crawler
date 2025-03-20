@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -289,6 +290,11 @@ func TestCorruptedTarFile(t *testing.T) {
 
 // MockTelegramService is a mock implementation for testing
 type MockTelegramService struct{}
+
+func (m *MockTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
+	//TODO implement me
+	panic("implement me")
+}
 
 // InitializeClient simulates a successful TDLib connection
 func (m *MockTelegramService) InitializeClient(storagePrefix string) (crawler.TDLibClient, error) {

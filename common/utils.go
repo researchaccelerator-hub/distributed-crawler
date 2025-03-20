@@ -15,7 +15,13 @@ type CrawlerConfig struct {
 	StorageRoot      string
 	TDLibDatabaseURL string
 	MinPostDate      time.Time
+	PostRecency      time.Time
 	DaprJobMode      bool
+	MinUsers         int
+	CrawlID          string
+	MaxComments      int
+	MaxPosts         int
+	MaxDepth         int
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

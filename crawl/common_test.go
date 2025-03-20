@@ -114,7 +114,17 @@ func createTempStateManager() (*state.StateManager, string, error) {
 
 	// Create a state manager with the temp directory
 	crawlID := "test-crawl-" + uuid.New().String()
-	stateManager := state.NewStateManager(tmpDir, crawlID)
+	cfg := state.Config{
+		StorageRoot:      "",
+		ContainerName:    "",
+		BlobNameRoot:     "",
+		JobID:            "",
+		CrawlID:          crawlID,
+		CrawlExecutionID: "",
+		DAPREnabled:      false,
+		MaxLayers:        0,
+	}
+	stateManager, err := state.NewStateManager(cfg)
 
 	return stateManager, tmpDir, nil
 }

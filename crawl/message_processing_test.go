@@ -3,8 +3,11 @@ package crawl
 
 import (
 	"errors"
+	"github.com/google/uuid"
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
+	"github.com/stretchr/testify/mock"
 	"testing"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
@@ -21,7 +24,7 @@ func TestProcessMessage(t *testing.T) {
 	t.Run("GetMessageError", func(t *testing.T) {
 		// Setup
 		mockClient := new(MockTDLibClient)
-		msg := CreateClientMessage(1, "Test message", fixtures.ChatID)
+		//msg := CreateClientMessage(1, "Test message", fixtures.ChatID)
 
 		// Set expectations - only GetMessage should be called, which will return an error
 		mockClient.On("GetMessage", &client.GetMessageRequest{
@@ -29,8 +32,9 @@ func TestProcessMessage(t *testing.T) {
 			MessageId: 1,
 		}).Return(nil, errors.New("GetMessage error"))
 
+		cfg := common.CrawlerConfig{}
 		// Execute
-		err := processMessage(mockClient, msg, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, *fixtures.StateManager)
+		_, err := processMessage(mockClient, 1, fixtures.ChatID, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, fixtures.StateManager, cfg)
 
 		// Assert
 		assert.Error(t, err)
@@ -68,7 +72,8 @@ func TestProcessMessage(t *testing.T) {
 			viewcount int,
 			channelName string,
 			tdlibClient crawler.TDLibClient,
-			sm state.StateManager,
+			sm state.StateManagementInterface,
+			cfg common.CrawlerConfig,
 		) (post model.Post, err error) {
 			// Verify that mlr is nil due to the simulated error
 			if mlr != nil {
@@ -78,8 +83,9 @@ func TestProcessMessage(t *testing.T) {
 		}
 		defer func() { telegramhelper.ParseMessage = origParseMessage }()
 
+		cfg := common.CrawlerConfig{}
 		// Execute
-		err := processMessage(mockClient, msg, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, *fixtures.StateManager)
+		_, err := processMessage(mockClient, 2, fixtures.ChatID, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, fixtures.StateManager, cfg)
 
 		// Assert
 		assert.NoError(t, err) // Should not error since GetMessageLink error is non-critical
@@ -120,14 +126,16 @@ func TestProcessMessage(t *testing.T) {
 			viewcount int,
 			channelName string,
 			tdlibClient crawler.TDLibClient,
-			sm state.StateManager,
+			sm state.StateManagementInterface,
+			cfg common.CrawlerConfig,
 		) (post model.Post, err error) {
 			return model.Post{}, errors.New("ParseMessage error")
 		}
 		defer func() { telegramhelper.ParseMessage = origParseMessage }()
+		cfg := common.CrawlerConfig{}
 
 		// Execute
-		err := processMessage(mockClient, msg, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, *fixtures.StateManager)
+		_, err := processMessage(mockClient, 3, fixtures.ChatID, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, fixtures.StateManager, cfg)
 
 		// Assert
 		assert.Error(t, err)
@@ -168,14 +176,16 @@ func TestProcessMessage(t *testing.T) {
 			viewcount int,
 			channelName string,
 			tdlibClient crawler.TDLibClient,
-			sm state.StateManager,
+			sm state.StateManagementInterface,
+			cfg common.CrawlerConfig,
 		) (post model.Post, err error) {
 			return model.Post{PostLink: "parsed"}, nil
 		}
 		defer func() { telegramhelper.ParseMessage = origParseMessage }()
+		cfg := common.CrawlerConfig{}
 
 		// Execute
-		err := processMessage(mockClient, msg, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, *fixtures.StateManager)
+		_, err := processMessage(mockClient, 4, fixtures.ChatID, fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, fixtures.StateManager, cfg)
 
 		// Assert
 		assert.NoError(t, err)
@@ -205,60 +215,103 @@ func TestProcessAllMessages(t *testing.T) {
 		mockClient := new(MockTDLibClient)
 		mockProcessor := new(MockMessageProcessor)
 		mockFetcher := new(MockMessageFetcher)
+		mockStateManager := new(MockStateManager)
+		// Create owner page
+		ownerPage := &state.Page{
+			ID:       uuid.New().String(),
+			URL:      fixtures.ChannelName,
+			Status:   "unfetched",
+			Depth:    0,
+			Messages: []state.Message{},
+		}
 
 		// Set expectations for message fetcher
 		mockFetcher.On("FetchMessages", mockClient, fixtures.ChatID, int64(0)).Return(batch1, nil)
 		mockFetcher.On("FetchMessages", mockClient, fixtures.ChatID, int64(3)).Return(batch2, nil)
 		mockFetcher.On("FetchMessages", mockClient, fixtures.ChatID, int64(5)).Return([]*client.Message{}, nil)
 
-		// Set expectations for message processor
+		// Set expectations for state manager
+		// For UpdateStatePage (called multiple times in the function)
+		mockStateManager.On("UpdateStatePage", mock.AnythingOfType("state.Page")).Return()
+
+		// For UpdateStateMessage (called for each message)
 		for _, msg := range append(batch1, batch2...) {
+			mockStateManager.On("UpdateStateMessage",
+				msg.Id,
+				msg.ChatId,
+				ownerPage,
+				"fetched").Return()
+		}
+
+		// Set expectations for message processor with new signature
+		for _, msg := range append(batch1, batch2...) {
+			outlinks := []string{"https://t.me/newchannel1", "https://t.me/newchannel2"}
 			mockProcessor.On("ProcessMessage",
 				mockClient,
-				msg,
+				msg.Id,
+				msg.ChatId,
 				fixtures.Channel,
 				fixtures.CrawlID,
 				fixtures.ChannelName,
-				fixtures.StateManager).Return(nil)
+				mock.MatchedBy(func(sm interface{}) bool {
+					// This will match any interface{} that's passed
+					return true
+				}),
+				mock.AnythingOfType("common.CrawlerConfig")).Return(outlinks, nil)
 		}
 
+		cfg := common.CrawlerConfig{}
+
 		// Execute
-		stateManagerValue := *fixtures.StateManager
-		err := processAllMessagesWithProcessor(
+		discoveredChannels, err := processAllMessagesWithProcessor(
 			mockClient,
 			fixtures.Channel,
 			fixtures.CrawlID,
 			fixtures.ChannelName,
-			stateManagerValue,
+			mockStateManager,
 			mockProcessor,
-			mockFetcher)
+			mockFetcher,
+			ownerPage,
+			cfg)
 
 		// Assert
 		assert.NoError(t, err)
+		assert.Len(t, discoveredChannels, 10) // 5 messages * 2 outlinks each
 		mockProcessor.AssertNumberOfCalls(t, "ProcessMessage", 5)
 		mockFetcher.AssertExpectations(t)
 		mockProcessor.AssertExpectations(t)
+		mockStateManager.AssertExpectations(t)
 	})
-
 	t.Run("FetchError", func(t *testing.T) {
 		// Create mocks
 		mockClient := new(MockTDLibClient)
 		mockProcessor := new(MockMessageProcessor)
 		mockFetcher := new(MockMessageFetcher)
+		mockStateManager := new(MockStateManager)
 
 		// Set expectations
 		fetchError := errors.New("fetch error")
 		mockFetcher.On("FetchMessages", mockClient, fixtures.ChatID, int64(0)).Return([]*client.Message(nil), fetchError)
+		ownerPage := &state.Page{
+			ID:       uuid.New().String(),
+			URL:      fixtures.ChannelName,
+			Status:   "unfetched",
+			Depth:    0,
+			Messages: []state.Message{},
+		}
+		cfg := common.CrawlerConfig{}
 
 		// Execute
-		err := processAllMessagesWithProcessor(
+		_, err := processAllMessagesWithProcessor(
 			mockClient,
 			fixtures.Channel,
 			fixtures.CrawlID,
 			fixtures.ChannelName,
-			*fixtures.StateManager,
+			mockStateManager,
 			mockProcessor,
-			mockFetcher)
+			mockFetcher,
+			ownerPage,
+			cfg)
 
 		// Assert
 		assert.Error(t, err)
@@ -279,51 +332,107 @@ func TestProcessAllMessages(t *testing.T) {
 		mockClient := new(MockTDLibClient)
 		mockProcessor := new(MockMessageProcessor)
 		mockFetcher := new(MockMessageFetcher)
+		mockStateManager := new(MockStateManager)
+
+		// Create owner page
+		ownerPage := &state.Page{
+			ID:       uuid.New().String(),
+			URL:      fixtures.ChannelName,
+			Status:   "unfetched",
+			Depth:    0,
+			Messages: []state.Message{},
+		}
 
 		// Set expectations for fetcher
 		mockFetcher.On("FetchMessages", mockClient, fixtures.ChatID, int64(0)).Return(messages, nil)
 		mockFetcher.On("FetchMessages", mockClient, fixtures.ChatID, int64(3)).Return([]*client.Message{}, nil)
 
+		// Set expectations for state manager methods
+		// This is crucial - set up expectations for ALL methods that will be called
+		mockStateManager.On("UpdateStatePage", mock.AnythingOfType("state.Page")).Return()
+		//mockStateManager.On("StoreState").Return().Times(5)
+		// For UpdateStateMessage (called for each message)
+		for _, msg := range messages {
+			mockStateManager.On("UpdateStateMessage",
+				msg.Id,
+				msg.ChatId,
+				ownerPage,
+				mock.AnythingOfType("string")).Return()
+		}
+
 		// Set expectations for processor - fail on the second message
-		mockProcessor.On("ProcessMessage", mockClient, messages[0], fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, fixtures.StateManager).Return(nil)
-		mockProcessor.On("ProcessMessage", mockClient, messages[1], fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, fixtures.StateManager).Return(errors.New("process error"))
-		mockProcessor.On("ProcessMessage", mockClient, messages[2], fixtures.Channel, fixtures.CrawlID, fixtures.ChannelName, fixtures.StateManager).Return(nil)
+		for _, msg := range messages {
+			outlinks := []string{"https://t.me/newchannel1", "https://t.me/newchannel2"}
+			mockProcessor.On("ProcessMessage",
+				mockClient,
+				msg.Id,
+				msg.ChatId,
+				fixtures.Channel,
+				fixtures.CrawlID,
+				fixtures.ChannelName,
+				mock.MatchedBy(func(sm interface{}) bool {
+					return true // Match any StateManager passed
+				}),
+				mock.MatchedBy(func(cfg interface{}) bool {
+					return true // Match any config passed
+				})).Return(outlinks, nil)
+		}
+
+		cfg := common.CrawlerConfig{}
 
 		// Execute
-		err := processAllMessagesWithProcessor(
+		_, err := processAllMessagesWithProcessor(
 			mockClient,
 			fixtures.Channel,
 			fixtures.CrawlID,
 			fixtures.ChannelName,
-			*fixtures.StateManager,
+			mockStateManager,
 			mockProcessor,
-			mockFetcher)
+			mockFetcher,
+			ownerPage,
+			cfg)
 
 		// Assert
 		assert.NoError(t, err) // Should continue despite process errors
 		mockProcessor.AssertNumberOfCalls(t, "ProcessMessage", 3)
 		mockFetcher.AssertExpectations(t)
 		mockProcessor.AssertExpectations(t)
+		mockStateManager.AssertExpectations(t)
 	})
-
 	t.Run("NoMessages", func(t *testing.T) {
 		// Create mocks
 		mockClient := new(MockTDLibClient)
 		mockProcessor := new(MockMessageProcessor)
 		mockFetcher := new(MockMessageFetcher)
+		mockStateManager := new(MockStateManager)
 
 		// Set expectations
 		mockFetcher.On("FetchMessages", mockClient, fixtures.ChatID, int64(0)).Return([]*client.Message{}, nil)
 
+		// Add missing expectations for state manager
+		mockStateManager.On("UpdateStatePage", mock.AnythingOfType("state.Page")).Return()
+
+		// Create owner page
+		ownerPage := &state.Page{
+			ID:       uuid.New().String(),
+			URL:      fixtures.ChannelName,
+			Status:   "unfetched",
+			Depth:    0,
+			Messages: []state.Message{},
+		}
+		cfg := common.CrawlerConfig{}
+
 		// Execute
-		err := processAllMessagesWithProcessor(
+		_, err := processAllMessagesWithProcessor(
 			mockClient,
 			fixtures.Channel,
 			fixtures.CrawlID,
 			fixtures.ChannelName,
-			*fixtures.StateManager,
+			mockStateManager,
 			mockProcessor,
-			mockFetcher)
+			mockFetcher,
+			ownerPage,
+			cfg)
 
 		// Assert
 		assert.NoError(t, err)

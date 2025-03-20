@@ -90,62 +90,68 @@ func readURLsFromFile(filename string) ([]string, error) {
 //   - crawlCfg: A CrawlerConfig struct containing configuration settings for the crawler.
 func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
-	crawlid := common.GenerateCrawlID()
-	log.Info().Msgf("Starting scraper for crawl: %s", crawlid)
+	crawlexecid := common.GenerateCrawlID()
+	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
 	cfg := state.Config{
-		StorageRoot:   crawlCfg.StorageRoot,
-		ContainerName: "",
-		BlobNameRoot:  "",
-		JobID:         "",
-		CrawlID:       crawlid,
+		StorageRoot:      crawlCfg.StorageRoot,
+		JobID:            "",
+		CrawlID:          crawlCfg.CrawlID,
+		CrawlExecutionID: crawlexecid,
 	}
-	sm, err := state.NewStateManager(cfg)
+	smfact := state.DefaultStateManagerFactory{}
+	sm, err := smfact.Create(cfg)
+	//sm, err := state.NewStateManager(cfg)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to load progress")
 	}
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	list, err := sm.SeedSetup(stringList)
 
-	for _, l := range list {
-		for _, la := range l.Pages {
-			if la.Status != "fetched" {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
-							// Continue to the next item
-						}
-					}()
+	//Layer Zero Loaded
+	err = sm.Initialize(stringList)
 
-					la.Timestamp = time.Now()
-					if outlinks, err := crawl.Run(crawlid, &la, crawlCfg.StorageRoot, *sm, crawlCfg); err != nil {
-						log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
-						la.Status = "error"
-					} else {
-						la.Status = "fetched"
-						pag := make([]state.Page, len(outlinks))
-						for i, ol := range outlinks {
-							pag[i] = *ol
-						}
-
-						if len(list) >= l.Depth {
-							existing := list[l.Depth+1]
-							existing.Pages = append(existing.Pages, pag...)
-						} else {
-							layer := state.Layer{
-								Depth: l.Depth + 1,
-								Pages: pag,
-							}
-							list = append(list, &layer)
-						}
-					}
-
-					err := sm.StoreLayers(list)
-					if err != nil {
-						log.Error().Stack().Err(err).Msg("Failed to store layers")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to initialize state")
+	}
+	connect, _ := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
+	layerzero, err := sm.GetLayerByDepth(0)
+	for _, la := range layerzero {
+		if la.Status != "fetched" {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
+						// Continue to the next item
 					}
 				}()
-			}
+
+				la.Timestamp = time.Now()
+				if _, err := crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg); err != nil {
+					log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
+					la.Status = "error"
+				} else {
+					la.Status = "fetched"
+					//pag := make([]state.Page, len(outlinks))
+					//for i, ol := range outlinks {
+					//	pag[i] = *ol
+					//}
+					//
+					//if len(list) >= l.Depth {
+					//	existing := list[l.Depth+1]
+					//	existing.Pages = append(existing.Pages, pag...)
+					//} else {
+					//	layer := state.Layer{
+					//		Depth: l.Depth + 1,
+					//		Pages: pag,
+					//	}
+					//	list = append(list, &layer)
+					//}
+				}
+
+				//err := sm.StoreLayers(list)
+				if err != nil {
+					log.Error().Stack().Err(err).Msg("Failed to store layers")
+				}
+			}()
 		}
 	}
 
