@@ -189,6 +189,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if err := sm.UpdateCrawlMetadata(cfg.CrawlID, completionMetadata); err != nil {
 		log.Panic().Err(err).Msg("Failed to update crawl completion metadata")
 	}
+
+	err = sm.ExportPagesToBinding(cfg.CrawlID)
+	if err != nil {
+		return
+	}
 	log.Info().Msg("All items processed successfully.")
 }
 

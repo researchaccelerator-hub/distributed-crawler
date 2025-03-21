@@ -20,7 +20,7 @@ import (
 const (
 	// Default component names
 	defaultStateStoreName = "statestore"
-	defaultStorageBinding = "crawlstorage"
+	defaultStorageBinding = "telegramscrawlstorage"
 )
 
 // DaprStateManager implements StateManagementInterface using Dapr
@@ -877,6 +877,112 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string) error {
 	}
 
 	log.Info().Str("crawlID", crawlID).Int("pageCount", loadedCount).Msg("Loaded pages into memory from DAPR")
+	return nil
+}
+
+func (dsm *DaprStateManager) ExportPagesToBinding(crawlID string) error {
+	exportedCount := 0
+
+	// Get timestamp for filename
+	timestamp := time.Now().Format("20060102-150405")
+	filename := fmt.Sprintf("channel-pages-%s-%s.jsonl", crawlID, timestamp)
+
+	// Create storage path
+	storagePath, err := dsm.generateStoragePath(
+		"analysis", // Using "analysis" instead of channel ID
+		fmt.Sprintf("channels/%s", filename),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to generate storage path: %w", err)
+	}
+
+	// Prepare for collecting all data as JSONL
+	var allPagesData []byte
+
+	// For each layer in the layer map
+	for _, pageIDs := range dsm.layerMap {
+		// For each page ID in the layer
+		for _, pageID := range pageIDs {
+			// Fetch the page from Dapr or memory
+			var page Page
+
+			// First try from memory
+			dsm.mutex.RLock()
+			existingPage, exists := dsm.pageMap[pageID]
+			dsm.mutex.RUnlock()
+
+			if exists {
+				page = existingPage
+			} else {
+				// If not in memory, fetch from Dapr
+				pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
+				pageResponse, err := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					pageKey,
+					nil,
+				)
+
+				if err != nil || pageResponse.Value == nil {
+					log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
+					continue
+				}
+
+				err = json.Unmarshal(pageResponse.Value, &page)
+				if err != nil {
+					log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
+					continue
+				}
+			}
+
+			// Extract channel ID - customize this based on your page structure
+			channelID := page.URL
+			if channelID == "" {
+				channelID = "unknown" // Default for pages without channel ID
+			}
+
+			// Marshal page to JSON and append to our data buffer with newline
+			pageData, err := json.Marshal(page)
+			if err != nil {
+				log.Warn().Err(err).Str("pageID", pageID).Msg("Failed to marshal page data")
+				continue
+			}
+
+			// Append newline for JSONL format
+			pageData = append(pageData, '\n')
+			allPagesData = append(allPagesData, pageData...)
+
+			exportedCount++
+		}
+	}
+
+	// If we didn't export any pages, return early
+	if exportedCount == 0 {
+		return fmt.Errorf("no pages found to export for crawl ID: %s", crawlID)
+	}
+
+	// Encode data for Dapr binding
+	encodedData := base64.StdEncoding.EncodeToString(allPagesData)
+
+	// Prepare metadata for the binding
+	metadata := map[string]string{
+		"path":      storagePath,
+		"operation": "create",
+	}
+
+	// Send to Dapr binding
+	req := daprc.InvokeBindingRequest{
+		Name:      dsm.storageBinding,
+		Operation: "create",
+		Data:      []byte(encodedData),
+		Metadata:  metadata,
+	}
+
+	_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
+	if err != nil {
+		return fmt.Errorf("failed to store pages via Dapr binding: %w", err)
+	}
+
 	return nil
 }
 

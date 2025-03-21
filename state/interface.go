@@ -22,6 +22,7 @@ type StateManagementInterface interface {
 
 	// State persistence
 	SaveState() error
+	ExportPagesToBinding(crawlID string) error
 
 	// Data storage
 	StorePost(channelID string, post model.Post) error

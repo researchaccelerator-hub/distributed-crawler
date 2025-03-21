@@ -408,7 +408,9 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 		log.Error().Err(err).Msg("Failed to update crawl completion metadata")
 		return err
 	}
-
+	err = sm.ExportPagesToBinding(cfg.CrawlID)
+	if err != nil {
+	}
 	log.Info().Msg("All items processed successfully.")
 	return nil
 }
