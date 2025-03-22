@@ -7,7 +7,7 @@ import (
 	"fmt"
 	daprc "github.com/dapr/go-sdk/client"
 	"github.com/dapr/go-sdk/service/common"
-	daprs "github.com/dapr/go-sdk/service/http"
+	daprs "github.com/dapr/go-sdk/service/grpc"
 	common2 "github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
@@ -41,7 +41,10 @@ func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 
 	// Create a new Dapr service
 	port := fmt.Sprintf(":%d", crawlerCfg.DaprPort)
-	server := daprs.NewService(port)
+	server, err := daprs.NewService(port)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to start server: %v")
+	}
 
 	// Creates handlers for the service
 	if err := server.AddServiceInvocationHandler("scheduleJob", scheduleJob); err != nil {
