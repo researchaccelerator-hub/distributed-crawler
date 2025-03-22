@@ -30,4 +30,4 @@ COPY --from=builder /app/main .
 
 # Set the entrypoint
 ENTRYPOINT ["./main"]
-CMD ["--dapr", "--dapr-mode job"]
+CMD ["--dapr", "--dapr-mode", "job"]
