@@ -191,7 +191,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is ./config.yaml)")
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.DaprMode, "dapr", false, "run with DAPR enabled")
 	rootCmd.PersistentFlags().StringVar(&daprMode, "dapr-mode", "job", "DAPR mode to use ('job' or 'standalone')")
-	rootCmd.PersistentFlags().IntVar(&crawlerCfg.DaprPort, "dapr-port", 6400, "DAPR port to use")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.DaprPort, "dapr-port", 6481, "DAPR port to use")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.Concurrency, "concurrency", 1, "number of concurrent crawlers")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.Timeout, "timeout", 30, "HTTP request timeout in seconds")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.UserAgent, "user-agent", "Mozilla/5.0 Crawler", "User agent to use")
