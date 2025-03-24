@@ -9,11 +9,16 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hello, World!")
+}
 
 // StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,
 // configures the crawler using the specified configuration, and optionally runs code generation. If no URLs are provided,
@@ -26,6 +31,8 @@ import (
 func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting crawler in standalone mode")
 
+	http.HandleFunc("/", handler)
+	http.ListenAndServe(":8080", nil)
 	// Collect URLs from command line arguments or file
 	var urls []string
 
