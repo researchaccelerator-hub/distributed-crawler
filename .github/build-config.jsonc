@@ -1,19 +1,17 @@
 {
     "app_name": "distributed-crawler",
     "deploy_type": "K8S",
-    // "sequential_build": true,
+    "sequential_build": true,
     "builds": [
+        {
+            "image_name": "tdlib",
+            "context": ".",
+            "dockerfile": "Dockerfile.tdlib"
+        },
         {
             "image_name": "distributed-crawler",
             "context": ".",
             "dockerfile": "Dockerfile"
         }
-        // ,
-        // {
-        //     "image_name": "tdlib",
-        //     "context": ".",
-        //     "dockerfile": "Dockerfile.tdlib",
-        //     "tag_override": "latest"
-        // }
     ]
 }
