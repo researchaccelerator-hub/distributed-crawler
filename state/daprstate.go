@@ -21,7 +21,7 @@ import (
 const (
 	// Default component names
 	defaultStateStoreName = "statestore"
-	defaultStorageBinding = "telegramscrawlstorage"
+	defaultStorageBinding = "telegramcrawlstorage"
 )
 
 // DaprStateManager implements StateManagementInterface using Dapr
