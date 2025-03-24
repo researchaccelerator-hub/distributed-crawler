@@ -70,6 +70,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
+	select {}
 }
 
 // readURLsFromFile reads a file specified by the filename and returns a slice of URLs.
