@@ -32,7 +32,13 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	log.Info().Msg("Starting crawler in standalone mode")
 
 	http.HandleFunc("/", handler)
-	http.ListenAndServe(":6481", nil)
+	go func() {
+		if err := http.ListenAndServe(":6481", nil); err != nil {
+			// Log the error and exit the application if the server fails to start
+			fmt.Printf("Failed to start server: %v\n", err)
+			return
+		}
+	}()
 	// Collect URLs from command line arguments or file
 	var urls []string
 
