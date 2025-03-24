@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -519,7 +520,6 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 		"path":      storagePath,
 		"operation": "append",
 	}
-
 	// Send to Dapr binding
 	req := daprc.InvokeBindingRequest{
 		Name:      dsm.storageBinding,
@@ -528,6 +528,7 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 		Metadata:  metadata,
 	}
 
+	log.Info().Msgf("Writing file to: %s", storagePath)
 	_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
 	if err != nil {
 		return fmt.Errorf("failed to store post via Dapr: %w", err)
@@ -538,7 +539,7 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 }
 
 // StoreFile stores a file via Dapr
-func (dsm *DaprStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, error) {
+func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fileName string) (string, error) {
 	// Check if the file exists
 	if _, err := os.Stat(sourceFilePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("source file does not exist: %w", err)
@@ -550,13 +551,18 @@ func (dsm *DaprStateManager) StoreFile(channelID string, sourceFilePath string, 
 		return "", fmt.Errorf("failed to read source file: %w", err)
 	}
 
-	// If fileName is empty, use the base name of the source file
 	if fileName == "" {
 		fileName = filepath.Base(sourceFilePath)
+	} else {
+		// Get the extension from the source file and add it to the fileName if it doesn't already have it
+		ext := filepath.Ext(sourceFilePath)
+		if ext != "" && !strings.HasSuffix(fileName, ext) {
+			fileName = fileName + ext
+		}
 	}
 
 	// Create storage path for media
-	storagePath, err := dsm.generateStoragePath(channelID, fmt.Sprintf("media/%s", fileName))
+	storagePath, err := dsm.generateCrawlLevelStoragePath(fmt.Sprintf("media/%s", fileName))
 	if err != nil {
 		return "", err
 	}
@@ -578,6 +584,7 @@ func (dsm *DaprStateManager) StoreFile(channelID string, sourceFilePath string, 
 		Metadata:  metadata,
 	}
 
+	log.Info().Msgf("Writing file to: %s", storagePath)
 	_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
 	if err != nil {
 		return "", fmt.Errorf("failed to store file via Dapr: %w", err)
@@ -745,6 +752,16 @@ func (dsm *DaprStateManager) generateStoragePath(channelID, subPath string) (str
 		dsm.config.JobID,
 		dsm.config.CrawlID,
 		channelID,
+		subPath,
+	), nil
+}
+
+func (dsm *DaprStateManager) generateCrawlLevelStoragePath(subPath string) (string, error) {
+	return fmt.Sprintf(
+		"%s/%s/%s/%s/%s",
+		dsm.config.StorageRoot,
+		dsm.config.JobID,
+		dsm.config.CrawlID,
 		subPath,
 	), nil
 }
@@ -970,6 +987,7 @@ func (dsm *DaprStateManager) ExportPagesToBinding(crawlID string) error {
 		"operation": "create",
 	}
 
+	log.Info().Msgf("Writing file to: %s", storagePath)
 	// Send to Dapr binding
 	req := daprc.InvokeBindingRequest{
 		Name:      dsm.storageBinding,
