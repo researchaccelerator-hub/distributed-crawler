@@ -16,4 +16,5 @@ type TDLibClient interface {
 	Close() (*client.Ok, error)
 	GetMe() (*client.User, error)
 	GetBasicGroupFullInfo(req *client.GetBasicGroupFullInfoRequest) (*client.BasicGroupFullInfo, error)
+	GetUser(*client.GetUserRequest) (*client.User, error)
 }

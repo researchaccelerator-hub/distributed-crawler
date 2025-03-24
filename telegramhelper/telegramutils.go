@@ -244,8 +244,13 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		// Collect the comment text
 		for _, msg := range threadHistory.Messages {
 			comment := model.Comment{}
+
+			username := GetPoster(tdlibClient, msg)
+			comment.Handle = username
+			
 			if textContent, ok := msg.Content.(*client.MessageText); ok {
 				comment.Text = textContent.Text.Text
+
 			}
 			if msg.InteractionInfo != nil && len(msg.InteractionInfo.Reactions.Reactions) > 0 {
 				comment.Reactions = make(map[string]int)
@@ -288,4 +293,36 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 	log.Info().Msgf("Got %d comments for channel %s", len(comments), channelname)
 	return comments, nil
+}
+
+func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
+	username := "unknown"
+	if msg.SenderId != nil {
+		switch sender := msg.SenderId.(type) {
+		case *client.MessageSenderUser:
+			// Get user info to extract username
+			userInfo, err := tdlibClient.GetUser(&client.GetUserRequest{
+				UserId: sender.UserId,
+			})
+			if err == nil && userInfo != nil {
+				username := userInfo.Usernames.ActiveUsernames[0]
+				// If username is empty, use first name + last name as fallback
+				if username == "" && userInfo.FirstName != "" {
+					username = userInfo.FirstName
+					if userInfo.LastName != "" {
+						username += " " + userInfo.LastName
+					}
+				}
+			}
+		case *client.MessageSenderChat:
+			// Handle messages from channels or groups
+			chatInfo, err := tdlibClient.GetChat(&client.GetChatRequest{
+				ChatId: sender.ChatId,
+			})
+			if err == nil && chatInfo != nil {
+				username = chatInfo.Title
+			}
+		}
+	}
+	return username
 }

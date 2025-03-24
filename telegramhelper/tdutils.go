@@ -480,7 +480,7 @@ var ParseMessage = func(
 	vc := GetViewCount(message, channelName)
 	postUid := fmt.Sprintf("%s-%s", messageNumber, channelName)
 	sharecount, _ := GetMessageShareCount(tdlibClient, chat.Id, message.Id, channelName)
-
+	username := GetPoster(tdlibClient, message)
 	post = model.Post{
 		PostLink:       mlr.Link,
 		ChannelID:      message.ChatId,
@@ -529,6 +529,7 @@ var ParseMessage = func(
 		},
 		Comments:  comments,
 		Reactions: reactions,
+		Handle:    username,
 	}
 	storeErr := sm.StorePost(channelName, post)
 	if storeErr != nil {

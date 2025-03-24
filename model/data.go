@@ -66,12 +66,14 @@ type Post struct {
 	Reactions               map[string]int    `json:"reactions"`
 	Outlinks                []string          `json:"outlinks"`
 	CaptureTime             time.Time         `json:"capture_time"`
+	Handle                  string            `json:"handle"`
 }
 type Comment struct {
 	Text       string         `json:"text"`
 	Reactions  map[string]int `json:"reactions"`
 	ViewCount  int            `json:"view_count"`
 	ReplyCount int            `json:"reply_count"`
+	Handle     string         `json:"handle"`
 }
 type ChannelData struct {
 	ChannelID             int64          `json:"channel_id"`
