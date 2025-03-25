@@ -14,9 +14,39 @@ on:
     branches:
       - main
 jobs:
-  node-build:
-    uses: IRIEAccelerator/common-workflows/.github/workflows/node-reuse.yaml@main
-    secrets: inherit
-    with:
-      config-file: .github/build-config.jsonc
-      runner: injected-runner
+  # node-build:
+  #   uses: IRIEAccelerator/common-workflows/.github/workflows/node-reuse.yaml@main
+  #   secrets: inherit
+  #   with:
+  #     config-file: .github/build-config.jsonc
+  #     runner: injected-runner
+  trigger-build:
+    uses: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test env vars
+        run: |
+          echo "${org_repo}, ${ref}, ${sha}"
+        env:
+          org_repo: ${{github.repository}}
+          ref: ${{github.ref_name}}
+          sha: ${{github.sha}}
+
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.TRIGGER_APP_ID }}
+          private-key: ${{ secrets.TRIGGER_APP_KEY }}
+          owner: IRIEAccelerator
+          repositories: "common-workflows"
+
+      - name: Trigger Build and Deploy
+        run: |
+          gh workflow run build-and-deploy-trigger.yaml -f repository="${org_repo}" -f config-file=".github/build-config.jsonc" -f ref="${ref}" -f sha="${sha}" --ref "feature/INFRA-185/adaptBuildandDeployforOS" --repo "irieaccelerator/common-workflows"
+        env:
+          org_repo: ${{github.repository}}
+          ref: ${{github.ref_name}}
+          sha: ${{github.sha}}
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
