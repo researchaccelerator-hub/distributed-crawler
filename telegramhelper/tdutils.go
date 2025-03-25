@@ -38,6 +38,7 @@ func (s *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TD
 func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	authorizer := client.ClientAuthorizer()
 	go client.CliInteractor(authorizer)
+
 	if cfg.TDLibDatabaseURL != "" {
 		if err := downloadAndExtractTarball(cfg.TDLibDatabaseURL, filepath.Join(storagePrefix, "state")); err != nil {
 			log.Warn().Err(err).Msg("Failed to download and extract pre-seeded TDLib database, proceeding with fresh database")
@@ -52,19 +53,6 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		return nil, err
 	}
 	apiHash := os.Getenv("TG_API_HASH")
-
-	// Create temporary directory
-	workingDir, err := os.Getwd()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get working directory")
-		return nil, err
-	}
-	tempDir, err := os.MkdirTemp(workingDir, "tempdir-*")
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to create temporary directory")
-		return nil, err
-	}
-	log.Info().Msgf("Temporary directory created: %s", tempDir)
 
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
@@ -94,7 +82,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
 
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 10}
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 1}
 		tdlibClient.SetLogVerbosityLevel(&verb)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
@@ -114,6 +102,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		log.Warn().Msg("Timeout reached. Exiting application.")
 		return nil, fmt.Errorf("timeout initializing TDLib client")
 	}
+
 }
 
 // GetMe retrieves the authenticated Telegram user

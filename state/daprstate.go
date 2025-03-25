@@ -514,10 +514,13 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 
 	// Encode data for Dapr binding
 	encodedData := base64.StdEncoding.EncodeToString(postData)
-
+	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
+	if err != nil {
+		return err
+	}
 	// Prepare metadata
 	metadata := map[string]string{
-		"path":      storagePath,
+		key:         storagePath,
 		"operation": "append",
 	}
 	// Send to Dapr binding
@@ -569,10 +572,13 @@ func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fi
 
 	// Encode data for Dapr binding
 	encodedData := base64.StdEncoding.EncodeToString(fileContent)
-
+	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
+	if err != nil {
+		return "", err
+	}
 	// Prepare metadata
 	metadata := map[string]string{
-		"path":      storagePath,
+		key:         storagePath,
 		"operation": "create",
 	}
 
@@ -980,10 +986,13 @@ func (dsm *DaprStateManager) ExportPagesToBinding(crawlID string) error {
 
 	// Encode data for Dapr binding
 	encodedData := base64.StdEncoding.EncodeToString(allPagesData)
-
+	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
+	if err != nil {
+		return err
+	}
 	// Prepare metadata for the binding
 	metadata := map[string]string{
-		"path":      storagePath,
+		key:         storagePath,
 		"operation": "create",
 	}
 

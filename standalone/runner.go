@@ -4,11 +4,15 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
-	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/zelenin/go-tdlib/client"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -38,7 +42,7 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 		urls = append(urls, fileURLs...)
 	}
 
-	if len(urls) == 0 {
+	if !generateCode && len(urls) == 0 {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
 	}
 
@@ -46,14 +50,87 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 
 	if generateCode {
 		log.Info().Msg("Running code generation...")
-		svc := &telegramhelper.RealTelegramService{}
-		telegramhelper.GenCode(svc, crawlerCfg.StorageRoot)
+		//svc := &telegramhelper.RealTelegramService{}
+		//telegramhelper.GenCode(svc, crawlerCfg.StorageRoot)
+		generatePCode()
 		os.Exit(0)
 	}
 
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
+}
+
+func generatePCode() {
+	var (
+		apiIdRaw = os.Getenv("TG_API_ID")
+		apiHash  = os.Getenv("TG_API_HASH")
+	)
+
+	apiId64, err := strconv.ParseInt(apiIdRaw, 10, 32)
+	if err != nil {
+		log.Fatal().Msgf("strconv.Atoi error: %s", err)
+	}
+
+	authorizer := client.ClientAuthorizer()
+	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
+		UseTestDc:           false,
+		DatabaseDirectory:   filepath.Join(".tdlib", "database"),
+		FilesDirectory:      filepath.Join(".tdlib", "files"),
+		UseFileDatabase:     true,
+		UseChatInfoDatabase: true,
+		UseMessageDatabase:  true,
+		UseSecretChats:      false,
+		ApiId:               int32(apiId64),
+		ApiHash:             apiHash,
+		SystemLanguageCode:  "en",
+		DeviceModel:         "Server",
+		SystemVersion:       "1.0.0",
+		ApplicationVersion:  "1.0.0",
+	}
+
+	go client.CliInteractor(authorizer)
+
+	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
+		NewVerbosityLevel: 0,
+	})
+	if err != nil {
+		log.Fatal().Msgf("SetLogVerbosityLevel error: %s", err)
+	}
+
+	tdlibClient, err := client.NewClient(authorizer)
+	if err != nil {
+		log.Fatal().Msgf("NewClient error: %s", err)
+	}
+
+	versionOption, err := client.GetOption(&client.GetOptionRequest{
+		Name: "version",
+	})
+	if err != nil {
+		log.Fatal().Msgf("GetOption error: %s", err)
+	}
+
+	commitOption, err := client.GetOption(&client.GetOptionRequest{
+		Name: "commit_hash",
+	})
+	if err != nil {
+		log.Fatal().Msgf("GetOption error: %s", err)
+	}
+
+	log.Printf("TDLib version: %s (commit: %s)", versionOption.(*client.OptionValueString).Value, commitOption.(*client.OptionValueString).Value)
+
+	me, err := tdlibClient.GetMe()
+	if err != nil {
+		log.Fatal().Msgf("GetMe error: %s", err)
+	}
+
+	log.Printf("Me: %s %s", me.FirstName, me.LastName)
+
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	<-ch
+	tdlibClient.Close()
+	os.Exit(1)
 }
 
 // readURLsFromFile reads a file specified by the filename and returns a slice of URLs.

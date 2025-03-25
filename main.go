@@ -164,7 +164,7 @@ var rootCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// If no specific subcommand is invoked, show help
-		if len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" {
+		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" {
 			cmd.Help()
 			return
 		}
