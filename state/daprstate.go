@@ -747,7 +747,7 @@ func (dsm *DaprStateManager) getStateKey(crawlID string) string {
 
 // getMediaCacheKey generates a key for the media cache in Dapr
 func (dsm *DaprStateManager) getMediaCacheKey() string {
-	return fmt.Sprintf("%s/media-cache", dsm.config.JobID)
+	return fmt.Sprintf("%s/media-cache", dsm.config.CrawlID)
 }
 
 // generateStoragePath creates a standardized storage path
