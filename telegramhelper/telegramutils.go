@@ -247,7 +247,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 			username := GetPoster(tdlibClient, msg)
 			comment.Handle = username
-			
+
 			if textContent, ok := msg.Content.(*client.MessageText); ok {
 				comment.Text = textContent.Text.Text
 
@@ -305,7 +305,7 @@ func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 				UserId: sender.UserId,
 			})
 			if err == nil && userInfo != nil {
-				username := userInfo.Usernames.ActiveUsernames[0]
+				username = userInfo.Usernames.ActiveUsernames[0]
 				// If username is empty, use first name + last name as fallback
 				if username == "" && userInfo.FirstName != "" {
 					username = userInfo.FirstName
@@ -324,5 +324,6 @@ func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 			}
 		}
 	}
+
 	return username
 }

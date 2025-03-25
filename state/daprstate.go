@@ -764,7 +764,7 @@ func (dsm *DaprStateManager) generateStoragePath(channelID, subPath string) (str
 
 func (dsm *DaprStateManager) generateCrawlLevelStoragePath(subPath string) (string, error) {
 	return fmt.Sprintf(
-		"%s/%s/%s/%s/%s",
+		"%s/%s/%s/%s",
 		dsm.config.StorageRoot,
 		dsm.config.JobID,
 		dsm.config.CrawlID,
