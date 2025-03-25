@@ -21,7 +21,7 @@ jobs:
   #     config-file: .github/build-config.jsonc
   #     runner: injected-runner
   trigger-build:
-    uses: ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
