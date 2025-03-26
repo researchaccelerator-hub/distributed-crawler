@@ -317,6 +317,10 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 	}
 
 	_, err = sm.StoreFile(channelName, path, remoteid)
+	e := os.Remove(path)
+	if e != nil {
+		log.Error().Err(e).Msg("Failed to remove file")
+	}
 	removeMultimedia(path)
 	if err != nil {
 		log.Error().Err(err).Str("path", path).Msg("Failed to upload file to blob storage")
