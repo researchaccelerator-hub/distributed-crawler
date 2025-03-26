@@ -326,7 +326,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 	if err != nil {
 		return "", err
 	}
-
+	removeMultimedia(path)
 	return remoteid, nil
 }
 

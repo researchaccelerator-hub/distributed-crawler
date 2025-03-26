@@ -145,6 +145,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Process layers iteratively, with potential for new layers to be added during execution
 	depth := 0
 	for {
+		log.Info().Msgf("Starting loop for depth: %v", depth)
 		// Check current maximum depth at the beginning of each iteration
 		maxDepth, err := sm.GetMaxDepth()
 		if err != nil {
@@ -174,6 +175,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 
 		if depth > crawlCfg.MaxDepth {
+			log.Info().Msgf("Processed all layers up to max depth %d", maxDepth)
 			break
 		}
 		log.Info().Msgf("Processing layer at depth %d with %d pages", depth, len(pages))
