@@ -317,6 +317,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 	}
 
 	_, err = sm.StoreFile(channelName, path, remoteid)
+	removeMultimedia(path)
 	if err != nil {
 		log.Error().Err(err).Str("path", path).Msg("Failed to upload file to blob storage")
 		return "", err
@@ -326,7 +327,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 	if err != nil {
 		return "", err
 	}
-	removeMultimedia(path)
+
 	return remoteid, nil
 }
 
