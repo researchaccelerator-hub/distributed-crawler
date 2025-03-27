@@ -9,7 +9,6 @@ import (
 	"github.com/dapr/go-sdk/service/common"
 	daprs "github.com/dapr/go-sdk/service/grpc"
 	common2 "github.com/researchaccelerator-hub/telegram-scraper/common"
-	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -314,12 +313,6 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 		seenURLs[url] = true
 	}
 
-	connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to connect to crawler")
-		return err
-	}
-
 	crawlexecid := common2.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
 
@@ -389,7 +382,7 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 		}
 
 		// Process pages in current layer in parallel
-		processLayerInParallel(layer, crawlCfg.Concurrency, connect, sm, crawlCfg)
+		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg)
 
 		// Log progress after completing a layer
 		log.Info().Msgf("Completed layer at depth %d", depth)
