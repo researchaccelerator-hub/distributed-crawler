@@ -360,33 +360,107 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 }
 
 func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
+	// Set default username
 	username := "unknown"
-	if msg.SenderId != nil {
-		switch sender := msg.SenderId.(type) {
-		case *client.MessageSenderUser:
-			// Get user info to extract username
-			userInfo, err := tdlibClient.GetUser(&client.GetUserRequest{
+
+	// Comprehensive panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+			log.Error().
+				Interface("panic", r).
+				Str("stack", string(stack)).
+				Msg("Recovered from panic in GetPoster")
+
+			// Keep the default username on panic
+			username = "unknown"
+		}
+	}()
+
+	// Validate input parameters
+	if tdlibClient == nil || msg == nil {
+		return username
+	}
+
+	// Check if SenderId is nil
+	if msg.SenderId == nil {
+		return username
+	}
+
+	// Process based on sender type with careful nil checks
+	switch sender := msg.SenderId.(type) {
+	case *client.MessageSenderUser:
+		// Check if sender is nil after type assertion
+		if sender == nil {
+			return username
+		}
+
+		// Safely call API and handle errors
+		var userInfo *client.User
+		var err error
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().
+						Interface("panic", r).
+						Int64("userId", sender.UserId).
+						Msg("Panic in GetUser call")
+					err = fmt.Errorf("panic in GetUser call: %v", r)
+				}
+			}()
+
+			userInfo, err = tdlibClient.GetUser(&client.GetUserRequest{
 				UserId: sender.UserId,
 			})
-			if err == nil && userInfo != nil {
-				if len(userInfo.Usernames.ActiveUsernames) > 0 {
-					username = userInfo.Usernames.ActiveUsernames[0]
-				} else if username == "" && userInfo.FirstName != "" {
-					username = userInfo.FirstName
-					if userInfo.LastName != "" {
-						username += " " + userInfo.LastName
-					}
+		}()
+
+		if err == nil && userInfo != nil {
+			// Safely access user information with nil checks
+			if userInfo.Usernames != nil && len(userInfo.Usernames.ActiveUsernames) > 0 {
+				username = userInfo.Usernames.ActiveUsernames[0]
+			} else if userInfo.FirstName != "" {
+				username = userInfo.FirstName
+				if userInfo.LastName != "" {
+					username += " " + userInfo.LastName
 				}
 			}
-		case *client.MessageSenderChat:
-			// Handle messages from channels or groups
-			chatInfo, err := tdlibClient.GetChat(&client.GetChatRequest{
+		}
+
+	case *client.MessageSenderChat:
+		// Check if sender is nil after type assertion
+		if sender == nil {
+			return username
+		}
+
+		// Safely call API and handle errors
+		var chatInfo *client.Chat
+		var err error
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().
+						Interface("panic", r).
+						Int64("chatId", sender.ChatId).
+						Msg("Panic in GetChat call")
+					err = fmt.Errorf("panic in GetChat call: %v", r)
+				}
+			}()
+
+			chatInfo, err = tdlibClient.GetChat(&client.GetChatRequest{
 				ChatId: sender.ChatId,
 			})
-			if err == nil && chatInfo != nil {
-				username = chatInfo.Title
-			}
+		}()
+
+		if err == nil && chatInfo != nil && chatInfo.Title != "" {
+			username = chatInfo.Title
 		}
+
+	default:
+		log.Debug().
+			Str("senderType", fmt.Sprintf("%T", msg.SenderId)).
+			Msg("Unknown sender type")
 	}
 
 	return username
