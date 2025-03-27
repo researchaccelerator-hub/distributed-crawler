@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -214,7 +213,6 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
 
 	// Create a mutex to protect shared state
-	var mutex sync.Mutex
 
 	// Map to collect all discovered channels
 	allDiscoveredChannels := make([]*state.Page, 0)
@@ -243,11 +241,9 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				}
 
 				// Save state after recovery
-				mutex.Lock()
 				if err := sm.SaveState(); err != nil {
 					log.Panic().Stack().Err(err).Msg("Failed to save state after panic recovery")
 				}
-				mutex.Unlock()
 			}
 		}()
 
@@ -280,9 +276,6 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				log.Error().Err(updateErr).Msg("Failed to update page status after error")
 			}
 		} else {
-			mutex.Lock()
-			defer mutex.Unlock()
-
 			pageToProcess.Status = "fetched"
 			if updateErr := sm.UpdatePage(pageToProcess); updateErr != nil {
 				log.Error().Err(updateErr).Msg("Failed to update page status after successful processing")
