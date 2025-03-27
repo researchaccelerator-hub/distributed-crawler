@@ -29,7 +29,15 @@ func Connect(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClien
 
 // Run connects to a Telegram channel and crawls its messages.
 func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
+	_, err := tdlibClient.Close()
+	if err != nil {
+		return nil, err
+	}
 
+	tdlibClient, err = Connect(cfg.StorageRoot, cfg)
+	if err != nil {
+		return nil, err
+	}
 	// Get channel information
 	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cfg)
 	if err != nil {

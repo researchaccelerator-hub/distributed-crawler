@@ -316,6 +316,28 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 		return "", fmt.Errorf("empty path returned from fetch operation")
 	}
 
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("File %s does not exist\n", path)
+		} else {
+			fmt.Printf("Error checking file: %v\n", err)
+		}
+		return "", err
+	}
+
+	// Get file size in bytes
+	sizeInBytes := fileInfo.Size()
+
+	// Convert to MB (1 MB = 1,048,576 bytes)
+	sizeInMB := float64(sizeInBytes) / 1048576.0
+
+	// Check if file is over 200MB
+	const fileSizeLimit = 190.0 // MB
+	isOverLimit := sizeInMB > fileSizeLimit
+	if isOverLimit {
+		return "", fmt.Errorf("file size is too large (%d MB)", sizeInMB)
+	}
 	_, err = sm.StoreFile(channelName, path, remoteid)
 	e := os.Remove(path)
 	if e != nil {
