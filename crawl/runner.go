@@ -9,6 +9,7 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"runtime"
 	"time"
 )
 
@@ -34,6 +35,9 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 		return nil, err
 	}
 
+	tdlibClient = nil
+	runtime.GC()
+	time.Sleep(10)
 	tdlibClient, err = Connect(cfg.StorageRoot, cfg)
 	if err != nil {
 		return nil, err
