@@ -212,10 +212,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 // processLayerInParallel processes all pages in a layer with a maximum of maxWorkers concurrent goroutines.
 // It uses a semaphore pattern to limit concurrency and ensures all pages are processed before returning.
 func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
-	var wg sync.WaitGroup
 
-	// Create a channel to limit concurrency
-	semaphore := make(chan struct{}, maxWorkers)
 	// Create a mutex to protect shared state
 	var mutex sync.Mutex
 
@@ -224,101 +221,82 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Process each page in the current layer
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
-		page := layer.Pages[pageIndex]
+		pageToProcess := layer.Pages[pageIndex]
 
 		// Skip already processed pages
-		if page.Status == "fetched" {
-			log.Debug().Msgf("Skipping already processed page: %s", page.URL)
+		if pageToProcess.Status == "fetched" {
+			log.Debug().Msgf("Skipping already processed page: %s", pageToProcess.URL)
 			continue
 		}
 
-		// Increment the wait group for each page to be processed
-		wg.Add(1)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", pageToProcess.URL, r)
 
-		// Acquire semaphore slot
-		semaphore <- struct{}{}
+				// Update the page status to error
+				pageToProcess.Status = "error"
+				pageToProcess.Error = fmt.Sprintf("Panic: %v", r)
 
-		// Process page in goroutine
-		go func(pageToProcess *state.Page) {
-			defer wg.Done()
-			defer func() {
-				// Release semaphore slot
-				<-semaphore
-			}()
-
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", pageToProcess.URL, r)
-
-						// Update the page status to error
-						pageToProcess.Status = "error"
-						pageToProcess.Error = fmt.Sprintf("Panic: %v", r)
-
-						// Update the page in the state manager
-						if err := sm.UpdatePage(*pageToProcess); err != nil {
-							log.Error().Err(err).Msg("Failed to update page status after panic")
-						}
-
-						// Save state after recovery
-						mutex.Lock()
-						if err := sm.SaveState(); err != nil {
-							log.Panic().Stack().Err(err).Msg("Failed to save state after panic recovery")
-						}
-						mutex.Unlock()
-					}
-				}()
-
-				pageToProcess.Timestamp = time.Now()
-
-				connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
-				if err != nil {
-					log.Error().Err(err).Msg("Failed to connect to tdlib")
-					return
+				// Update the page in the state manager
+				if err := sm.UpdatePage(pageToProcess); err != nil {
+					log.Error().Err(err).Msg("Failed to update page status after panic")
 				}
-				// Run the crawler for this page
-				discoveredChannels, err := crawl.RunForChannel(connect, pageToProcess, crawlCfg.StorageRoot, sm, crawlCfg)
 
-				ok, err := connect.Close()
-				if err != nil {
-					log.Error().Err(err).Msg("Failed to close connection")
-					return
+				// Save state after recovery
+				mutex.Lock()
+				if err := sm.SaveState(); err != nil {
+					log.Panic().Stack().Err(err).Msg("Failed to save state after panic recovery")
 				}
-				if ok == nil {
-					log.Error().Err(err).Msg("No OK signal on close connection")
-				}
-				if err != nil {
-					log.Error().Stack().Err(err).Msgf("Error processing item %s", pageToProcess.URL)
-					pageToProcess.Status = "error"
-					pageToProcess.Error = err.Error()
+				mutex.Unlock()
+			}
+		}()
 
-					// Update the page in the state manager
-					if updateErr := sm.UpdatePage(*pageToProcess); updateErr != nil {
-						log.Error().Err(updateErr).Msg("Failed to update page status after error")
-					}
-				} else {
-					mutex.Lock()
-					defer mutex.Unlock()
+		pageToProcess.Timestamp = time.Now()
 
-					pageToProcess.Status = "fetched"
-					if updateErr := sm.UpdatePage(*pageToProcess); updateErr != nil {
-						log.Error().Err(updateErr).Msg("Failed to update page status after successful processing")
-					}
+		connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to connect to tdlib")
+			return
+		}
+		log.Info().Msgf("Starting run for channel: %s", pageToProcess.URL)
+		// Run the crawler for this page
+		discoveredChannels, err := crawl.RunForChannel(connect, &pageToProcess, crawlCfg.StorageRoot, sm, crawlCfg)
+		log.Info().Msgf("Page processed for %s", pageToProcess.URL)
+		ok, err := connect.Close()
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to close connection")
+			return
+		}
+		if ok == nil {
+			log.Error().Err(err).Msg("No OK signal on close connection")
+		}
+		if err != nil {
+			log.Error().Stack().Err(err).Msgf("Error processing item %s", pageToProcess.URL)
+			pageToProcess.Status = "error"
+			pageToProcess.Error = err.Error()
 
-					// Save the entire state
-					if err := sm.SaveState(); err != nil {
-						log.Panic().Stack().Err(err).Msgf("Error saving state after processing channel %s", pageToProcess.URL)
-					}
+			// Update the page in the state manager
+			if updateErr := sm.UpdatePage(pageToProcess); updateErr != nil {
+				log.Error().Err(updateErr).Msg("Failed to update page status after error")
+			}
+		} else {
+			mutex.Lock()
+			defer mutex.Unlock()
 
-					// Collect discovered channels
-					allDiscoveredChannels = append(allDiscoveredChannels, discoveredChannels...)
-				}
-			}()
-		}(&page)
+			pageToProcess.Status = "fetched"
+			if updateErr := sm.UpdatePage(pageToProcess); updateErr != nil {
+				log.Error().Err(updateErr).Msg("Failed to update page status after successful processing")
+			}
+
+			// Save the entire state
+			if err := sm.SaveState(); err != nil {
+				log.Panic().Stack().Err(err).Msgf("Error saving state after processing channel %s", pageToProcess.URL)
+			}
+
+			// Collect discovered channels
+			allDiscoveredChannels = append(allDiscoveredChannels, discoveredChannels...)
+		}
 	}
-
-	// Wait for all goroutines to complete
-	wg.Wait()
 
 	// After all pages in the layer are processed, append the new layer with all discovered channels
 	if len(allDiscoveredChannels) > 0 {
