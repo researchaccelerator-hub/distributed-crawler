@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
 	"runtime/debug"
+	"strings"
 	"time"
 )
 
@@ -245,13 +246,30 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 						Str("channel", channelname).
 						Interface("panic", r).
 						Str("stack", string(stack)).
+						Int64("chatID", chatID).
+						Int64("messageID", messageID).
+						Int64("fromMessageId", fromMessageId).
 						Msg("Recovered from panic in GetMessageThreadHistory")
 
 					err = fmt.Errorf("panic in GetMessageThreadHistory: %v", r)
 					threadHistory = nil
 				}
 			}()
+			_, err = tdlibClient.GetChat(&client.GetChatRequest{
+				ChatId: chatID,
+			})
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to get chat: %v", err)
+			}
 
+			// Check if the message exists
+			_, err = tdlibClient.GetMessage(&client.GetMessageRequest{
+				ChatId:    chatID,
+				MessageId: messageID,
+			})
+			if err != nil {
+				log.Error().Err(err).Msgf("Failed to get chat message: %v", err)
+			}
 			threadHistory, err = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
 				ChatId:        chatID,
 				MessageId:     messageID,
@@ -261,6 +279,20 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		}()
 
 		if err != nil {
+			// Parse the error string to detect specific errors
+			errStr := err.Error()
+
+			if strings.Contains(errStr, "Receive messages in an unexpected chat") {
+				log.Error().Err(err).
+					Str("channel", channelname).
+					Int64("chatID", chatID).
+					Int64("messageID", messageID).
+					Msg("Unable to access chat or message thread - the chat ID might be invalid or inaccessible")
+
+				// You might want to handle this specific error differently
+				return comments, fmt.Errorf("chat access error (%s): %w", channelname, err)
+			}
+
 			log.Error().Err(err).Stack().
 				Str("channel", channelname).
 				Int64("chatID", chatID).
