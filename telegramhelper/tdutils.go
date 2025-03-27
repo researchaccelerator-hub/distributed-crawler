@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -387,38 +388,61 @@ var ParseMessage = func(
 	postcount int,
 	viewcount int,
 	channelName string,
-	tdlibClient crawler.TDLibClient, // our interface type
+	tdlibClient crawler.TDLibClient,
 	sm state.StateManagementInterface,
 	cfg common.CrawlerConfig,
 ) (post model.Post, err error) {
-	// original implementation...
 	// Defer to recover from panics and ensure the crawl continues
 	defer func() {
 		if r := recover(); r != nil {
-			// Log the panic and set a default error
-			log.Info().Msgf("Recovered from panic while parsing message for channel %s: %v\n", channelName, r)
-			err = fmt.Errorf("failed to parse message")
+			stack := debug.Stack() // Get stack trace
+			log.Error().
+				Str("channel", channelName).
+				Interface("panic", r).
+				Str("stack", string(stack)).
+				Msg("Recovered from panic while parsing message")
+			err = fmt.Errorf("failed to parse message: %v", r)
 		}
 	}()
 
+	// Validate required inputs
+	if message == nil {
+		return model.Post{}, fmt.Errorf("message is nil")
+	}
+	if mlr == nil {
+		return model.Post{}, fmt.Errorf("message link is nil")
+	}
+	if chat == nil {
+		return model.Post{}, fmt.Errorf("chat is nil")
+	}
+
 	publishedAt := time.Unix(int64(message.Date), 0)
 
-	if !cfg.MinPostDate.IsZero() {
-		if time.Unix(int64(message.Date), 0).Before(cfg.MinPostDate) {
-			return model.Post{}, nil // Skip messages not from earlier than 2018
-		}
+	if !cfg.MinPostDate.IsZero() && publishedAt.Before(cfg.MinPostDate) {
+		return model.Post{}, nil // Skip messages earlier than MinPostDate
 	}
 
 	var messageNumber string
-	linkParts := strings.Split(mlr.Link, "/")
-	if len(linkParts) > 0 {
-		messageNumber = linkParts[len(linkParts)-1]
-	} else {
-		return model.Post{}, nil // Skip if message number cannot be determined
+	if mlr.Link != "" {
+		linkParts := strings.Split(mlr.Link, "/")
+		if len(linkParts) > 0 {
+			messageNumber = linkParts[len(linkParts)-1]
+		}
 	}
 
+	if messageNumber == "" {
+		return model.Post{}, fmt.Errorf("could not determine message number")
+	}
+
+	// Initialize variables
 	comments := make([]model.Comment, 0)
-	if message.InteractionInfo != nil && message.InteractionInfo.ReplyInfo != nil &&
+	description := ""
+	thumbnailPath := ""
+	videoPath := ""
+
+	// Safely fetch comments if available
+	if message.InteractionInfo != nil &&
+		message.InteractionInfo.ReplyInfo != nil &&
 		message.InteractionInfo.ReplyInfo.ReplyCount > 0 {
 		fetchedComments, fetchErr := GetMessageComments(tdlibClient, chat.Id, message.Id, channelName, cfg.MaxComments)
 		if fetchErr != nil {
@@ -428,75 +452,198 @@ var ParseMessage = func(
 		}
 	}
 
-	description := ""
-	thumbnailPath := ""
-	videoPath := ""
-	switch content := message.Content.(type) {
-	case *client.MessageText:
-		description = content.Text.Text
-	case *client.MessageVideo:
-		thumbnailPath, videoPath, description, _ = processMessageSafely(content)
-		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
-		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
-	case *client.MessagePhoto:
-		description = content.Caption.Text
-		thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
-		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+	// Process based on message content type
+	if message.Content != nil {
+		switch content := message.Content.(type) {
+		case *client.MessageText:
+			if content != nil && content.Text != nil {
+				description = content.Text.Text
+			}
 
-	case *client.MessageAnimation:
-		description = content.Caption.Text
-		thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
-		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+		case *client.MessageVideo:
+			// Safe processing with nil checks
+			if content != nil {
+				thumbnailPath, videoPath, description, _ = processMessageSafely(content)
 
-	case *client.MessageAnimatedEmoji:
-		description = content.Emoji
-	case *client.MessagePoll:
-		description = content.Poll.Question.Text
-	case *client.MessageGiveaway:
-		description = content.Prize.GiveawayPrizeType()
-	case *client.MessagePaidMedia:
-		description = content.Caption.Text
-	case *client.MessageSticker:
-		thumbnailPath = content.Sticker.Sticker.Remote.Id
-		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
-	case *client.MessageGiveawayWinners:
-		log.Debug().Msgf("This message is a giveaway winner: %v", content)
-	case *client.MessageGiveawayCompleted:
-		log.Debug().Msgf("This message is a giveaway completed: %v", content)
-	case *client.MessageVideoNote:
-		thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
-		videoPath = content.VideoNote.Video.Remote.Id
-		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
-		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
-	case *client.MessageDocument:
-		description = content.Document.FileName
-		thumbnailPath = content.Document.Thumbnail.File.Remote.Id
-		videoPath = content.Document.Document.Remote.Id
-		thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
-		videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
+				if thumbnailPath != "" {
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+				}
 
-	default:
-		log.Debug().Msg("Unknown message content type")
+				if videoPath != "" {
+					videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
+				}
+
+				if content.Caption != nil {
+					description = content.Caption.Text
+				}
+			}
+
+		case *client.MessagePhoto:
+			if content != nil {
+				if content.Caption != nil {
+					description = content.Caption.Text
+				}
+
+				if content.Photo != nil &&
+					len(content.Photo.Sizes) > 0 &&
+					content.Photo.Sizes[0].Photo != nil &&
+					content.Photo.Sizes[0].Photo.Remote != nil {
+					thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
+					if thumbnailPath != "" {
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+					}
+				}
+			}
+
+		case *client.MessageAnimation:
+			if content != nil {
+				if content.Caption != nil {
+					description = content.Caption.Text
+				}
+
+				if content.Animation != nil &&
+					content.Animation.Thumbnail != nil &&
+					content.Animation.Thumbnail.File != nil &&
+					content.Animation.Thumbnail.File.Remote != nil {
+					thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
+					if thumbnailPath != "" {
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+					}
+				}
+			}
+
+		case *client.MessageAnimatedEmoji:
+			if content != nil {
+				description = content.Emoji
+			}
+
+		case *client.MessagePoll:
+			if content != nil && content.Poll != nil && content.Poll.Question != nil {
+				description = content.Poll.Question.Text
+			}
+
+		case *client.MessageGiveaway:
+			if content != nil && content.Prize != nil {
+				description = content.Prize.GiveawayPrizeType()
+			}
+
+		case *client.MessagePaidMedia:
+			if content != nil && content.Caption != nil {
+				description = content.Caption.Text
+			}
+
+		case *client.MessageSticker:
+			if content != nil &&
+				content.Sticker != nil &&
+				content.Sticker.Sticker != nil &&
+				content.Sticker.Sticker.Remote != nil {
+				thumbnailPath = content.Sticker.Sticker.Remote.Id
+				if thumbnailPath != "" {
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+				}
+			}
+
+		case *client.MessageGiveawayWinners:
+			log.Debug().Msgf("This message is a giveaway winner: %+v", content)
+
+		case *client.MessageGiveawayCompleted:
+			log.Debug().Msgf("This message is a giveaway completed: %+v", content)
+
+		case *client.MessageVideoNote:
+			if content != nil {
+				if content.VideoNote != nil {
+					if content.VideoNote.Thumbnail != nil &&
+						content.VideoNote.Thumbnail.File != nil &&
+						content.VideoNote.Thumbnail.File.Remote != nil {
+						thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
+						if thumbnailPath != "" {
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+						}
+					}
+
+					if content.VideoNote.Video != nil &&
+						content.VideoNote.Video.Remote != nil {
+						videoPath = content.VideoNote.Video.Remote.Id
+						if videoPath != "" {
+							videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
+						}
+					}
+				}
+			}
+
+		case *client.MessageDocument:
+			if content != nil {
+				if content.Document != nil {
+					description = content.Document.FileName
+
+					if content.Document.Thumbnail != nil &&
+						content.Document.Thumbnail.File != nil &&
+						content.Document.Thumbnail.File.Remote != nil {
+						thumbnailPath = content.Document.Thumbnail.File.Remote.Id
+						if thumbnailPath != "" {
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+						}
+					}
+
+					if content.Document.Document != nil &&
+						content.Document.Document.Remote != nil {
+						videoPath = content.Document.Document.Remote.Id
+						if videoPath != "" {
+							videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
+						}
+					}
+				}
+			}
+
+		default:
+			log.Debug().Str("type", fmt.Sprintf("%T", content)).Msg("Unknown message content type")
+		}
 	}
 
+	// Safely extract outlinks and reactions
 	outlinks := extractChannelLinksFromMessage(message)
 	reactions := make(map[string]int)
-	if message.InteractionInfo != nil && message.InteractionInfo.Reactions != nil &&
+
+	if message.InteractionInfo != nil &&
+		message.InteractionInfo.Reactions != nil &&
 		len(message.InteractionInfo.Reactions.Reactions) > 0 {
 		for _, reaction := range message.InteractionInfo.Reactions.Reactions {
 			if reaction.Type != nil {
-				if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok {
+				if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok && emojiReaction != nil {
 					reactions[emojiReaction.Emoji] = int(reaction.TotalCount)
 				}
 			}
 		}
 	}
-	posttype := []string{message.Content.MessageContentType()}
-	createdAt := time.Unix(int64(message.EditDate), 0)
+
+	// Build the post
+	posttype := []string{"unknown"}
+	if message.Content != nil {
+		posttype = []string{message.Content.MessageContentType()}
+	}
+
+	createdAt := time.Now()
+	if message.EditDate > 0 {
+		createdAt = time.Unix(int64(message.EditDate), 0)
+	}
+
 	vc := GetViewCount(message, channelName)
 	postUid := fmt.Sprintf("%s-%s", messageNumber, channelName)
-	sharecount, _ := GetMessageShareCount(tdlibClient, chat.Id, message.Id, channelName)
+	var sharecount int = 0
+
+	// Safely get share count
+	if tdlibClient != nil {
+		sharecount, _ = GetMessageShareCount(tdlibClient, chat.Id, message.Id, channelName)
+	}
+
 	username := GetPoster(tdlibClient, message)
+
+	// Safely get supergroup info
+	memberCount := 0
+	if supergroupInfo != nil {
+		memberCount = int(supergroupInfo.MemberCount)
+	}
+
 	post = model.Post{
 		PostLink:       mlr.Link,
 		ChannelID:      message.ChatId,
@@ -532,7 +679,7 @@ var ParseMessage = func(
 			ChannelName:         chat.Title,
 			ChannelProfileImage: "",
 			ChannelEngagementData: model.EngagementData{
-				FollowerCount:  int(supergroupInfo.MemberCount),
+				FollowerCount:  memberCount,
 				FollowingCount: 0,
 				LikeCount:      0,
 				PostCount:      postcount,
@@ -547,11 +694,15 @@ var ParseMessage = func(
 		Reactions: reactions,
 		Handle:    username,
 	}
-	storeErr := sm.StorePost(channelName, post)
-	if storeErr != nil {
-		log.Error().Err(storeErr).Msg("Failed to store data")
-		// Not returning error here as we still want to return the post
+
+	// Store the post but don't return an error if storage fails
+	if sm != nil {
+		storeErr := sm.StorePost(channelName, post)
+		if storeErr != nil {
+			log.Error().Err(storeErr).Msg("Failed to store data")
+		}
 	}
+
 	return post, nil
 }
 

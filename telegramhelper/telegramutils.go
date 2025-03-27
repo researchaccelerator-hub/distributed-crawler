@@ -7,6 +7,7 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"runtime/debug"
 	"time"
 )
 
@@ -220,64 +221,110 @@ func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Me
 // The function fetches comments in batches of up to 100 and continues until no more comments are available.
 // It extracts the text, reactions, view count, and reply count for each comment.
 func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string, maxcomments int) ([]model.Comment, error) {
+	// Check if tdlibClient is nil
+	if tdlibClient == nil {
+		return nil, fmt.Errorf("tdlibClient is nil")
+	}
+
 	// Fetch the comments in the thread
-	var comments []model.Comment
+	comments := make([]model.Comment, 0)
 	var fromMessageId int64 = 0
 	done := false
+
 	for {
-		threadHistory, err := tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
-			ChatId:        chatID,
-			MessageId:     messageID,
-			FromMessageId: fromMessageId,
-			Limit:         100, // Fetch up to 100 comments at a time
-		})
+		// Safely call GetMessageThreadHistory with nil checks
+		var threadHistory *client.Messages
+		var err error
+
+		// Wrap the API call in a recover block to prevent any panic from bubbling up
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					stack := debug.Stack()
+					log.Error().
+						Str("channel", channelname).
+						Interface("panic", r).
+						Str("stack", string(stack)).
+						Msg("Recovered from panic in GetMessageThreadHistory")
+
+					err = fmt.Errorf("panic in GetMessageThreadHistory: %v", r)
+					threadHistory = nil
+				}
+			}()
+
+			threadHistory, err = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
+				ChatId:        chatID,
+				MessageId:     messageID,
+				FromMessageId: fromMessageId,
+				Limit:         100, // Fetch up to 100 comments at a time
+			})
+		}()
+
 		if err != nil {
-			log.Error().Err(err).Stack().Msgf("Failed to get message thread history for channel %s: %v", channelname, err)
+			log.Error().Err(err).Stack().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Msg("Failed to get message thread history")
 			return comments, err
 		}
 
-		// Stop if no more comments are returned
-		if len(threadHistory.Messages) == 0 {
+		// Check if threadHistory is nil or empty
+		if threadHistory == nil || len(threadHistory.Messages) == 0 {
 			break
 		}
 
-		// Collect the comment text
+		// Process each message in the thread
 		for _, msg := range threadHistory.Messages {
+			// Skip nil messages
+			if msg == nil {
+				continue
+			}
+
 			comment := model.Comment{}
 
+			// Safely get username
 			username := GetPoster(tdlibClient, msg)
 			comment.Handle = username
 
-			if textContent, ok := msg.Content.(*client.MessageText); ok {
-				comment.Text = textContent.Text.Text
-
+			// Safely extract message text
+			if msg.Content != nil {
+				if textContent, ok := msg.Content.(*client.MessageText); ok && textContent != nil && textContent.Text != nil {
+					comment.Text = textContent.Text.Text
+				}
 			}
-			if msg.InteractionInfo != nil && len(msg.InteractionInfo.Reactions.Reactions) > 0 {
+
+			// Safely extract reactions
+			if msg.InteractionInfo != nil &&
+				msg.InteractionInfo.Reactions != nil &&
+				len(msg.InteractionInfo.Reactions.Reactions) > 0 {
+
 				comment.Reactions = make(map[string]int)
+
 				for _, reaction := range msg.InteractionInfo.Reactions.Reactions {
-					if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok {
-						comment.Reactions[emojiReaction.Emoji] = int(reaction.TotalCount)
+					if reaction.Type != nil {
+						if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok && emojiReaction != nil {
+							comment.Reactions[emojiReaction.Emoji] = int(reaction.TotalCount)
+						}
 					}
 				}
 			}
 
-			// Extract view count
+			// Safely extract view count and reply count
 			if msg.InteractionInfo != nil {
-				defer func() {
-					if r := recover(); r != nil {
-						// Log the error and continue
-						log.Info().Msgf("Recovered from panic while processing InteractionInfo: %v\n", r)
-					}
-				}()
-
+				// Extract reply count
 				if msg.InteractionInfo.ReplyInfo != nil {
 					comment.ReplyCount = int(msg.InteractionInfo.ReplyInfo.ReplyCount)
 				}
+
+				// Extract view count (no need for defer/recover here as we've checked nil)
 				comment.ViewCount = int(msg.InteractionInfo.ViewCount)
 			}
 
-			// Add to the comments slice
+			// Add comment to the results
 			comments = append(comments, comment)
+
+			// Check if we've reached the maximum number of comments
 			if maxcomments > -1 && len(comments) >= maxcomments {
 				done = true
 				break
@@ -287,8 +334,25 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		if done {
 			break
 		}
-		// Update `fromMessageId` to fetch older comments
-		fromMessageId = threadHistory.Messages[len(threadHistory.Messages)-1].Id
+
+		// Check if we have messages to get the last ID
+		if len(threadHistory.Messages) == 0 {
+			break
+		}
+
+		// Safely get the last message ID for pagination
+		lastMsg := threadHistory.Messages[len(threadHistory.Messages)-1]
+		if lastMsg == nil {
+			break
+		}
+
+		// Update fromMessageId to fetch older comments
+		fromMessageId = lastMsg.Id
+
+		// Safety check - if we're not making progress, break
+		if fromMessageId == 0 {
+			break
+		}
 	}
 
 	log.Info().Msgf("Got %d comments for channel %s", len(comments), channelname)
