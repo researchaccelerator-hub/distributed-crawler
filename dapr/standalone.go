@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
-	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
@@ -112,10 +111,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	for _, url := range stringList {
 		seenURLs[url] = true
 	}
-	connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect to crawler")
-	}
+
 	crawlexecid := common.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
 
@@ -187,7 +183,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 
 		// Process pages in current layer in parallel
-		processLayerInParallel(layer, crawlCfg.Concurrency, connect, sm, crawlCfg)
+		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg)
 
 		// Log progress after completing a layer
 		log.Info().Msgf("Completed layer at depth %d", depth)
@@ -215,7 +211,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 // processLayerInParallel processes all pages in a layer with a maximum of maxWorkers concurrent goroutines.
 // It uses a semaphore pattern to limit concurrency and ensures all pages are processed before returning.
-func processLayerInParallel(layer *state.Layer, maxWorkers int, connect crawler.TDLibClient, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
 	var wg sync.WaitGroup
 
 	// Create a channel to limit concurrency
@@ -275,8 +271,22 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, connect crawler.
 
 				pageToProcess.Timestamp = time.Now()
 
+				connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to connect to tdlib")
+					return
+				}
 				// Run the crawler for this page
 				discoveredChannels, err := crawl.RunForChannel(connect, pageToProcess, crawlCfg.StorageRoot, sm, crawlCfg)
+
+				ok, err := connect.Close()
+				if err != nil {
+					log.Error().Err(err).Msg("Failed to close connection")
+					return
+				}
+				if ok == nil {
+					log.Error().Err(err).Msg("No OK signal on close connection")
+				}
 				if err != nil {
 					log.Error().Stack().Err(err).Msgf("Error processing item %s", pageToProcess.URL)
 					pageToProcess.Status = "error"
