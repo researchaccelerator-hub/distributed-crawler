@@ -8,7 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
-
+	"log/slog"
+	"github.com/zelenin/go-tdlib/client"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
