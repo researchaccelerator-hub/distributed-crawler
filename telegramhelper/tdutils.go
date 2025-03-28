@@ -83,7 +83,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
 
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 1}
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 4}
 		tdlibClient.SetLogVerbosityLevel(&verb)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
