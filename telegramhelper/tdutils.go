@@ -447,7 +447,7 @@ var ParseMessage = func(
 		fetchedComments, fetchErr := GetMessageComments(tdlibClient, chat.Id, message.Id, channelName, cfg.MaxComments)
 		if fetchErr != nil {
 			log.Error().Stack().Err(fetchErr).Msg("Failed to fetch comments")
-		} else {
+		} else if len(fetchedComments) > 0 {
 			comments = fetchedComments
 		}
 	}
