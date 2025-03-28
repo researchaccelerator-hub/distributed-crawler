@@ -222,172 +222,181 @@ func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Me
 // The function fetches comments in batches of up to 100 and continues until no more comments are available.
 // It extracts the text, reactions, view count, and reply count for each comment.
 func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string, maxcomments int) ([]model.Comment, error) {
-	// Check if tdlibClient is nil
 	if tdlibClient == nil {
 		return nil, fmt.Errorf("tdlibClient is nil")
 	}
 
+	// --- Determine the correct Chat ID for fetching comments ---
+	var threadChatID int64 = chatID // Default to the provided chatID
+
+	// Get info about the original chat to find the linked discussion group
+	originalChat, err := tdlibClient.GetChat(&client.GetChatRequest{
+		ChatId: chatID,
+	})
+	if err != nil {
+		// Log the error but proceed cautiously, maybe it's already the discussion group ID
+		slog.Warn("Failed to get original chat info, proceeding with provided chatID", "channel", channelname, "chatID", chatID, "error", err)
+	} else if originalChat != nil && originalChat.LinkedChatId != 0 {
+		// If a linked chat exists, use its ID for fetching comments
+		threadChatID = originalChat.LinkedChatId
+		slog.Info("Found linked discussion group, using its ID for comments", "channel", channelname, "originalChatID", chatID, "linkedChatID", threadChatID)
+
+        // OPTIONAL BUT RECOMMENDED: Ensure the client has access to the linked chat
+        // You might need to call GetChat on threadChatID or even JoinChat if necessary and appropriate
+        _, err = tdlibClient.GetChat(&client.GetChatRequest{ChatId: threadChatID})
+        if err != nil {
+             slog.Error("Cannot access the linked discussion group", "channel", channelname, "linkedChatID", threadChatID, "error", err)
+             // Decide how to handle this: return error, try original chat ID, etc.
+             return nil, fmt.Errorf("cannot access linked discussion group %d for %s: %w", threadChatID, channelname, err)
+        }
+
+	} else {
+		slog.Info("No linked discussion group found or failed to get chat info, using original chat ID for comments", "channel", channelname, "chatID", chatID)
+	}
+    // --- End of determining chat ID ---
+
+
 	// Fetch the comments in the thread
 	comments := make([]model.Comment, 0)
-	var fromMessageId int64 = 0
+	var fromMessageId int64 = 0 // Start from the beginning of the thread
 	done := false
 
-	for {
-		// Safely call GetMessageThreadHistory with nil checks
+	for !done { // Simplified loop condition
 		var threadHistory *client.Messages
-		var err error
+		var historyErr error // Use a separate variable for the history error
 
-		// Wrap the API call in a recover block to prevent any panic from bubbling up
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					stack := debug.Stack()
-					log.Error().
-						Str("channel", channelname).
-						Interface("panic", r).
-						Str("stack", string(stack)).
-						Int64("chatID", chatID).
-						Int64("messageID", messageID).
-						Int64("fromMessageId", fromMessageId).
-						Msg("Recovered from panic in GetMessageThreadHistory")
+		// --- Fetch Batch of Comments ---
+		// No need for the inner GetChat/GetMessage calls here usually
+		// No need for the complex defer/recover inside the loop if the client call itself returns errors properly
+		threadHistory, historyErr = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
+			ChatId:        threadChatID, // Use the determined threadChatID
+			MessageId:     messageID,    // The ID of the original post
+			FromMessageId: fromMessageId,
+			Limit:         100,
+		})
 
-					err = fmt.Errorf("panic in GetMessageThreadHistory: %v", r)
-					threadHistory = nil
-				}
-			}()
-			_, err = tdlibClient.GetChat(&client.GetChatRequest{
-				ChatId: chatID,
-			})
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to get chat: %v", err)
+		if historyErr != nil {
+			errStr := historyErr.Error()
+			if strings.Contains(errStr, "Receive messages in an unexpected chat") || strings.Contains(errStr, "CHAT_ID_INVALID") || strings.Contains(errStr,"MESSAGE_ID_INVALID") || strings.Contains(errStr, "MSG_ID_INVALID") {
+                // This often happens if the message doesn't exist, was deleted, or the chat ID is truly wrong/inaccessible
+				slog.Error("TDLib Error: Cannot access chat or message thread",
+					"error", historyErr,
+					"channel", channelname,
+					"effectiveChatID", threadChatID, // Log the ID actually used
+					"messageID", messageID,
+					"fromMessageId", fromMessageId)
+				// Return a more specific error, potentially breaking the loop/function
+                // Check if it's the *first* attempt (fromMessageId == 0). If so, the thread might not exist or be inaccessible.
+                // If it happens mid-pagination, it could be a temporary issue or data inconsistency.
+                if fromMessageId == 0 {
+                    return comments, fmt.Errorf("message thread %d in chat %d (channel %s) not found or inaccessible: %w", messageID, threadChatID, channelname, historyErr)
+                } else {
+                     slog.Warn("Error occurred mid-pagination, stopping comment retrieval for this thread.", "channel", channelname, "messageID", messageID, "error", historyErr)
+                     break // Stop pagination for this thread
+                }
+
+			} else if strings.Contains(errStr, "THREAD_NOT_FOUND") {
+                 slog.Warn("Message thread does not exist or comments might be disabled.",
+					"channel", channelname,
+					"effectiveChatID", threadChatID,
+					"messageID", messageID)
+                 return comments, nil // No comments to fetch
+            } else {
+				// Handle other potential errors (rate limits, network issues, etc.)
+				slog.Error("Failed to get message thread history",
+					"error", historyErr,
+					"channel", channelname,
+					"effectiveChatID", threadChatID,
+					"messageID", messageID)
+				return comments, historyErr // Return the error
 			}
-
-			// Check if the message exists
-			_, err = tdlibClient.GetMessage(&client.GetMessageRequest{
-				ChatId:    chatID,
-				MessageId: messageID,
-			})
-			if err != nil {
-				log.Error().Err(err).Msgf("Failed to get chat message: %v", err)
-			}
-			threadHistory, err = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
-				ChatId:        chatID,
-				MessageId:     messageID,
-				FromMessageId: fromMessageId,
-				Limit:         100, // Fetch up to 100 comments at a time
-			})
-		}()
-
-		if err != nil {
-			// Parse the error string to detect specific errors
-			errStr := err.Error()
-
-			if strings.Contains(errStr, "Receive messages in an unexpected chat") {
-				log.Error().Err(err).
-					Str("channel", channelname).
-					Int64("chatID", chatID).
-					Int64("messageID", messageID).
-					Msg("Unable to access chat or message thread - the chat ID might be invalid or inaccessible")
-
-				// You might want to handle this specific error differently
-				return comments, fmt.Errorf("chat access error (%s): %w", channelname, err)
-			}
-
-			log.Error().Err(err).Stack().
-				Str("channel", channelname).
-				Int64("chatID", chatID).
-				Int64("messageID", messageID).
-				Msg("Failed to get message thread history")
-			return comments, err
 		}
 
-		// Check if threadHistory is nil or empty
+		// Check if threadHistory is nil or empty after handling errors
 		if threadHistory == nil || len(threadHistory.Messages) == 0 {
-			break
+			break // No more messages in the thread
 		}
 
-		// Process each message in the thread
+		// --- Process fetched messages ---
+		foundNewMessages := false
 		for _, msg := range threadHistory.Messages {
-			// Skip nil messages
 			if msg == nil {
 				continue
 			}
+            // Skip the original post itself if it appears in the history (sometimes happens with fromMessageId=0)
+            // Although GetMessageThreadHistory *should* only return thread messages. Check msg.Id against messageId if needed.
 
-			comment := model.Comment{}
+			comment := model.Comment{
+				// Initialize map to avoid nil panic later
+				Reactions: make(map[string]int),
+			}
 
 			// Safely get username
-			username := GetPoster(tdlibClient, msg)
-			comment.Handle = username
+			comment.Handle = GetPoster(tdlibClient, msg) // Assuming GetPoster handles potential errors/nil values
 
 			// Safely extract message text
 			if msg.Content != nil {
 				if textContent, ok := msg.Content.(*client.MessageText); ok && textContent != nil && textContent.Text != nil {
 					comment.Text = textContent.Text.Text
 				}
+				// Add handling for other content types if needed (photos, stickers etc.)
 			}
 
 			// Safely extract reactions
-			if msg.InteractionInfo != nil &&
-				msg.InteractionInfo.Reactions != nil &&
-				len(msg.InteractionInfo.Reactions.Reactions) > 0 {
-
-				comment.Reactions = make(map[string]int)
-
+			if msg.InteractionInfo != nil && msg.InteractionInfo.Reactions != nil {
 				for _, reaction := range msg.InteractionInfo.Reactions.Reactions {
 					if reaction.Type != nil {
 						if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok && emojiReaction != nil {
 							comment.Reactions[emojiReaction.Emoji] = int(reaction.TotalCount)
 						}
+						// Add handling for custom reactions if needed
 					}
 				}
 			}
 
-			// Safely extract view count and reply count
+			// Safely extract view count (usually 0 for comments) and reply count (replies *within* the comment thread)
 			if msg.InteractionInfo != nil {
-				// Extract reply count
+				comment.ViewCount = int(msg.InteractionInfo.ViewCount)
 				if msg.InteractionInfo.ReplyInfo != nil {
 					comment.ReplyCount = int(msg.InteractionInfo.ReplyInfo.ReplyCount)
 				}
-
-				// Extract view count (no need for defer/recover here as we've checked nil)
-				comment.ViewCount = int(msg.InteractionInfo.ViewCount)
 			}
 
-			// Add comment to the results
 			comments = append(comments, comment)
+			foundNewMessages = true // Mark that we processed at least one message
 
-			// Check if we've reached the maximum number of comments
+			// Check max comments limit
 			if maxcomments > -1 && len(comments) >= maxcomments {
 				done = true
 				break
 			}
 		}
+        // --- End processing messages ---
 
 		if done {
+			break // Exit outer loop if max comments reached
+		}
+
+		// If the last batch returned no processable messages, stop.
+		if !foundNewMessages || len(threadHistory.Messages) == 0 {
 			break
 		}
 
-		// Check if we have messages to get the last ID
-		if len(threadHistory.Messages) == 0 {
-			break
-		}
-
-		// Safely get the last message ID for pagination
+		// Update fromMessageId for the next iteration
 		lastMsg := threadHistory.Messages[len(threadHistory.Messages)-1]
 		if lastMsg == nil {
-			break
+            slog.Warn("Last message in batch was nil, stopping pagination", "channel", channelname, "messageID", messageID)
+			break // Safety break
 		}
-
-		// Update fromMessageId to fetch older comments
+		if lastMsg.Id == fromMessageId {
+            slog.Warn("fromMessageId did not change, potential loop detected. Stopping pagination.", "channel", channelname, "messageID", messageID, "fromMessageId", fromMessageId)
+            break; // Prevent infinite loop if API keeps returning the same last message
+        }
 		fromMessageId = lastMsg.Id
 
-		// Safety check - if we're not making progress, break
-		if fromMessageId == 0 {
-			break
-		}
-	}
+	} // End for loop
 
-	log.Info().Msgf("Got %d comments for channel %s", len(comments), channelname)
+	slog.Info("Finished fetching comments", "count", len(comments), "channel", channelname, "messageID", messageID)
 	return comments, nil
 }
 
