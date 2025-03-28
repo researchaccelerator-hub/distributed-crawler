@@ -185,7 +185,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 				}
 
 				// NEW CODE: Load all pages from this layer map into memory
-				err = dsm.loadPagesIntoMemory(crawlID)
+				err = dsm.loadPagesIntoMemory(crawlID, false)
 				if err != nil {
 					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load pages into memory")
 					continue // Try next crawl ID
@@ -194,6 +194,46 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 				log.Info().Str("crawlID", crawlID).Msg("Successfully loaded existing state structure from DAPR")
 				loadedLayerMap = true
 				break // Successfully loaded a layer map, stop searching
+			}
+		}
+
+		if !loadedLayerMap {
+			crawlID := "20250327185808"
+
+			// Load layer structure
+			layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+			layerMapResponse, err := (*dsm.client).GetState(
+				context.Background(),
+				dsm.stateStoreName,
+				layerMapKey,
+				nil,
+			)
+
+			if err == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+				// Layer map exists and is not empty, load it
+				err = json.Unmarshal(layerMapResponse.Value, &dsm.layerMap)
+				if err != nil {
+					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to parse layer map for crawl ID")
+
+				}
+
+				// Load URL cache for this crawl
+				err = dsm.loadURLsForCrawl(crawlID)
+				if err != nil {
+					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load URLs for crawl")
+
+				}
+
+				// NEW CODE: Load all pages from this layer map into memory
+				err = dsm.loadPagesIntoMemory(crawlID, true)
+				if err != nil {
+					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load pages into memory")
+
+				}
+
+				log.Info().Str("crawlID", crawlID).Msg("Successfully loaded existing state structure from DAPR")
+				loadedLayerMap = true
+
 			}
 		}
 
@@ -853,7 +893,7 @@ func (dsm *DaprStateManager) loadURLsFromPreviousCrawls() (map[string]string, er
 	return urlMap, nil
 }
 
-func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string) error {
+func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) error {
 	loadedCount := 0
 
 	// For each layer in the layer map
@@ -887,13 +927,15 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string) error {
 			}
 
 			// Add page to in-memory page map
-			page.Status = "unfetched"
+			if !cont {
+				page.Status = "unfetched"
+				page.Timestamp = time.Now()
+			}
 
 			// Clear any previous messages or processing data
 			page.Messages = []Message{}
 
 			// Update the timestamp to current time
-			page.Timestamp = time.Now()
 			dsm.pageMap[pageID] = page
 			loadedCount++
 		}
