@@ -72,11 +72,11 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	}
 
 	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM. IF YOUR TG_PHONE_CODE IS INVALID, YOU MUST RE-RUN WITH A VALID CODE.")
-	//p := os.Getenv("TG_PHONE_NUMBER")
-	//pc := os.Getenv("TG_PHONE_CODE")
-	//os.Setenv("TG_PHONE_NUMBER", p)
-	//os.Setenv("TG_PHONE_CODE", pc)
-	//authorizer.PhoneNumber <- p
+	p := os.Getenv("TG_PHONE_NUMBER")
+	pc := os.Getenv("TG_PHONE_CODE")
+	os.Setenv("TG_PHONE_NUMBER", p)
+	os.Setenv("TG_PHONE_CODE", pc)
+	authorizer.PhoneNumber <- p
 	clientReady := make(chan *client.Client)
 	errChan := make(chan error)
 
