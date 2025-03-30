@@ -226,7 +226,8 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		return nil, fmt.Errorf("tdlibClient is nil")
 	}
 
-	log.Debug().Str("channel", channelname).Int64("chatID", chatID).Int64("messageID", messageID).Msg("Starting GetMessageComments")
+	// Added Log: Start of function execution
+	log.Debug().Str("channel", channelname).Int64("chatID", chatID).Int64("messageID", messageID).Msg("Entered GetMessageComments function")
 
 	// --- Determine the correct Chat ID for fetching comments ---
 	var threadChatID int64 = chatID // Default to the provided chatID
@@ -239,48 +240,52 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 	if err != nil {
 		log.Warn().Err(err).Str("channel", channelname).Int64("chatID", chatID).Msg("Failed to get original chat info, proceeding with provided chatID")
 	} else if originalChat != nil && originalChat.Type != nil {
-		// *** CORRECTED TYPE CHECK FOR v0.7.4 ***
-		// 2. Check if the chat type is Supergroup
+		// 2. Check if the chat type is Supergroup (correct for v0.7.4)
 		if chatTypeSupergroup, ok := originalChat.Type.(*client.ChatTypeSupergroup); ok && chatTypeSupergroup != nil {
-			// 3. Check if the IsChannel field is true within the Supergroup type
-			if chatTypeSupergroup.IsChannel { // <-- This is how we identify a Channel in v0.7.4
-				// It's a channel. Use its SupergroupId to get full info.
-				supergroupId := chatTypeSupergroup.SupergroupId // Field exists in ChatTypeSupergroup
+			// 3. Check if it's actually a channel via the IsChannel field
+			if chatTypeSupergroup.IsChannel {
+				supergroupId := chatTypeSupergroup.SupergroupId
 				if supergroupId != 0 {
 					log.Debug().Str("channel", channelname).Int64("chatID", chatID).Int64("supergroupID", supergroupId).Msg("Original chat is a channel (via ChatTypeSupergroup), attempting to get SupergroupFullInfo")
-					// 4. Fetch the full info for the supergroup associated with the channel
+					// 4. Fetch the full info using SupergroupId
 					supergroupFullInfo, err := tdlibClient.GetSupergroupFullInfo(&client.GetSupergroupFullInfoRequest{
 						SupergroupId: supergroupId,
 					})
 
+					// *** Logging added here to check GetSupergroupFullInfo result ***
 					if err != nil {
 						log.Warn().Err(err).Str("channel", channelname).Int64("chatID", chatID).Int64("supergroupID", supergroupId).Msg("Failed to get supergroup full info for channel")
-					} else if supergroupFullInfo != nil && supergroupFullInfo.LinkedChatId != 0 {
-						// 5. Found the linked chat ID! Use this for fetching comments.
-						threadChatID = supergroupFullInfo.LinkedChatId
-						foundLinkedChat = true
-						log.Info().Str("channel", channelname).Int64("originalChatID", chatID).Int64("linkedChatID", threadChatID).Msg("Found linked discussion group via SupergroupFullInfo")
+					} else if supergroupFullInfo != nil {
+						// Log exactly what was found
+						log.Debug().Int64("supergroupID", supergroupId).Int64("foundLinkedChatID", supergroupFullInfo.LinkedChatId).Msg("GetSupergroupFullInfo succeeded")
+						if supergroupFullInfo.LinkedChatId != 0 {
+							// 5. Found the linked chat ID! Use this for fetching comments.
+							threadChatID = supergroupFullInfo.LinkedChatId
+							foundLinkedChat = true
+							log.Info().Str("channel", channelname).Int64("originalChatID", chatID).Int64("linkedChatID", threadChatID).Msg("Found linked discussion group via SupergroupFullInfo")
 
-						// Optional access check for the linked chat
-						_, err = tdlibClient.GetChat(&client.GetChatRequest{ChatId: threadChatID})
-						if err != nil {
-							log.Error().Err(err).Str("channel", channelname).Int64("linkedChatID", threadChatID).Msg("Cannot access the determined linked discussion group")
-							return nil, fmt.Errorf("cannot access linked discussion group %d for channel %s: %w", threadChatID, channelname, err)
-						} else {
-							log.Debug().Int64("linkedChatID", threadChatID).Msg("Successfully accessed linked discussion group info")
-						}
+							// Optional access check for the linked chat
+							_, err = tdlibClient.GetChat(&client.GetChatRequest{ChatId: threadChatID})
+							if err != nil {
+								log.Error().Err(err).Str("channel", channelname).Int64("linkedChatID", threadChatID).Msg("Cannot access the determined linked discussion group")
+								return nil, fmt.Errorf("cannot access linked discussion group %d for channel %s: %w", threadChatID, channelname, err)
+							} else {
+								log.Debug().Int64("linkedChatID", threadChatID).Msg("Successfully accessed linked discussion group info")
+							}
+						} // else: LinkedChatId is 0, handled below by !foundLinkedChat check
 					} else {
-						log.Debug().Str("channel", channelname).Int64("supergroupID", supergroupId).Msg("SupergroupFullInfo obtained but no LinkedChatId found")
+						// Log if the call succeeded but returned nil info
+						log.Warn().Int64("supergroupID", supergroupId).Msg("GetSupergroupFullInfo returned nil info")
 					}
+					// *** End added logging ***
+
 				} else {
 					log.Debug().Str("channel", channelname).Int64("chatID", chatID).Msg("ChatTypeSupergroup is channel, but SupergroupId is 0")
 				}
 			} else {
-				// It's a supergroup but not a channel
 				log.Debug().Str("channel", channelname).Int64("chatID", chatID).Msg("Chat is a Supergroup, but not a channel.")
 			}
 		} else {
-			// Handle other chat types if necessary (Private, BasicGroup, Secret)
 			log.Debug().Str("channel", channelname).Int64("chatID", chatID).Str("type", originalChat.Type.ChatTypeType()).Msg("Original chat is not a Supergroup/Channel type.")
 		}
 	}
@@ -290,33 +295,52 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 	}
 	// --- End of determining chat ID ---
 
+	// Optional preliminary GetMessage check (uncomment if needed for further debugging)
+	/*
+		log.Debug().Int64("threadChatID", threadChatID).Int64("messageID", messageID).Msg("Attempting preliminary GetMessage check")
+		_, getMsgErr := tdlibClient.GetMessage(&client.GetMessageRequest{
+			ChatId:    threadChatID,
+			MessageId: messageID,
+		})
+		if getMsgErr != nil {
+			log.Error().Err(getMsgErr).Int64("threadChatID", threadChatID).Int64("messageID", messageID).Msg("Preliminary GetMessage failed - message might not exist or be inaccessible")
+			return comments, fmt.Errorf("preliminary GetMessage failed for message %d in chat %d: %w", messageID, threadChatID, getMsgErr)
+		} else {
+			log.Debug().Int64("threadChatID", threadChatID).Int64("messageID", messageID).Msg("Preliminary GetMessage succeeded")
+		}
+	*/
+
 	// Fetch the comments in the thread
 	comments := make([]model.Comment, 0)
 	var fromMessageId int64 = 0
 	done := false
 	const historyLimit = 100
 
+	// Added Log: Before starting loop
 	log.Debug().Str("channel", channelname).Int64("effectiveChatID", threadChatID).Int64("messageID", messageID).Msg("Starting comment pagination loop")
 
 	for !done {
 		var threadHistory *client.Messages
 		var historyErr error
 
-		log.Debug().Int64("effectiveChatID", threadChatID).Int64("messageID", messageID).Int64("fromMessageId", fromMessageId).Int("limit", historyLimit).Msg("Requesting message thread history batch")
+		// Added Log: Before GetMessageThreadHistory call
+		log.Debug().Int64("fromMessageId", fromMessageId).Msg("Attempting GetMessageThreadHistory")
 
 		// --- Fetch Batch of Comments ---
 		threadHistory, historyErr = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
-			ChatId:        threadChatID, // Use the determined threadChatID
+			ChatId:        threadChatID,
 			MessageId:     messageID,
 			FromMessageId: fromMessageId,
 			Offset:        0,
 			Limit:         historyLimit,
 		})
 
+		// Added Log: After GetMessageThreadHistory call
+		log.Debug().Err(historyErr).Msg("GetMessageThreadHistory call completed")
+
 		// --- Handle Errors ---
 		if historyErr != nil {
 			errStr := historyErr.Error()
-			// Check for common errors
 			if strings.Contains(errStr, "Receive messages in an unexpected chat") ||
 				strings.Contains(errStr, "CHAT_ID_INVALID") ||
 				strings.Contains(errStr, "MESSAGE_ID_INVALID") ||
@@ -324,13 +348,15 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 				strings.Contains(errStr, "Input_Request_Chat_Not_Found") ||
 				strings.Contains(errStr, "Chat not found") ||
 				strings.Contains(errStr, "message thread not found") ||
-				strings.Contains(errStr, "THREAD_NOT_FOUND") {
+				strings.Contains(errStr, "THREAD_NOT_FOUND") ||
+				// Explicitly check for the error you saw
+				strings.Contains(errStr, "Message not found") { // <-- Added "Message not found" here
 
 				loggerWithError := log.Error().Err(historyErr).Str("channel", channelname).
 					Int64("originalChatID", chatID).Int64("effectiveChatID", threadChatID).
 					Int64("messageID", messageID).Int64("fromMessageId", fromMessageId)
 
-				loggerWithError.Msg("TDLib Error: Cannot access chat or message thread, or it doesn't exist.")
+				loggerWithError.Msg("TDLib Error: Cannot access chat or message thread, or it doesn't exist (Specific Check).")
 
 				if fromMessageId == 0 {
 					return comments, fmt.Errorf("message thread %d in chat %d (channel %s) not found or inaccessible: %w", messageID, threadChatID, channelname, historyErr)
@@ -343,10 +369,10 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 					break
 				}
 			} else {
-				// Handle other potential errors
+				// Handle other potential errors (Rate limits, network issues, etc.)
 				log.Error().Err(historyErr).Str("channel", channelname).
 					Int64("effectiveChatID", threadChatID).Int64("messageID", messageID).
-					Msg("Failed to get message thread history due to other error")
+					Msg("Failed to get message thread history due to other error") // <-- This was the log you saw previously
 				return comments, historyErr
 			}
 		}
@@ -358,7 +384,10 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		}
 
 		// --- Process Fetched Messages ---
-		log.Debug().Int("count", len(threadHistory.Messages)).Str("channel", channelname).Int64("messageID", messageID).Msg("Received message batch")
+		// Added Log: Before processing batch
+		if threadHistory != nil && len(threadHistory.Messages) > 0 {
+			log.Debug().Int("batch_size", len(threadHistory.Messages)).Msg("Processing message batch")
+		}
 		foundNewMessagesInBatch := false
 		for _, msg := range threadHistory.Messages {
 			if msg == nil {
@@ -367,10 +396,10 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 			}
 
 			comment := model.Comment{
-				Reactions: make(map[string]int), // Initialize map
+				Reactions: make(map[string]int),
 			}
 
-			comment.Handle = GetPoster(tdlibClient, msg) // Ensure GetPoster is robust
+			comment.Handle = GetPoster(tdlibClient, msg)
 
 			if msg.Content != nil {
 				if textContent, ok := msg.Content.(*client.MessageText); ok && textContent != nil && textContent.Text != nil {
@@ -426,6 +455,9 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 			break
 		}
 		fromMessageId = lastMsg.Id
+
+		// Added Log: End of loop iteration
+		log.Debug().Int64("next_fromMessageId", fromMessageId).Bool("done", done).Msg("End of loop iteration")
 
 	} // End for loop
 
