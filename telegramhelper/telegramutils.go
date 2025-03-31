@@ -222,194 +222,272 @@ func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Me
 // The function fetches comments in batches of up to 100 and continues until no more comments are available.
 // It extracts the text, reactions, view count, and reply count for each comment.
 func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string, maxcomments int) ([]model.Comment, error) {
+	// Check if tdlibClient is nil
 	if tdlibClient == nil {
+		log.Error().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Int64("messageID", messageID).
+			Msg("TDLib client is nil")
 		return nil, fmt.Errorf("tdlibClient is nil")
 	}
 
-	// Added Log: Start of function execution
-	log.Info().Str("channel", channelname).Int64("chatID", chatID).Int64("messageID", messageID).Msg("Entered GetMessageComments function")
-
-	// --- Determine the correct Chat ID for fetching comments ---
-	var threadChatID int64 = chatID // Default to the provided chatID
-	var foundLinkedChat bool = false
-
-	// 1. Get info about the original chat
-	originalChat, err := tdlibClient.GetChat(&client.GetChatRequest{
-		ChatId: chatID,
-	})
-	if err != nil {
-		log.Warn().Err(err).Str("channel", channelname).Int64("chatID", chatID).Msg("Failed to get original chat info, proceeding with provided chatID")
-	} else if originalChat != nil && originalChat.Type != nil {
-		// 2. Check if the chat type is Supergroup (correct for v0.7.4)
-		if chatTypeSupergroup, ok := originalChat.Type.(*client.ChatTypeSupergroup); ok && chatTypeSupergroup != nil {
-			// 3. Check if it's actually a channel via the IsChannel field
-			if chatTypeSupergroup.IsChannel {
-				supergroupId := chatTypeSupergroup.SupergroupId
-				if supergroupId != 0 {
-					log.Info().Str("channel", channelname).Int64("chatID", chatID).Int64("supergroupID", supergroupId).Msg("Original chat is a channel (via ChatTypeSupergroup), attempting to get SupergroupFullInfo")
-					// 4. Fetch the full info using SupergroupId
-					supergroupFullInfo, err := tdlibClient.GetSupergroupFullInfo(&client.GetSupergroupFullInfoRequest{
-						SupergroupId: supergroupId,
-					})
-
-					// *** Logging added here to check GetSupergroupFullInfo result ***
-					if err != nil {
-						log.Warn().Err(err).Str("channel", channelname).Int64("chatID", chatID).Int64("supergroupID", supergroupId).Msg("Failed to get supergroup full info for channel")
-					} else if supergroupFullInfo != nil {
-						// Log exactly what was found
-						log.Info().Int64("supergroupID", supergroupId).Int64("foundLinkedChatID", supergroupFullInfo.LinkedChatId).Msg("GetSupergroupFullInfo succeeded")
-						if supergroupFullInfo.LinkedChatId != 0 {
-							// 5. Found the linked chat ID! Use this for fetching comments.
-							threadChatID = supergroupFullInfo.LinkedChatId
-							foundLinkedChat = true
-							log.Info().Str("channel", channelname).Int64("originalChatID", chatID).Int64("linkedChatID", threadChatID).Msg("Found linked discussion group via SupergroupFullInfo")
-
-							// Optional access check for the linked chat
-							_, err = tdlibClient.GetChat(&client.GetChatRequest{ChatId: threadChatID})
-							if err != nil {
-								log.Error().Err(err).Str("channel", channelname).Int64("linkedChatID", threadChatID).Msg("Cannot access the determined linked discussion group")
-								return nil, fmt.Errorf("cannot access linked discussion group %d for channel %s: %w", threadChatID, channelname, err)
-							} else {
-								log.Info().Int64("linkedChatID", threadChatID).Msg("Successfully accessed linked discussion group info")
-							}
-						} // else: LinkedChatId is 0, handled below by !foundLinkedChat check
-					} else {
-						// Log if the call succeeded but returned nil info
-						log.Warn().Int64("supergroupID", supergroupId).Msg("GetSupergroupFullInfo returned nil info")
-					}
-					// *** End added logging ***
-
-				} else {
-					log.Info().Str("channel", channelname).Int64("chatID", chatID).Msg("ChatTypeSupergroup is channel, but SupergroupId is 0")
-				}
-			} else {
-				log.Info().Str("channel", channelname).Int64("chatID", chatID).Msg("Chat is a Supergroup, but not a channel.")
-			}
-		} else {
-			log.Info().Str("channel", channelname).Int64("chatID", chatID).Str("type", originalChat.Type.ChatTypeType()).Msg("Original chat is not a Supergroup/Channel type.")
-		}
-	}
-
-	if !foundLinkedChat {
-		log.Info().Str("channel", channelname).Int64("effectiveChatID", threadChatID).Msg("Proceeding using the initially provided chat ID (not a channel, no linked group found/accessible, or error getting info)")
-	}
-	// --- End of determining chat ID ---
-
-	// Optional preliminary GetMessage check (uncomment if needed for further debugging)
-	/*
-		log.Info().Int64("threadChatID", threadChatID).Int64("messageID", messageID).Msg("Attempting preliminary GetMessage check")
-		_, getMsgErr := tdlibClient.GetMessage(&client.GetMessageRequest{
-			ChatId:    threadChatID,
-			MessageId: messageID,
-		})
-		if getMsgErr != nil {
-			log.Error().Err(getMsgErr).Int64("threadChatID", threadChatID).Int64("messageID", messageID).Msg("Preliminary GetMessage failed - message might not exist or be inaccessible")
-			return comments, fmt.Errorf("preliminary GetMessage failed for message %d in chat %d: %w", messageID, threadChatID, getMsgErr)
-		} else {
-			log.Info().Int64("threadChatID", threadChatID).Int64("messageID", messageID).Msg("Preliminary GetMessage succeeded")
-		}
-	*/
+	log.Info().
+		Str("channel", channelname).
+		Int64("chatID", chatID).
+		Int64("messageID", messageID).
+		Int("maxcomments", maxcomments).
+		Msg("Starting GetMessageComments function")
 
 	// Fetch the comments in the thread
 	comments := make([]model.Comment, 0)
 	var fromMessageId int64 = 0
 	done := false
-	const historyLimit = 100
+	iterationCount := 0
 
-	// Added Log: Before starting loop
-	log.Info().Str("channel", channelname).Int64("effectiveChatID", threadChatID).Int64("messageID", messageID).Msg("Starting comment pagination loop")
+	for {
+		iterationCount++
+		log.Debug().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Int64("messageID", messageID).
+			Int64("fromMessageId", fromMessageId).
+			Int("iteration", iterationCount).
+			Msg("Starting pagination iteration")
 
-	for !done {
+		// Set up variables to store results
 		var threadHistory *client.Messages
-		var historyErr error
+		var err error
 
-		// Added Log: Before GetMessageThreadHistory call
-		log.Info().Int64("fromMessageId", fromMessageId).Msg("Attempting GetMessageThreadHistory")
+		// Set up panic recovery directly in the main function
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				log.Error().
+					Str("channel", channelname).
+					Interface("panic", r).
+					Str("stack", string(stack)).
+					Int64("chatID", chatID).
+					Int64("messageID", messageID).
+					Int64("fromMessageId", fromMessageId).
+					Int("iteration", iterationCount).
+					Msg("Recovered from panic in GetMessageComments")
 
-		// --- Fetch Batch of Comments ---
-		threadHistory, historyErr = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
-			ChatId:        threadChatID,
-			MessageId:     messageID,
-			FromMessageId: fromMessageId,
-			Offset:        0,
-			Limit:         historyLimit,
+				// If we've recovered from a panic, we'll just return what we have so far
+				done = true
+			}
+		}()
+
+		// Verify the chat exists
+		log.Debug().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Msg("Verifying chat existence")
+
+		chatInfo, chatErr := tdlibClient.GetChat(&client.GetChatRequest{
+			ChatId: chatID,
 		})
 
-		// Added Log: After GetMessageThreadHistory call
-		log.Info().Err(historyErr).Msg("GetMessageThreadHistory call completed")
+		if chatErr != nil {
+			log.Error().
+				Err(chatErr).
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Msg("Failed to get chat info")
+		} else {
+			// Log chat type information for debugging
+			if chatInfo != nil && chatInfo.Type != nil {
+				log.Debug().
+					Str("channel", channelname).
+					Int64("chatID", chatID).
+					Str("chatTitle", chatInfo.Title).
+					Str("chatType", chatInfo.Type.ChatTypeType()).
+					Msg("Successfully got chat info")
 
-		// --- Handle Errors ---
-		if historyErr != nil {
-			errStr := historyErr.Error()
-			if strings.Contains(errStr, "Receive messages in an unexpected chat") ||
-				strings.Contains(errStr, "CHAT_ID_INVALID") ||
-				strings.Contains(errStr, "MESSAGE_ID_INVALID") ||
-				strings.Contains(errStr, "MSG_ID_INVALID") ||
-				strings.Contains(errStr, "Input_Request_Chat_Not_Found") ||
-				strings.Contains(errStr, "Chat not found") ||
-				strings.Contains(errStr, "message thread not found") ||
-				strings.Contains(errStr, "THREAD_NOT_FOUND") ||
-				// Explicitly check for the error you saw
-				strings.Contains(errStr, "Message not found") { // <-- Added "Message not found" here
-
-				loggerWithError := log.Error().Err(historyErr).Str("channel", channelname).
-					Int64("originalChatID", chatID).Int64("effectiveChatID", threadChatID).
-					Int64("messageID", messageID).Int64("fromMessageId", fromMessageId)
-
-				loggerWithError.Msg("TDLib Error: Cannot access chat or message thread, or it doesn't exist (Specific Check).")
-
-				if fromMessageId == 0 {
-					return comments, fmt.Errorf("message thread %d in chat %d (channel %s) not found or inaccessible: %w", messageID, threadChatID, channelname, historyErr)
-				} else {
-					log.Warn().Err(historyErr).Str("channel", channelname).
-						Int64("originalChatID", chatID).Int64("effectiveChatID", threadChatID).
-						Int64("messageID", messageID).Int64("fromMessageId", fromMessageId).
-						Msg("Error occurred mid-pagination, stopping comment retrieval for this thread.")
-					done = true
-					break
+				// If it's a supergroup, log additional details
+				if supergroupType, ok := chatInfo.Type.(*client.ChatTypeSupergroup); ok && supergroupType != nil {
+					log.Debug().
+						Int64("supergroupId", supergroupType.SupergroupId).
+						Bool("isChannel", supergroupType.IsChannel).
+						Msg("Chat is a supergroup")
 				}
-			} else {
-				// Handle other potential errors (Rate limits, network issues, etc.)
-				log.Error().Err(historyErr).Str("channel", channelname).
-					Int64("effectiveChatID", threadChatID).Int64("messageID", messageID).
-					Msg("Failed to get message thread history due to other error") // <-- This was the log you saw previously
-				return comments, historyErr
 			}
 		}
 
-		// --- Check if History is Empty ---
+		// Check if the message exists
+		log.Debug().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Int64("messageID", messageID).
+			Msg("Verifying message existence")
+
+		msgInfo, msgErr := tdlibClient.GetMessage(&client.GetMessageRequest{
+			ChatId:    chatID,
+			MessageId: messageID,
+		})
+
+		if msgErr != nil {
+			log.Error().
+				Err(msgErr).
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Msg("Failed to get message")
+		} else {
+			// Log message info for debugging
+			if msgInfo != nil {
+				var contentType string
+				if msgInfo.Content != nil {
+					contentType = msgInfo.Content.MessageContentType()
+				}
+
+				log.Debug().
+					Str("channel", channelname).
+					Int64("chatID", chatID).
+					Int64("messageID", messageID).
+					Str("contentType", contentType).
+					Msg("Successfully got message info")
+			}
+		}
+
+		// Get the message thread history directly (without function wrapper)
+		log.Debug().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Int64("messageID", messageID).
+			Int64("fromMessageId", fromMessageId).
+			Int("iteration", iterationCount).
+			Msg("Attempting to get message thread history")
+
+		threadHistory, err = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
+			ChatId:        chatID,
+			MessageId:     messageID,
+			FromMessageId: fromMessageId,
+			Limit:         100, // Fetch up to 100 comments at a time
+		})
+
+		// Log the result of the GetMessageThreadHistory call
+		if err != nil {
+			log.Error().
+				Err(err).
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int64("fromMessageId", fromMessageId).
+				Int("iteration", iterationCount).
+				Msg("GetMessageThreadHistory failed")
+		} else {
+			// Log success with message count
+			messageCount := 0
+			if threadHistory != nil && threadHistory.Messages != nil {
+				messageCount = len(threadHistory.Messages)
+			}
+
+			log.Debug().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int64("fromMessageId", fromMessageId).
+				Int("messagesCount", messageCount).
+				Int("iteration", iterationCount).
+				Msg("GetMessageThreadHistory succeeded")
+		}
+
+		if err != nil {
+			// Parse the error string to detect specific errors
+			errStr := err.Error()
+
+			if strings.Contains(errStr, "Receive messages in an unexpected chat") {
+				log.Error().
+					Err(err).
+					Str("channel", channelname).
+					Int64("chatID", chatID).
+					Int64("messageID", messageID).
+					Int("iteration", iterationCount).
+					Str("errorMsg", errStr).
+					Msg("Cloud environment error: Unable to access chat or message thread")
+
+				// You might want to handle this specific error differently
+				return comments, fmt.Errorf("chat access error (%s): %w", channelname, err)
+			}
+
+			log.Error().
+				Err(err).
+				Stack().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int("iteration", iterationCount).
+				Str("errorMsg", errStr).
+				Msg("Failed to get message thread history")
+
+			return comments, err
+		}
+
+		// Check if threadHistory is nil or empty
 		if threadHistory == nil || len(threadHistory.Messages) == 0 {
-			log.Info().Str("channel", channelname).Int64("messageID", messageID).Int64("fromMessageId", fromMessageId).Msg("Received empty message history, ending pagination.")
+			log.Info().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int64("fromMessageId", fromMessageId).
+				Int("iteration", iterationCount).
+				Msg("Thread history is empty, ending pagination")
+
 			break
 		}
 
-		// --- Process Fetched Messages ---
-		// Added Log: Before processing batch
-		if threadHistory != nil && len(threadHistory.Messages) > 0 {
-			log.Info().Int("batch_size", len(threadHistory.Messages)).Msg("Processing message batch")
-		}
-		foundNewMessagesInBatch := false
-		for _, msg := range threadHistory.Messages {
+		// Log the number of messages retrieved in this batch
+		log.Info().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Int64("messageID", messageID).
+			Int("messageCount", len(threadHistory.Messages)).
+			Int("iteration", iterationCount).
+			Msg("Processing batch of messages")
+
+		// Process each message in the thread
+		commentsAddedInBatch := 0
+		for i, msg := range threadHistory.Messages {
+			// Skip nil messages
 			if msg == nil {
-				log.Warn().Str("channel", channelname).Int64("messageID", messageID).Msg("Encountered nil message in history batch")
+				log.Warn().
+					Str("channel", channelname).
+					Int64("chatID", chatID).
+					Int64("messageID", messageID).
+					Int("index", i).
+					Int("iteration", iterationCount).
+					Msg("Encountered nil message in thread history")
+
 				continue
 			}
 
-			comment := model.Comment{
-				Reactions: make(map[string]int),
-			}
+			comment := model.Comment{}
 
-			comment.Handle = GetPoster(tdlibClient, msg)
+			// Safely get username
+			username := GetPoster(tdlibClient, msg)
+			comment.Handle = username
 
+			// Safely extract message text
+			messageText := ""
 			if msg.Content != nil {
 				if textContent, ok := msg.Content.(*client.MessageText); ok && textContent != nil && textContent.Text != nil {
+					messageText = textContent.Text.Text
 					comment.Text = textContent.Text.Text
 				}
 			}
 
-			if msg.InteractionInfo != nil && msg.InteractionInfo.Reactions != nil {
+			// Safely extract reactions
+			reactionCount := 0
+			if msg.InteractionInfo != nil &&
+				msg.InteractionInfo.Reactions != nil &&
+				len(msg.InteractionInfo.Reactions.Reactions) > 0 {
+
+				comment.Reactions = make(map[string]int)
+				reactionCount = len(msg.InteractionInfo.Reactions.Reactions)
+
 				for _, reaction := range msg.InteractionInfo.Reactions.Reactions {
-					if reaction != nil && reaction.Type != nil {
+					if reaction.Type != nil {
 						if emojiReaction, ok := reaction.Type.(*client.ReactionTypeEmoji); ok && emojiReaction != nil {
 							comment.Reactions[emojiReaction.Emoji] = int(reaction.TotalCount)
 						}
@@ -417,56 +495,132 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 				}
 			}
 
+			// Safely extract view count and reply count
+			viewCount := 0
+			replyCount := 0
 			if msg.InteractionInfo != nil {
-				comment.ViewCount = int(msg.InteractionInfo.ViewCount)
+				// Extract reply count
 				if msg.InteractionInfo.ReplyInfo != nil {
-					comment.ReplyCount = int(msg.InteractionInfo.ReplyInfo.ReplyCount)
+					replyCount = int(msg.InteractionInfo.ReplyInfo.ReplyCount)
+					comment.ReplyCount = replyCount
 				}
+
+				// Extract view count
+				viewCount = int(msg.InteractionInfo.ViewCount)
+				comment.ViewCount = viewCount
 			}
 
-			comments = append(comments, comment)
-			foundNewMessagesInBatch = true
+			// Log message processing details
+			log.Debug().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int64("commentID", msg.Id).
+				Str("handle", comment.Handle).
+				Int("textLength", len(messageText)).
+				Int("viewCount", viewCount).
+				Int("replyCount", replyCount).
+				Int("reactionCount", reactionCount).
+				Int("index", i).
+				Int("iteration", iterationCount).
+				Msg("Processed comment")
 
+			// Add comment to the results
+			comments = append(comments, comment)
+			commentsAddedInBatch++
+
+			// Check if we've reached the maximum number of comments
 			if maxcomments > -1 && len(comments) >= maxcomments {
-				log.Info().Int("count", len(comments)).Int("limit", maxcomments).Str("channel", channelname).Int64("messageID", messageID).Msg("Reached max comments limit")
+				log.Info().
+					Str("channel", channelname).
+					Int64("chatID", chatID).
+					Int64("messageID", messageID).
+					Int("commentsCollected", len(comments)).
+					Int("maxComments", maxcomments).
+					Int("iteration", iterationCount).
+					Msg("Reached maximum comment limit, ending pagination")
+
 				done = true
 				break
 			}
 		}
-		// --- End processing messages ---
+
+		// Log the number of comments added in this batch
+		log.Info().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Int64("messageID", messageID).
+			Int("commentsAddedInBatch", commentsAddedInBatch).
+			Int("totalCommentsCollected", len(comments)).
+			Int("iteration", iterationCount).
+			Msg("Batch processing complete")
 
 		if done {
 			break
 		}
 
-		if !foundNewMessagesInBatch {
-			log.Info().Str("channel", channelname).Int64("messageID", messageID).Int64("fromMessageId", fromMessageId).Msg("Last batch contained no new processable messages, ending pagination.")
+		// Check if we have messages to get the last ID
+		if len(threadHistory.Messages) == 0 {
+			log.Info().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int("iteration", iterationCount).
+				Msg("No messages in batch, ending pagination")
+
 			break
 		}
 
+		// Safely get the last message ID for pagination
 		lastMsg := threadHistory.Messages[len(threadHistory.Messages)-1]
 		if lastMsg == nil {
-			log.Warn().Str("channel", channelname).Int64("messageID", messageID).Msg("Last message in the last valid batch was nil, stopping pagination")
+			log.Warn().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int("iteration", iterationCount).
+				Msg("Last message in batch is nil, ending pagination")
+
 			break
 		}
 
-		if lastMsg.Id == fromMessageId {
-			log.Warn().Str("channel", channelname).Int64("messageID", messageID).Int64("fromMessageId", fromMessageId).Msg("Next fromMessageId is the same as the current one, potential loop detected. Stopping pagination.")
-			break
-		}
+		// Log the last message ID for pagination
+		previousFromMessageId := fromMessageId
 		fromMessageId = lastMsg.Id
 
-		// Added Log: End of loop iteration
-		log.Info().Int64("next_fromMessageId", fromMessageId).Bool("done", done).Msg("End of loop iteration")
+		log.Debug().
+			Str("channel", channelname).
+			Int64("chatID", chatID).
+			Int64("messageID", messageID).
+			Int64("previousFromMessageId", previousFromMessageId).
+			Int64("newFromMessageId", fromMessageId).
+			Int("iteration", iterationCount).
+			Msg("Updated pagination cursor")
 
-	} // End for loop
+		// Safety check - if we're not making progress, break
+		if fromMessageId == 0 || fromMessageId == previousFromMessageId {
+			log.Warn().
+				Str("channel", channelname).
+				Int64("chatID", chatID).
+				Int64("messageID", messageID).
+				Int64("fromMessageId", fromMessageId).
+				Int("iteration", iterationCount).
+				Msg("Pagination not making progress or fromMessageId is 0, ending pagination")
 
-	log.Info().Msgf("Finished fetching comments. Got %d comments for channel %s [messageID: %d, originalChatID: %d, effectiveChatID: %d]",
-		len(comments), channelname, messageID, chatID, threadChatID)
+			break
+		}
+	}
+
+	log.Info().
+		Str("channel", channelname).
+		Int64("chatID", chatID).
+		Int64("messageID", messageID).
+		Int("totalComments", len(comments)).
+		Int("iterations", iterationCount).
+		Msg("Finished fetching comments")
 
 	return comments, nil
 }
-
 func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 	// Set default username
 	username := "unknown"
