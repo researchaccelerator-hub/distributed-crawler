@@ -517,6 +517,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 				Int64("messageID", messageID).
 				Int64("commentID", msg.Id).
 				Str("handle", comment.Handle).
+				Str("message", messageText).
 				Int("textLength", len(messageText)).
 				Int("viewCount", viewCount).
 				Int("replyCount", replyCount).
