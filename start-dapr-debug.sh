@@ -31,7 +31,7 @@ go build -gcflags "all=-N -l" -o ./bin/app
 
 echo "Starting Delve debugger..."
 # Pass your app arguments after the double dash
-dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls "kartiny_muzei_zhivopis" --crawl-id test55 --tdlib-database-url http://tomb218.sg-host.com/tdlib.tgz --min-post-date 2024-01-01 --max-depth 1 &
+dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls "kartiny_muzei_zhivopis" --crawl-id test61 --tdlib-database-url http://tomb218.sg-host.com/tdlib-db.tgz --min-post-date 2024-01-01 --max-depth 1 &
 DLV_PID=$!
 
 # Give Delve a moment to initialize

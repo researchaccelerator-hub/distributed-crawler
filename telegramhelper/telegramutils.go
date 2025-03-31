@@ -621,7 +621,6 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 	return comments, nil
 }
-
 func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 	// Set default username
 	username := "unknown"
@@ -721,7 +720,7 @@ func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 		}
 
 	default:
-		log.Debug().
+		log.Info().
 			Str("senderType", fmt.Sprintf("%T", msg.SenderId)).
 			Msg("Unknown sender type")
 	}
