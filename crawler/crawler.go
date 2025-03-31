@@ -6,6 +6,7 @@ type TDLibClient interface {
 	GetMessage(req *client.GetMessageRequest) (*client.Message, error)
 	GetMessageLink(req *client.GetMessageLinkRequest) (*client.MessageLink, error)
 	GetMessageThreadHistory(req *client.GetMessageThreadHistoryRequest) (*client.Messages, error)
+	GetMessageThread(req *client.GetMessageThreadRequest) (*client.MessageThreadInfo, error)
 	GetRemoteFile(req *client.GetRemoteFileRequest) (*client.File, error)
 	DownloadFile(req *client.DownloadFileRequest) (*client.File, error)
 	GetChatHistory(req *client.GetChatHistoryRequest) (*client.Messages, error)
