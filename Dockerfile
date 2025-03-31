@@ -28,6 +28,6 @@ WORKDIR /app
 # Copy the binary from the builder stage
 COPY --from=builder /app/main .
 
-# Set the entrypoint
+# Set the entrypoint.
 ENTRYPOINT ["./main"]
 CMD ["--dapr", "--dapr-mode", "job"]
