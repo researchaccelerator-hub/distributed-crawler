@@ -29,5 +29,5 @@ WORKDIR /app
 COPY --from=builder /app/main .
 
 # Set the entrypoint
-#ENTRYPOINT ["./main"]
-#CMD ["--dapr", "--dapr-mode", "job"]
+ENTRYPOINT ["./main"]
+CMD ["--dapr", "--dapr-mode", "job"]
