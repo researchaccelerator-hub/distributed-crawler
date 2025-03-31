@@ -83,7 +83,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
 
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 4}
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 1}
 		tdlibClient.SetLogVerbosityLevel(&verb)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
@@ -447,9 +447,9 @@ var ParseMessage = func(
 		fetchedComments, fetchErr := GetMessageComments(tdlibClient, chat.Id, message.Id, channelName, cfg.MaxComments)
 		if fetchErr != nil {
 			log.Error().Stack().Err(fetchErr).Msg("Failed to fetch comments")
-		} else if len(fetchedComments) > 0 {
-			comments = fetchedComments
 		}
+		comments = fetchedComments
+
 	}
 
 	// Process based on message content type

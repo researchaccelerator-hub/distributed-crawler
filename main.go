@@ -119,8 +119,8 @@ var rootCmd = &cobra.Command{
 		crawlerCfg.MinUsers = viper.GetInt("crawler.minusers")
 		crawlerCfg.CrawlID = viper.GetString("crawler.crawlid")
 		crawlerCfg.MaxComments = viper.GetInt("crawler.maxcomments")
-		crawlerCfg.MaxComments = viper.GetInt("crawler.maxposts")
-		crawlerCfg.MaxComments = viper.GetInt("crawler.maxdepth")
+		crawlerCfg.MaxPosts = viper.GetInt("crawler.maxposts")
+		crawlerCfg.MaxDepth = viper.GetInt("crawler.maxdepth")
 
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
