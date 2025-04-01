@@ -750,6 +750,98 @@ func (dsm *DaprStateManager) Close() error {
 	return nil
 }
 
+// FindIncompleteCrawl looks for an incomplete crawl with the given crawl ID
+// in the Dapr state store and returns its execution ID if found
+func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) {
+	// First check in-memory data using the base implementation
+	execID, exists, err := dsm.BaseStateManager.FindIncompleteCrawl(crawlID)
+	if err != nil || exists {
+		return execID, exists, err
+	}
+	
+	// Try to get metadata for the crawl ID
+	metadataKey := fmt.Sprintf("%s/metadata", crawlID)
+	response, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		metadataKey,
+		nil,
+	)
+	
+	if err != nil {
+		return "", false, fmt.Errorf("failed to get metadata from Dapr: %w", err)
+	}
+	
+	if response.Value == nil {
+		return "", false, nil // No metadata exists for this crawl ID
+	}
+	
+	var metadata CrawlMetadata
+	err = json.Unmarshal(response.Value, &metadata)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to parse metadata: %w", err)
+	}
+	
+	// Check if the crawl is incomplete (not marked as completed)
+	if metadata.Status != "completed" {
+		log.Info().
+			Str("crawlID", crawlID).
+			Str("executionID", metadata.ExecutionID).
+			Str("status", metadata.Status).
+			Msg("Found incomplete crawl")
+		return metadata.ExecutionID, true, nil
+	}
+	
+	// If we have previous execution IDs, check them too
+	for _, prevExecID := range metadata.PreviousCrawlID {
+		// For each previous execution ID, check if it's incomplete
+		layerMapKey := fmt.Sprintf("%s/layer_map", prevExecID)
+		layerMapResponse, err := (*dsm.client).GetState(
+			context.Background(),
+			dsm.stateStoreName,
+			layerMapKey,
+			nil,
+		)
+		
+		if err != nil || layerMapResponse.Value == nil {
+			log.Warn().Err(err).Str("executionID", prevExecID).Msg("Failed to load layer map for execution")
+			continue
+		}
+		
+		// Get the execution's metadata to check its status
+		execMetadataKey := fmt.Sprintf("%s/metadata", prevExecID)
+		execMetadataResponse, err := (*dsm.client).GetState(
+			context.Background(),
+			dsm.stateStoreName,
+			execMetadataKey,
+			nil,
+		)
+		
+		if err != nil || execMetadataResponse.Value == nil {
+			continue
+		}
+		
+		var execMetadata CrawlMetadata
+		err = json.Unmarshal(execMetadataResponse.Value, &execMetadata)
+		if err != nil {
+			continue
+		}
+		
+		// If the execution is not completed, return it
+		if execMetadata.Status != "completed" {
+			log.Info().
+				Str("crawlID", crawlID).
+				Str("executionID", prevExecID).
+				Str("status", execMetadata.Status).
+				Msg("Found incomplete previous execution")
+			return prevExecID, true, nil
+		}
+	}
+	
+	// No incomplete crawl found
+	return "", false, nil
+}
+
 // Helper methods
 
 // loadStateForCrawl loads the state for a specific crawl ID

@@ -133,9 +133,46 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		seenURLs[url] = true
 	}
 
-	crawlexecid := common.GenerateCrawlID()
-	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
-
+	// Initialize state manager factory
+	log.Info().Msgf("Starting scraper for crawl ID: %s", crawlCfg.CrawlID)
+	smfact := state.DefaultStateManagerFactory{}
+	
+	// Create a temporary state manager to check for incomplete crawls
+	tempCfg := state.Config{
+		StorageRoot: crawlCfg.StorageRoot,
+		JobID:       "",
+		CrawlID:     crawlCfg.CrawlID,
+	}
+	
+	tempSM, err := smfact.Create(tempCfg)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create temporary state manager")
+	}
+	
+	// Check for an existing incomplete crawl
+	var crawlexecid string
+	if tempSM != nil {
+		existingExecID, exists, err := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
+		if err != nil {
+			log.Warn().Err(err).Msg("Error checking for existing crawls, starting fresh")
+		} else if exists {
+			// Use existing execution ID
+			crawlexecid = existingExecID
+			log.Info().Msgf("Resuming existing crawl: %s (execution: %s)", 
+				crawlCfg.CrawlID, crawlexecid)
+		}
+		
+		// Close the temporary state manager to free up resources
+		_ = tempSM.Close()
+	}
+	
+	// If no existing crawl was found, generate a new execution ID
+	if crawlexecid == "" {
+		crawlexecid = common.GenerateCrawlID()
+		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
+	}
+	
+	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
 		JobID:            "",
@@ -143,7 +180,6 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		CrawlExecutionID: crawlexecid,
 	}
 
-	smfact := state.DefaultStateManagerFactory{}
 	sm, err := smfact.Create(cfg)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize state manager")

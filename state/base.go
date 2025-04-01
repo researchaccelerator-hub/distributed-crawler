@@ -352,6 +352,20 @@ func (bsm *BaseStateManager) GetMaxDepth() (int, error) {
 	return maxDepth, nil
 }
 
+// FindIncompleteCrawl checks if there is an existing incomplete crawl with the given crawl ID
+// and returns its execution ID if found
+func (bsm *BaseStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) {
+	bsm.mutex.RLock()
+	defer bsm.mutex.RUnlock()
+
+	// The base implementation just checks the in-memory metadata
+	if bsm.metadata.CrawlID == crawlID && bsm.metadata.Status != "completed" {
+		return bsm.metadata.ExecutionID, true, nil
+	}
+
+	return "", false, nil
+}
+
 // StorePost and StoreFile are left to specific implementations
 // HasProcessedMedia and MarkMediaAsProcessed are left to specific implementations
 // SaveState is left to specific implementations

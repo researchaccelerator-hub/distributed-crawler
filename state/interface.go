@@ -31,6 +31,7 @@ type StateManagementInterface interface {
 	// Crawl management
 	GetPreviousCrawls() ([]string, error)
 	UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error
+	FindIncompleteCrawl(crawlID string) (string, bool, error) // Returns executionID, exists, error
 
 	// Media cache
 	HasProcessedMedia(mediaID string) (bool, error)
