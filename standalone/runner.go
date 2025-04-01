@@ -1,6 +1,7 @@
 package standalone
 
 import (
+	"context"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
@@ -189,6 +190,31 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize state")
 	}
+	
+	// Initialize connection pool with an appropriate size
+	poolSize := crawlCfg.Concurrency
+	if poolSize < 1 {
+		poolSize = 1
+	}
+	
+	// If we have database URLs, use those to determine pool size
+	if len(crawlCfg.TDLibDatabaseURLs) > 0 {
+		log.Info().Msgf("Found %d TDLib database URLs for connection pooling", len(crawlCfg.TDLibDatabaseURLs))
+		// Use the smaller of concurrency or number of database URLs
+		if len(crawlCfg.TDLibDatabaseURLs) < poolSize {
+			poolSize = len(crawlCfg.TDLibDatabaseURLs)
+			log.Info().Msgf("Adjusting pool size to %d to match available database URLs", poolSize)
+		}
+	}
+	
+	// Initialize the connection pool
+	crawl.InitConnectionPool(poolSize, crawlCfg.StorageRoot, crawlCfg)
+	defer crawl.CloseConnectionPool()
+	
+	// Create a context for the connections
+	ctx := context.Background()
+	
+	// Create a single non-pooled connection for backward compatibility
 	connect, _ := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
 	layerzero, err := sm.GetLayerByDepth(0)
 	for _, la := range layerzero {
@@ -202,26 +228,30 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				}()
 
 				la.Timestamp = time.Now()
-				if _, err := crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg); err != nil {
+				// Try to use the connection pool
+				var discoveredChannels []*state.Page
+				var err error
+				
+				log.Info().Msgf("Processing page: %s", la.URL)
+				
+				// Use pool if available, fall back to direct connection
+				if crawl.GetConnectionPool() != nil {
+					discoveredChannels, err = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+				} else {
+					discoveredChannels, err = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+				}
+				
+				if err != nil {
 					log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
 					la.Status = "error"
 				} else {
 					la.Status = "fetched"
-					//pag := make([]state.Page, len(outlinks))
-					//for i, ol := range outlinks {
-					//	pag[i] = *ol
-					//}
-					//
-					//if len(list) >= l.Depth {
-					//	existing := list[l.Depth+1]
-					//	existing.Pages = append(existing.Pages, pag...)
-					//} else {
-					//	layer := state.Layer{
-					//		Depth: l.Depth + 1,
-					//		Pages: pag,
-					//	}
-					//	list = append(list, &layer)
-					//}
+					log.Info().Msgf("Successfully processed page: %s", la.URL)
+					
+					// Handle any discovered channels from this page
+					if len(discoveredChannels) > 0 {
+						log.Info().Msgf("Discovered %d new channels from %s", len(discoveredChannels), la.URL)
+					}
 				}
 
 				//err := sm.StoreLayers(list)

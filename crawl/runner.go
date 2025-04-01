@@ -1,6 +1,7 @@
 package crawl
 
 import (
+	"context"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
@@ -9,9 +10,26 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"sync"
 	"time"
 )
 
+// Global connection pool
+var connectionPool *telegramhelper.ConnectionPool
+var poolMu sync.Mutex
+
+// InitConnectionPool initializes the connection pool
+func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerConfig) {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	
+	if connectionPool == nil {
+		connectionPool = telegramhelper.NewConnectionPool(maxSize, storagePrefix, cfg)
+		log.Info().Int("maxSize", maxSize).Msg("Initialized connection pool")
+	}
+}
+
+// Connect creates a new client connection outside the pool
 func Connect(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	// Initialize Telegram client
 	service := &telegramhelper.RealTelegramService{}
@@ -21,10 +39,63 @@ func Connect(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClien
 		return nil, err
 	}
 
-	// Ensure tdlibClient is closed after the function finishes
-	//defer closeClient(tdlibClient)
-
 	return tdlibClient, nil
+}
+
+// GetConnectionFromPool gets a connection from the pool
+func GetConnectionFromPool(ctx context.Context) (crawler.TDLibClient, string, error) {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	
+	if connectionPool == nil {
+		return nil, "", fmt.Errorf("connection pool not initialized")
+	}
+	
+	return connectionPool.GetConnection(ctx)
+}
+
+// ReleaseConnectionToPool returns a connection to the pool
+func ReleaseConnectionToPool(connID string) {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	
+	if connectionPool != nil {
+		connectionPool.ReleaseConnection(connID)
+	}
+}
+
+// CloseConnectionPool closes all connections in the pool
+func CloseConnectionPool() {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	
+	if connectionPool != nil {
+		connectionPool.Close()
+		connectionPool = nil
+	}
+}
+
+// RunForChannelWithPool connects to a Telegram channel and crawls its messages.
+// This version uses the connection pool for more efficient client management.
+func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
+	// Get a client from the connection pool
+	tdlibClient, connID, err := GetConnectionFromPool(ctx)
+	if err != nil {
+		log.Error().Err(err).Msgf("Failed to get client from pool for channel %s", p.URL)
+		// Fall back to creating a new connection if pool is exhausted or not initialized
+		tdlibClient, err = Connect(storagePrefix, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get client connection: %w", err)
+		}
+		// Make sure to close this non-pooled connection when done
+		defer closeClient(tdlibClient)
+	} else {
+		// Ensure we return the pooled connection when done
+		defer ReleaseConnectionToPool(connID)
+	}
+	
+	// Continue with the regular channel processing
+	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }
 
 // Run connects to a Telegram channel and crawls its messages.
