@@ -132,6 +132,7 @@ var rootCmd = &cobra.Command{
 		crawlerCfg.MaxComments = viper.GetInt("crawler.maxcomments")
 		crawlerCfg.MaxPosts = viper.GetInt("crawler.maxposts")
 		crawlerCfg.MaxDepth = viper.GetInt("crawler.maxdepth")
+		crawlerCfg.MaxPages = viper.GetInt("crawler.maxpages")
 
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
@@ -217,6 +218,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxComments, "max-comments", -1, "The maximum number of comments to crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxDepth, "max-depth", -1, "The maximum depth of the crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPosts, "max-posts", -1, "The maximum posts to collect")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPages, "max-pages", 108000, "The maximum number of pages/channels to crawl")
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
@@ -242,6 +244,7 @@ func init() {
 	viper.BindPFlag("crawler.maxcomments", rootCmd.PersistentFlags().Lookup("max-comments"))
 	viper.BindPFlag("crawler.maxposts", rootCmd.PersistentFlags().Lookup("max-posts"))
 	viper.BindPFlag("crawler.maxdepth", rootCmd.PersistentFlags().Lookup("max-depth"))
+	viper.BindPFlag("crawler.maxpages", rootCmd.PersistentFlags().Lookup("max-pages"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)

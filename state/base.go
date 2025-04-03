@@ -150,6 +150,7 @@ func (bsm *BaseStateManager) UpdateMessage(pageID string, chatID int64, messageI
 }
 
 // AddLayer adds a new layer of pages, ensuring URLs are unique across all layers
+// and respecting the maximum page limit if set in the config
 func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 	if len(pages) == 0 {
 		return nil
@@ -157,6 +158,34 @@ func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
+
+	// Count total existing pages and deadend pages
+	totalExistingPages := 0
+	deadendPageCount := 0
+	for _, page := range bsm.pageMap {
+		totalExistingPages++
+		if page.Status == "deadend" {
+			deadendPageCount++
+		}
+	}
+
+	// Check if we've reached the maximum page limit and if it's set
+	// Only applies if config.MaxPages is greater than 0 (otherwise, unlimited)
+	maxPagesReached := false
+	maxPagesAllowed := 0
+	if bsm.config.MaxPagesConfig != nil && bsm.config.MaxPagesConfig.MaxPages > 0 {
+		maxPagesAllowed = bsm.config.MaxPagesConfig.MaxPages
+		maxPagesReached = totalExistingPages >= maxPagesAllowed
+		
+		if maxPagesReached {
+			log.Info().
+				Int("currentPages", totalExistingPages).
+				Int("maxPages", maxPagesAllowed).
+				Int("deadendPages", deadendPageCount).
+				Msgf("Maximum page limit reached (%d/%d), will only add replacements for deadend pages",
+					totalExistingPages, maxPagesAllowed)
+		}
+	}
 
 	// Create URL to existing page ID map for deduplication
 	existingURLs := make(map[string]string)
@@ -174,13 +203,28 @@ func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 
 	// Track the IDs of pages we're actually adding (after deduplication)
 	addedIDs := make([]string, 0)
-
+	
+	// Counter for pages we can add as replacements for deadend pages
+	replacementsAvailable := deadendPageCount
+	
 	// Process each page
 	for i := range pages {
 		// Check if URL already exists in any layer
 		if existingID, exists := existingURLs[pages[i].URL]; exists {
 			log.Debug().Msgf("Skipping duplicate URL: %s (already exists with ID: %s)", pages[i].URL, existingID)
 			continue
+		}
+		
+		// If we've reached the max pages limit, only add if we have replacements available
+		if maxPagesReached {
+			if replacementsAvailable <= 0 {
+				log.Debug().Msgf("Skipping URL %s: maximum page limit reached and no deadend replacements available", pages[i].URL)
+				continue
+			}
+			
+			// Consume one replacement slot
+			replacementsAvailable--
+			log.Debug().Msgf("Adding URL %s as a replacement for a deadend page (%d replacements remaining)", pages[i].URL, replacementsAvailable)
 		}
 
 		// Ensure the page has an ID

@@ -273,6 +273,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			StateStoreName: "statestore",
 			ComponentName:  "statestore",
 		},
+		
+		// Add the MaxPages config
+		MaxPagesConfig: &state.MaxPagesConfig{
+			MaxPages: crawlCfg.MaxPages,
+		},
 	}
 
 	sm, err := smfact.Create(cfg)
@@ -318,114 +323,169 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		return
 	}
 	
-	// Fetch the first layer of pages (depth 0)
-	layerzero, err := sm.GetLayerByDepth(0)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get layer 0 pages")
-		return
+	// Process layers sequentially starting from depth 0
+	// and continuing until max depth is reached or no more layers exist
+	currentDepth := 0
+	maxDepthConfig := crawlCfg.MaxDepth 
+	
+	// If maxDepth is -1 or 0, we'll just continue until no more layers are found
+	if maxDepthConfig <= 0 {
+		maxDepthConfig = 1000 // Set a very high number as default
 	}
 	
-	log.Info().Msgf("Found %d pages at layer 0", len(layerzero))
+	log.Info().Int("maxDepth", maxDepthConfig).Msg("Starting multi-layer crawl")
 	
-	// Track statistics
-	var totalPages, skippedPages, successPages, errorPages int
-	totalPages = len(layerzero)
+	// Track overall statistics
+	var totalPagesProcessed, totalPagesSkipped, totalPagesSuccess, totalPagesError int
 	
-	// Process each page in the layer
-	for _, la := range layerzero {
-		// Check the page status to determine if we need to process it
-		if la.Status == "fetched" {
-			log.Debug().Str("url", la.URL).Msg("Skipping already fetched page")
-			skippedPages++
-			continue
+	for currentDepth <= maxDepthConfig {
+		// Fetch the current layer of pages
+		currentLayer, err := sm.GetLayerByDepth(currentDepth)
+		if err != nil {
+			log.Error().Err(err).Int("depth", currentDepth).Msg("Failed to get layer pages")
+			break
 		}
 		
-		if la.Status == "processing" {
-			log.Info().Str("url", la.URL).Msg("Found page in 'processing' state - will retry")
-			// Continue to process it
+		// If no pages at this depth, we've reached the end of the crawl
+		if len(currentLayer) == 0 {
+			log.Info().Int("depth", currentDepth).Msg("No pages found at this depth, crawl complete")
+			break
 		}
 		
-		// Process this page in a self-contained function to handle panics
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
-					la.Status = "error" // Mark as error so we can retry later
-					errorPages++
-					
-					// Make sure we save the state even after a panic
-					saveErr := sm.SaveState()
-					if saveErr != nil {
-						log.Error().Err(saveErr).Msg("Failed to save state after panic")
+		log.Info().Msgf("Processing layer at depth %d with %d pages", currentDepth, len(currentLayer))
+		
+		// Track statistics for this layer
+		var layerPages, layerSkipped, layerSuccess, layerError int
+		layerPages = len(currentLayer)
+		totalPagesProcessed += layerPages
+		
+		// Process each page in the current layer
+		for _, la := range currentLayer {
+			// Check the page status to determine if we need to process it
+			if la.Status == "fetched" {
+				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page")
+				layerSkipped++
+				totalPagesSkipped++
+				continue
+			}
+			
+			if la.Status == "processing" {
+				log.Info().Str("url", la.URL).Msg("Found page in 'processing' state - will retry")
+				// Continue to process it
+			}
+			
+			// Process this page in a self-contained function to handle panics
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
+						la.Status = "error" // Mark as error so we can retry later
+						layerError++
+						totalPagesError++
+						
+						// Make sure we save the state even after a panic
+						saveErr := sm.SaveState()
+						if saveErr != nil {
+							log.Error().Err(saveErr).Msg("Failed to save state after panic")
+						}
+					}
+				}()
+
+				// Update page status and timestamp before processing
+				la.Timestamp = time.Now()
+				la.Status = "processing" // Mark as in-progress
+				
+				// Save state before processing to record that we're working on this page
+				saveErr := sm.SaveState()
+				if saveErr != nil {
+					log.Warn().Err(saveErr).Str("url", la.URL).Msg("Failed to save state before processing page")
+				}
+				
+				// Try to use the connection pool
+				var discoveredChannels []*state.Page
+				var runErr error
+
+				log.Info().Msgf("Processing page: %s", la.URL)
+
+				// Use the connection pool if it's initialized
+				ctx := context.Background()
+				
+				// Try to get the connection pool stats
+				poolStats := crawl.GetConnectionPoolStats()
+				log.Info().Interface("poolStats", poolStats).Msg("Connection pool status")
+				
+				// Use the connection pool if it's initialized
+				if crawl.IsConnectionPoolInitialized() {
+					log.Info().Msg("Using connection pool for channel processing")
+					discoveredChannels, runErr = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+				} else {
+					log.Info().Msg("No connection pool available, using single connection")
+					discoveredChannels, runErr = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+				}
+
+				if runErr != nil {
+					log.Error().Stack().Err(runErr).Msgf("Error processing item %s", la.URL)
+					la.Status = "error"
+					layerError++
+					totalPagesError++
+				} else {
+					la.Status = "fetched"
+					log.Info().Msgf("Successfully processed page: %s", la.URL)
+					layerSuccess++
+					totalPagesSuccess++
+
+					// Handle any discovered channels from this page
+					if len(discoveredChannels) > 0 {
+						log.Info().Msgf("Discovered %d new channels from %s", len(discoveredChannels), la.URL)
+						
+						// Convert to Page structs needed for AddLayer
+						newPages := make([]state.Page, 0, len(discoveredChannels))
+						for _, channel := range discoveredChannels {
+							// Use the existing Page struct directly
+							newPages = append(newPages, *channel)
+						}
+						
+						// Add the new channels as a layer
+						if err := sm.AddLayer(newPages); err != nil {
+							log.Error().Err(err).Msg("Failed to add discovered channels as new layer")
+						} else {
+							log.Info().Int("count", len(newPages)).Msg("Added new channels to be processed in next layer")
+						}
 					}
 				}
-			}()
 
-			// Update page status and timestamp before processing
-			la.Timestamp = time.Now()
-			la.Status = "processing" // Mark as in-progress
-			
-			// Save state before processing to record that we're working on this page
-			saveErr := sm.SaveState()
-			if saveErr != nil {
-				log.Warn().Err(saveErr).Str("url", la.URL).Msg("Failed to save state before processing page")
-			}
-			
-			// Try to use the connection pool
-			var discoveredChannels []*state.Page
-			var runErr error
-
-			log.Info().Msgf("Processing page: %s", la.URL)
-
-			// Use the connection pool if it's initialized
-			ctx := context.Background()
-			
-			// Try to get the connection pool stats
-			poolStats := crawl.GetConnectionPoolStats()
-			log.Info().Interface("poolStats", poolStats).Msg("Connection pool status")
-			
-			// Use the connection pool if it's initialized
-			if crawl.IsConnectionPoolInitialized() {
-				log.Info().Msg("Using connection pool for channel processing")
-				discoveredChannels, runErr = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
-			} else {
-				log.Info().Msg("No connection pool available, using single connection")
-				discoveredChannels, runErr = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
-			}
-
-			if runErr != nil {
-				log.Error().Stack().Err(runErr).Msgf("Error processing item %s", la.URL)
-				la.Status = "error"
-				errorPages++
-			} else {
-				la.Status = "fetched"
-				log.Info().Msgf("Successfully processed page: %s", la.URL)
-				successPages++
-
-				// Handle any discovered channels from this page
-				if len(discoveredChannels) > 0 {
-					log.Info().Msgf("Discovered %d new channels from %s", len(discoveredChannels), la.URL)
+				// Save state after processing
+				saveErr = sm.SaveState()
+				if saveErr != nil {
+					log.Error().Stack().Err(saveErr).Msg("Failed to save state after processing page")
 				}
-			}
-
-			// Save state after processing
-			saveErr = sm.SaveState()
-			if saveErr != nil {
-				log.Error().Stack().Err(saveErr).Msg("Failed to save state after processing page")
-			}
-		}()
+			}()
+		}
+		
+		// Log statistics about the layer processing
+		log.Info().
+			Int("depth", currentDepth).
+			Int("totalPages", layerPages).
+			Int("skippedPages", layerSkipped).
+			Int("successPages", layerSuccess).
+			Int("errorPages", layerError).
+			Msg("Layer processing statistics")
+		
+		// Move to the next depth
+		currentDepth++
 	}
 	
-	// Log statistics about the processing
+	// Log overall statistics
 	log.Info().
-		Int("totalPages", totalPages).
-		Int("skippedPages", skippedPages).
-		Int("successPages", successPages).
-		Int("errorPages", errorPages).
-		Msg("Page processing statistics")
-		
-	// Update crawl metadata to mark as completed if all pages were processed
-	if errorPages == 0 {
+		Int("totalPagesProcessed", totalPagesProcessed).
+		Int("totalPagesSkipped", totalPagesSkipped).
+		Int("totalPagesSuccess", totalPagesSuccess).
+		Int("totalPagesError", totalPagesError).
+		Int("maxDepthReached", currentDepth-1).
+		Msg("Overall crawl statistics")
+			
+	// Update crawl metadata to mark as completed if all pages were processed successfully
+	if totalPagesError == 0 {
 		metadata := map[string]interface{}{
 			"status":  "completed",
 			"endTime": time.Now(),
@@ -437,8 +497,8 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			log.Info().Msg("Crawl marked as completed successfully")
 		}
 	} else {
-		log.Info().Int("errorPages", errorPages).Msg("Crawl completed with errors - can be resumed later")
+		log.Info().Int("errorPages", totalPagesError).Msg("Crawl completed with errors - can be resumed later")
 	}
 
-	log.Info().Msg("All items processed successfully.")
+	log.Info().Msg("All layers processed successfully.")
 }

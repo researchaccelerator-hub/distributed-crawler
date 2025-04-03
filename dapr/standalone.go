@@ -176,6 +176,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
+		
+		// Add the MaxPages config
+		MaxPagesConfig: &state.MaxPagesConfig{
+			MaxPages: crawlCfg.MaxPages,
+		},
 	}
 
 	sm, err := smfact.Create(cfg)
