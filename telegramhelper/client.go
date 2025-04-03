@@ -18,14 +18,63 @@ import (
 	"time"
 )
 
-// TelegramService defines an interface for interacting with the Telegram client
+// TelegramService defines an interface for interacting with the Telegram client.
+// This abstraction allows for both real implementations with TDLib and mock
+// implementations for testing.
+//
+// The interface provides methods for:
+// - Initializing Telegram clients with different configurations
+// - Retrieving authenticated user information
+//
+// By using this interface, components that need Telegram functionality can
+// be tested with mock implementations, and the actual TDLib implementation
+// can be easily swapped if needed.
 type TelegramService interface {
+	// InitializeClient creates and initializes a basic Telegram client with default settings.
+	//
+	// Parameters:
+	//   - storagePrefix: Base directory for storing TDLib database and files
+	//
+	// Returns:
+	//   - An initialized TDLib client
+	//   - An error if initialization fails
 	InitializeClient(storagePrefix string) (crawler.TDLibClient, error)
+
+	// InitializeClientWithConfig creates and initializes a Telegram client with custom configuration.
+	// This allows for more control over client behavior and storage options.
+	//
+	// Parameters:
+	//   - storagePrefix: Base directory for storing TDLib database and files
+	//   - cfg: Configuration options controlling client behavior and features
+	//
+	// Returns:
+	//   - An initialized TDLib client
+	//   - An error if initialization fails
 	InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error)
+
+	// GetMe retrieves information about the authenticated user.
+	// This is typically used to verify successful authentication.
+	//
+	// Parameters:
+	//   - libClient: An initialized TDLib client
+	//
+	// Returns:
+	//   - User information for the authenticated user
+	//   - An error if retrieval fails
 	GetMe(libClient crawler.TDLibClient) (*client.User, error)
 }
 
-// RealTelegramService is the actual TDLib implementation
+// RealTelegramService is the concrete implementation of the TelegramService interface
+// that uses the TDLib library for authenticating and communicating with Telegram servers.
+//
+// This service handles:
+// - Client initialization with proper credentials
+// - Authentication flow management
+// - Session management using local database storage
+// - Loading pre-seeded TDLib databases for faster startup
+//
+// The implementation supports both development and production use cases,
+// with options for configuring database locations and authentication methods.
 type RealTelegramService struct{}
 
 // InitializeClient sets up a real TDLib client
@@ -33,16 +82,40 @@ func (s *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TD
 	return s.InitializeClientWithConfig(storagePrefix, common.CrawlerConfig{})
 }
 
-// Credentials stores Telegram API authentication details
+// Credentials stores Telegram API authentication details necessary for
+// connecting to the Telegram API. This structure is used for both reading
+// credentials from a file and for in-memory storage during client initialization.
+//
+// The credentials include:
+// - API ID and hash obtained from the Telegram developer portal
+// - Phone number for account authentication
+// - Phone code received via SMS or Telegram during authentication
+//
+// These credentials are sensitive and should be handled securely.
+// The structure is designed to be serialized to/from JSON for persistent storage.
 type Credentials struct {
-	APIId       string `json:"api_id"`
-	APIHash     string `json:"api_hash"`
-	PhoneNumber string `json:"phone_number"`
-	PhoneCode   string `json:"phone_code"`
+	APIId       string `json:"api_id"`       // Telegram API ID obtained from developer portal
+	APIHash     string `json:"api_hash"`     // Telegram API hash obtained from developer portal
+	PhoneNumber string `json:"phone_number"` // User's phone number in international format
+	PhoneCode   string `json:"phone_code"`   // One-time code received via SMS or Telegram
 }
 
-// readCredentials attempts to read stored credentials from .tdlib/credentials.json
-// Returns the credentials if found, or nil if not found or there was an error
+// readCredentials loads Telegram API authentication details from a JSON file.
+// The credentials file provides a way to store and reuse authentication details
+// without hardcoding them in the application or relying on environment variables.
+//
+// The function looks for a file named "credentials.json" in the ".tdlib" directory
+// in the current working directory. This file should contain a JSON representation
+// of the Credentials struct.
+//
+// Returns:
+//   - A pointer to a Credentials struct containing the authentication details
+//   - An error if the file doesn't exist, can't be read, or contains invalid JSON
+//
+// This function is used during client initialization to obtain the necessary
+// credentials for authenticating with the Telegram API. If the file doesn't exist
+// or contains invalid data, the function will return an error, prompting the
+// application to fall back to environment variables for credentials.
 func readCredentials() (*Credentials, error) {
 	credsPath := filepath.Join(".tdlib", "credentials.json")
 
@@ -66,22 +139,91 @@ func readCredentials() (*Credentials, error) {
 	return &creds, nil
 }
 
-// CustomCliInteractor handles TDLib authentication flow with custom credentials
-// We need a simpler approach without creating interface dependencies
+// SetupAuth prepares the environment for Telegram authentication by setting
+// environment variables that will be used by the CLI interactor during the
+// TDLib authentication flow.
+//
+// Parameters:
+//   - phoneNumber: The phone number associated with the Telegram account
+//   - phoneCode: The verification code received via SMS or Telegram during login
+//
+// The function uses environment variables as a simple and non-intrusive way to
+// pass authentication information to the TDLib client library without requiring
+// modifications to the library itself. It sets:
+//   - TG_PHONE_NUMBER: The phone number in international format
+//   - TG_PHONE_CODE: The one-time verification code
+//
+// These environment variables are later read by the standard CLI interactor
+// provided by the TDLib client library when it needs to perform authentication steps.
+// This approach avoids having to implement a custom interactor while still
+// providing a way to automate the authentication process.
+//
+// Only non-empty values will be set as environment variables to avoid overriding
+// existing values with empty ones.
 func SetupAuth(phoneNumber, phoneCode string) {
 	// Set environment variables for the CLI interactor to use
 	if phoneNumber != "" {
 		os.Setenv("TG_PHONE_NUMBER", phoneNumber)
+		log.Debug().
+			Str("phone_number_masked", maskPhoneNumber(phoneNumber)).
+			Msg("Set TG_PHONE_NUMBER environment variable for authentication")
+	} else {
+		log.Debug().Msg("No phone number provided, will use existing TG_PHONE_NUMBER or prompt user")
 	}
-	
+
 	if phoneCode != "" {
 		os.Setenv("TG_PHONE_CODE", phoneCode)
+		log.Debug().Msg("Set TG_PHONE_CODE environment variable for authentication")
+	} else {
+		log.Debug().Msg("No phone code provided, will use existing TG_PHONE_CODE or prompt user")
 	}
 }
 
+// maskPhoneNumber hides most digits of a phone number for security in logs
+func maskPhoneNumber(phoneNumber string) string {
+	if len(phoneNumber) <= 4 {
+		return "***" // Too short to mask meaningfully
+	}
+
+	// Keep country code (first few digits) and last 2 digits
+	visiblePrefix := 3
+	if len(phoneNumber) > 10 {
+		visiblePrefix = 4 // For international format with + and country code
+	}
+
+	masked := phoneNumber[:visiblePrefix]
+	for i := visiblePrefix; i < len(phoneNumber)-2; i++ {
+		masked += "*"
+	}
+	masked += phoneNumber[len(phoneNumber)-2:]
+
+	return masked
+}
+
+// InitializeClientWithConfig creates and initializes a TDLib client with custom configuration.
+// This method handles the complex process of setting up a Telegram client, including
+// authentication, database setup, and pre-seeding from existing database archives.
+//
+// Parameters:
+//   - storagePrefix: Base directory for storing TDLib database and files
+//   - cfg: Configuration containing options like database URL for pre-seeding
+//
+// Returns:
+//   - An initialized and authenticated TDLib client ready for use
+//   - An error if any step of the initialization process fails
+//
+// The function supports several advanced features:
+//   - Loading pre-seeded TDLib databases from remote URLs for faster startup
+//   - Reading authentication credentials from a credentials file or environment variables
+//   - Creating unique database directories for each client instance
+//   - Handling the complete Telegram authentication flow
+//
+// Connection timeouts ensure the process doesn't hang indefinitely if authentication
+// or connection problems occur. If authentication requires user interaction for phone code,
+// the function will prompt for input through the CLI interactor.
 func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	authorizer := client.ClientAuthorizer()
-	
+
 	// We'll use the default CLI interactor but prepare environment variables
 	// so we need to track the phoneCode for later
 
@@ -139,7 +281,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		apiHash = os.Getenv("TG_API_HASH")
 		phoneNumber = os.Getenv("TG_PHONE_NUMBER")
 		phoneCode = os.Getenv("TG_PHONE_CODE")
-		
+
 		// Create credentials object to use locally (don't save it)
 		creds = &Credentials{
 			APIId:       apiIdStr,
@@ -189,7 +331,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	// Set up authentication environment variables
 	// The phone number will be picked up by the default CLI interactor
 	SetupAuth(phoneNumber, phoneCode)
-	
+
 	// Use the default CLI interactor which will read the environment variables
 	go client.CliInteractor(authorizer)
 
@@ -199,7 +341,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
 
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 1}
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 4}
 		tdlibClient.SetLogVerbosityLevel(&verb)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
@@ -255,9 +397,26 @@ func GenCode(service TelegramService, storagePrefix string) {
 	log.Info().Msgf("Authenticated as: %s %s", user.FirstName, user.LastName)
 }
 
-// downloadAndExtractTarball downloads a tarball from the specified URL and extracts its contents
-// into the target directory. It handles HTTP requests, decompresses gzip files, and processes
-// tar archives to create directories and files as needed. Returns an error if any step fails.
+// downloadAndExtractTarball downloads a pre-configured TDLib database archive from a URL
+// and extracts it to the specified target directory. This is a key feature for performance
+// optimization, allowing the application to start with a pre-authenticated TDLib session
+// rather than going through the full authentication flow for each new instance.
+//
+// Parameters:
+//   - url: The URL of the gzipped tarball containing a pre-configured TDLib database
+//   - targetDir: The directory where the contents should be extracted
+//
+// Returns:
+//   - An error if any step of the download or extraction process fails
+//
+// The function:
+// 1. Downloads the tarball using a standard HTTP GET request with browser-like headers
+// 2. Checks for successful HTTP status code (200)
+// 3. Passes the response body to downloadAndExtractTarballFromReader for extraction
+//
+// This approach allows for rapid deployment of new crawler instances with pre-authenticated
+// sessions, significantly reducing startup time and avoiding the need for repeated
+// authentication steps. It's especially valuable in distributed or containerized environments.
 func downloadAndExtractTarball(url, targetDir string) error {
 	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
@@ -277,7 +436,7 @@ func downloadAndExtractTarball(url, targetDir string) error {
 		return fmt.Errorf("non-200 status returned: %v", resp.Status)
 	}
 
-	// Pass the response body to the new function
+	// Pass the response body to the extraction function
 	return downloadAndExtractTarballFromReader(resp.Body, targetDir)
 }
 
