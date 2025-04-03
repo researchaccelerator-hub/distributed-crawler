@@ -3,11 +3,13 @@ package telegramhelper
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"os"
@@ -31,29 +33,145 @@ func (s *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TD
 	return s.InitializeClientWithConfig(storagePrefix, common.CrawlerConfig{})
 }
 
+// Credentials stores Telegram API authentication details
+type Credentials struct {
+	APIId       string `json:"api_id"`
+	APIHash     string `json:"api_hash"`
+	PhoneNumber string `json:"phone_number"`
+	PhoneCode   string `json:"phone_code"`
+}
+
+// readCredentials attempts to read stored credentials from .tdlib/credentials.json
+// Returns the credentials if found, or nil if not found or there was an error
+func readCredentials() (*Credentials, error) {
+	credsPath := filepath.Join(".tdlib", "credentials.json")
+
+	// Check if credentials file exists
+	if _, err := os.Stat(credsPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("credentials file not found at %s", credsPath)
+	}
+
+	// Read the file
+	data, err := os.ReadFile(credsPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read credentials file: %w", err)
+	}
+
+	// Parse the JSON
+	var creds Credentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return nil, fmt.Errorf("failed to parse credentials JSON: %w", err)
+	}
+
+	return &creds, nil
+}
+
+// CustomCliInteractor handles TDLib authentication flow with custom credentials
+// We need a simpler approach without creating interface dependencies
+func SetupAuth(phoneNumber, phoneCode string) {
+	// Set environment variables for the CLI interactor to use
+	if phoneNumber != "" {
+		os.Setenv("TG_PHONE_NUMBER", phoneNumber)
+	}
+	
+	if phoneCode != "" {
+		os.Setenv("TG_PHONE_CODE", phoneCode)
+	}
+}
+
 func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	authorizer := client.ClientAuthorizer()
-	go client.CliInteractor(authorizer)
+	
+	// We'll use the default CLI interactor but prepare environment variables
+	// so we need to track the phoneCode for later
 
+	// Generate a unique subfolder for this connection if a database URL is provided
+	uniqueSubfolder := ""
 	if cfg.TDLibDatabaseURL != "" {
-		if err := downloadAndExtractTarball(cfg.TDLibDatabaseURL, filepath.Join(storagePrefix, "state")); err != nil {
+		// Create a unique subfolder based on the URL hash
+		h := fnv.New32a()
+		h.Write([]byte(cfg.TDLibDatabaseURL))
+		uniqueSubfolder = fmt.Sprintf("conn_%d", h.Sum32())
+
+		// Create the full unique path
+		uniquePath := filepath.Join(storagePrefix, "state", uniqueSubfolder)
+
+		// Ensure the directory exists
+		err := os.MkdirAll(uniquePath, 0755)
+		if err != nil {
+			log.Warn().Err(err).Msgf("Failed to create unique directory %s for database", uniquePath)
+		}
+
+		// Download and extract to the unique directory
+		if err := downloadAndExtractTarball(cfg.TDLibDatabaseURL, uniquePath); err != nil {
 			log.Warn().Err(err).Msg("Failed to download and extract pre-seeded TDLib database, proceeding with fresh database")
 			// Continue with a fresh database even if download fails
 		} else {
-			log.Info().Msg("Successfully downloaded and extracted pre-seeded TDLib database")
+			log.Info().Msgf("Successfully downloaded and extracted pre-seeded TDLib database to %s", uniquePath)
 		}
 	}
-	apiID, err := strconv.Atoi(os.Getenv("TG_API_ID"))
-	if err != nil {
-		log.Fatal().Err(err).Msg("Error converting TG_API_ID to int")
-		return nil, err
+
+	// Try to read credentials from file first
+	var apiID int
+	var apiHash string
+	var phoneNumber, phoneCode string
+
+	creds, err := readCredentials()
+	if err == nil && creds != nil {
+		log.Info().Msg("Using API credentials from stored file")
+		apiID, err = strconv.Atoi(creds.APIId)
+		if err != nil {
+			log.Warn().Err(err).Msg("Invalid API ID in credentials file")
+			return nil, fmt.Errorf("invalid API ID in credentials file: %w", err)
+		}
+		apiHash = creds.APIHash
+		phoneNumber = creds.PhoneNumber
+		phoneCode = creds.PhoneCode
+	} else {
+		// Fall back to environment variables if needed
+		log.Info().Msg("Using API credentials from environment variables")
+		apiIdStr := os.Getenv("TG_API_ID")
+		apiID, err = strconv.Atoi(apiIdStr)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Error converting TG_API_ID to int")
+			return nil, err
+		}
+		apiHash = os.Getenv("TG_API_HASH")
+		phoneNumber = os.Getenv("TG_PHONE_NUMBER")
+		phoneCode = os.Getenv("TG_PHONE_CODE")
+		
+		// Create credentials object to use locally (don't save it)
+		creds = &Credentials{
+			APIId:       apiIdStr,
+			APIHash:     apiHash,
+			PhoneNumber: phoneNumber,
+			PhoneCode:   phoneCode,
+		}
 	}
-	apiHash := os.Getenv("TG_API_HASH")
+
+	// Determine database and files directory paths
+	var dbDir, filesDir string
+
+	if uniqueSubfolder != "" {
+		// Use the unique subfolder path if we created one
+		dbDir = filepath.Join(storagePrefix, "state", uniqueSubfolder, ".tdlib", "database")
+		filesDir = filepath.Join(storagePrefix, "state", uniqueSubfolder, ".tdlib", "files")
+	} else {
+		// Use default paths
+		dbDir = filepath.Join(storagePrefix, "state", ".tdlib", "database")
+		filesDir = filepath.Join(storagePrefix, "state", ".tdlib", "files")
+	}
+
+	// Ensure directories exist
+	os.MkdirAll(dbDir, 0755)
+	os.MkdirAll(filesDir, 0755)
+
+	log.Info().Msgf("Using TDLib database directory: %s", dbDir)
 
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(storagePrefix+"/state", ".tdlib", "database"),
-		FilesDirectory:      filepath.Join(storagePrefix+"/state", ".tdlib", "files"),
+		DatabaseDirectory:   dbDir,
+		FilesDirectory:      filesDir,
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
 		UseMessageDatabase:  true,
@@ -66,12 +184,15 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		ApplicationVersion:  "1.0.0",
 	}
 
-	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM. IF YOUR TG_PHONE_CODE IS INVALID, YOU MUST RE-RUN WITH A VALID CODE.")
-	// p := os.Getenv("TG_PHONE_NUMBER")
-	// pc := os.Getenv("TG_PHONE_CODE")
-	// os.Setenv("TG_PHONE_NUMBER", p)
-	// os.Setenv("TG_PHONE_CODE", pc)
-	// authorizer.PhoneNumber <- p
+	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM. IF YOUR PHONE CODE IS INVALID, YOU MUST RE-RUN WITH A VALID CODE.")
+
+	// Set up authentication environment variables
+	// The phone number will be picked up by the default CLI interactor
+	SetupAuth(phoneNumber, phoneCode)
+	
+	// Use the default CLI interactor which will read the environment variables
+	go client.CliInteractor(authorizer)
+
 	clientReady := make(chan *client.Client)
 	errChan := make(chan error)
 

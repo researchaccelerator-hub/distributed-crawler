@@ -358,11 +358,51 @@ func (bsm *BaseStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 	bsm.mutex.RLock()
 	defer bsm.mutex.RUnlock()
 
-	// The base implementation just checks the in-memory metadata
-	if bsm.metadata.CrawlID == crawlID && bsm.metadata.Status != "completed" {
-		return bsm.metadata.ExecutionID, true, nil
+	// First check the current metadata
+	if bsm.metadata.CrawlID == crawlID {
+		// If this crawl isn't marked as completed and has a valid execution ID
+		if bsm.metadata.Status != "completed" && bsm.metadata.ExecutionID != "" {
+			log.Info().
+				Str("crawlID", crawlID).
+				Str("executionID", bsm.metadata.ExecutionID).
+				Str("status", bsm.metadata.Status).
+				Msg("Found incomplete crawl in memory")
+			return bsm.metadata.ExecutionID, true, nil
+		}
+		
+		// Check if the crawl has any incomplete pages even if it's marked as completed
+		hasIncompletePages := false
+		
+		// Look through layers to find incomplete pages
+		for _, pageIDs := range bsm.layerMap {
+			for _, pageID := range pageIDs {
+				if page, exists := bsm.pageMap[pageID]; exists {
+					if page.Status != "fetched" {
+						hasIncompletePages = true
+						log.Debug().
+							Str("pageID", pageID).
+							Str("status", page.Status).
+							Msg("Found incomplete page in memory")
+						break
+					}
+				}
+			}
+			if hasIncompletePages {
+				break
+			}
+		}
+		
+		if hasIncompletePages {
+			log.Info().
+				Str("crawlID", crawlID).
+				Str("executionID", bsm.metadata.ExecutionID).
+				Msg("Found crawl with incomplete pages in memory")
+			return bsm.metadata.ExecutionID, true, nil
+		}
 	}
-
+	
+	// The memory-only implementation doesn't have a way to check previous crawls, 
+	// so we'll return false. The DaprStateManager implementation handles that case.
 	return "", false, nil
 }
 

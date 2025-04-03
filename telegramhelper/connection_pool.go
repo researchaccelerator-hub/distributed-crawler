@@ -106,8 +106,28 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 
 	// If no available connections and we haven't reached max size, create a new one
 	if len(p.inUseConns) < p.maxSize {
+		// Check if we have unused database URLs available
+		var connConfig common.CrawlerConfig
+		
+		if len(p.defaultConfig.TDLibDatabaseURLs) > 0 {
+			// Calculate which database URL to use based on the current connection count
+			// This ensures we cycle through all available URLs before reusing them
+			urlIndex := p.connectionCount % len(p.defaultConfig.TDLibDatabaseURLs)
+			databaseURL := p.defaultConfig.TDLibDatabaseURLs[urlIndex]
+			
+			// Copy the default config and set the specific database URL for this connection
+			connConfig = p.defaultConfig
+			connConfig.TDLibDatabaseURL = databaseURL
+			
+			log.Info().Str("databaseURL", databaseURL).Msg("Creating new connection with specified database URL")
+		} else {
+			// If no specific URLs provided, use the default config
+			connConfig = p.defaultConfig
+			log.Info().Msg("Creating new connection with default configuration")
+		}
+		
 		// Create a new connection
-		client, err := p.service.InitializeClientWithConfig(p.storagePrefix, p.defaultConfig)
+		client, err := p.service.InitializeClientWithConfig(p.storagePrefix, connConfig)
 		if err != nil {
 			return nil, "", fmt.Errorf("failed to initialize new client for pool: %w", err)
 		}
