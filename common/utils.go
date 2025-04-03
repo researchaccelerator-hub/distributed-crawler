@@ -24,6 +24,7 @@ type CrawlerConfig struct {
 	MaxPosts          int
 	MaxDepth          int
 	MaxPages          int            // Maximum number of pages to crawl (default: 108000)
+	TDLibVerbosity    int            // TDLib verbosity level for logging (default: 1)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.
