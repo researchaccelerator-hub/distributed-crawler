@@ -140,7 +140,6 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Create a temporary state manager to check for incomplete crawls
 	tempCfg := state.Config{
 		StorageRoot: crawlCfg.StorageRoot,
-		JobID:       "",
 		CrawlID:     crawlCfg.CrawlID,
 	}
 	
@@ -175,7 +174,6 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
-		JobID:            "",
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
 	}

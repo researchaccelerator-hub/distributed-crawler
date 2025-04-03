@@ -1,10 +1,11 @@
 package standalone
 
 import (
-	"context"
+	"encoding/json"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
+	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
@@ -64,8 +65,10 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 
 func generatePCode() {
 	var (
-		apiIdRaw = os.Getenv("TG_API_ID")
-		apiHash  = os.Getenv("TG_API_HASH")
+		apiIdRaw    = os.Getenv("TG_API_ID")
+		apiHash     = os.Getenv("TG_API_HASH")
+		phoneNumber = os.Getenv("TG_PHONE_NUMBER")
+		phoneCode   = os.Getenv("TG_PHONE_CODE")
 	)
 
 	apiId64, err := strconv.ParseInt(apiIdRaw, 10, 32)
@@ -73,11 +76,20 @@ func generatePCode() {
 		log.Fatal().Msgf("strconv.Atoi error: %s", err)
 	}
 
+	// Ensure .tdlib directory exists
+	tdlibDir := ".tdlib"
+	if _, err := os.Stat(tdlibDir); os.IsNotExist(err) {
+		err = os.Mkdir(tdlibDir, 0755)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to create .tdlib directory")
+		}
+	}
+
 	authorizer := client.ClientAuthorizer()
 	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
 		UseTestDc:           false,
-		DatabaseDirectory:   filepath.Join(".tdlib", "database"),
-		FilesDirectory:      filepath.Join(".tdlib", "files"),
+		DatabaseDirectory:   filepath.Join(tdlibDir, "database"),
+		FilesDirectory:      filepath.Join(tdlibDir, "files"),
 		UseFileDatabase:     true,
 		UseChatInfoDatabase: true,
 		UseMessageDatabase:  true,
@@ -90,6 +102,10 @@ func generatePCode() {
 		ApplicationVersion:  "1.0.0",
 	}
 
+	// Set up authentication environment variables 
+	telegramhelper.SetupAuth(phoneNumber, phoneCode)
+	
+	// Use the default CLI interactor
 	go client.CliInteractor(authorizer)
 
 	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
@@ -127,6 +143,31 @@ func generatePCode() {
 
 	log.Printf("Me: %s %s", me.FirstName, me.LastName)
 
+	// Import the Credentials type from telegramhelper
+	// Create the credentials object
+	creds := telegramhelper.Credentials{
+		APIId:       apiIdRaw,
+		APIHash:     apiHash,
+		PhoneNumber: phoneNumber,
+		PhoneCode:   phoneCode,
+	}
+
+	// Convert to JSON
+	credsJson, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshal credentials to JSON")
+	} else {
+		// Write to file in .tdlib directory
+		credsPath := filepath.Join(tdlibDir, "credentials.json")
+		err = os.WriteFile(credsPath, credsJson, 0600) // Use restrictive permissions for sensitive data
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to write credentials to file")
+		} else {
+			log.Info().Msgf("Credentials saved to %s", credsPath)
+		}
+	}
+
+	// Wait for signal to exit
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
@@ -171,69 +212,90 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Initialize state manager factory
 	log.Info().Msgf("Starting scraper for crawl ID: %s", crawlCfg.CrawlID)
 	smfact := state.DefaultStateManagerFactory{}
-	
-	// Create a temporary state manager to check for incomplete crawls
+
+	// Create a state manager configuration specifically for checking incomplete crawls
+	// Include all necessary configuration to ensure proper state loading
 	tempCfg := state.Config{
 		StorageRoot: crawlCfg.StorageRoot,
-		JobID:       "",
 		CrawlID:     crawlCfg.CrawlID,
+		
+		// Configure DAPR if we're using it (this ensures proper state lookup)
+		DaprConfig: &state.DaprConfig{
+			StateStoreName: "statestore", // Default DAPR state store name
+			ComponentName:  "statestore", // Default component name
+		},
 	}
-	
+
+	// Create a temporary state manager to look for incomplete crawls
+	log.Info().Msgf("Checking for incomplete crawls with ID: %s", crawlCfg.CrawlID)
 	tempSM, err := smfact.Create(tempCfg)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to create temporary state manager")
+		log.Error().Err(err).Msg("Failed to create temporary state manager, will start fresh")
 	}
-	
+
 	// Check for an existing incomplete crawl
 	var crawlexecid string
 	if tempSM != nil {
+		// Look for an incomplete crawl with this ID
 		existingExecID, exists, err := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
 		if err != nil {
 			log.Warn().Err(err).Msg("Error checking for existing crawls, starting fresh")
-		} else if exists {
-			// Use existing execution ID
+		} else if exists && existingExecID != "" {
+			// Found an incomplete crawl to resume
 			crawlexecid = existingExecID
-			log.Info().Msgf("Resuming existing crawl: %s (execution: %s)", 
+			log.Info().Msgf("Resuming existing crawl: %s (execution: %s)",
 				crawlCfg.CrawlID, crawlexecid)
+		} else {
+			log.Debug().Msg("No incomplete crawl found, will start a new execution")
 		}
-		
+
 		// Close the temporary state manager to free up resources
-		_ = tempSM.Close()
+		if err := tempSM.Close(); err != nil {
+			log.Warn().Err(err).Msg("Error closing temporary state manager")
+		}
 	}
-	
-	// If no existing crawl was found, generate a new execution ID
+
+	// If no existing crawl was found or there was an error, generate a new execution ID
 	if crawlexecid == "" {
 		crawlexecid = common.GenerateCrawlID()
 		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
 	}
-	
+
 	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
-		JobID:            "",
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
+		
+		// Add the DAPR config here too to ensure proper state storage
+		DaprConfig: &state.DaprConfig{
+			StateStoreName: "statestore",
+			ComponentName:  "statestore",
+		},
 	}
-	
+
 	sm, err := smfact.Create(cfg)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to load progress")
+		return
 	}
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	//Layer Zero Loaded
+	// Initialize with seed URLs if this is a new crawl
+	// If resuming an existing crawl, this is a no-op 
+	// as the state manager already has the data
 	err = sm.Initialize(stringList)
-
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize state")
+		return
 	}
-	
+
 	// Initialize connection pool with an appropriate size
 	poolSize := crawlCfg.Concurrency
 	if poolSize < 1 {
 		poolSize = 1
 	}
-	
+
 	// If we have database URLs, use those to determine pool size
 	if len(crawlCfg.TDLibDatabaseURLs) > 0 {
 		log.Info().Msgf("Found %d TDLib database URLs for connection pooling", len(crawlCfg.TDLibDatabaseURLs))
@@ -243,62 +305,132 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			log.Info().Msgf("Adjusting pool size to %d to match available database URLs", poolSize)
 		}
 	}
-	
+
 	// Initialize the connection pool
 	crawl.InitConnectionPool(poolSize, crawlCfg.StorageRoot, crawlCfg)
 	defer crawl.CloseConnectionPool()
-	
-	// Create a context for the connections
-	ctx := context.Background()
-	
+
 	// Create a single non-pooled connection for backward compatibility
-	connect, _ := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
+	connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to create Telegram connection")
+		return
+	}
+	
+	// Fetch the first layer of pages (depth 0)
 	layerzero, err := sm.GetLayerByDepth(0)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get layer 0 pages")
+		return
+	}
+	
+	log.Info().Msgf("Found %d pages at layer 0", len(layerzero))
+	
+	// Track statistics
+	var totalPages, skippedPages, successPages, errorPages int
+	totalPages = len(layerzero)
+	
+	// Process each page in the layer
 	for _, la := range layerzero {
-		if la.Status != "fetched" {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
-						// Continue to the next item
-					}
-				}()
-
-				la.Timestamp = time.Now()
-				// Try to use the connection pool
-				var discoveredChannels []*state.Page
-				var err error
-				
-				log.Info().Msgf("Processing page: %s", la.URL)
-				
-				// Use pool if available, fall back to direct connection
-				if crawl.GetConnectionPool() != nil {
-					discoveredChannels, err = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
-				} else {
-					discoveredChannels, err = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
-				}
-				
-				if err != nil {
-					log.Error().Stack().Err(err).Msgf("Error processing item %s", la.URL)
-					la.Status = "error"
-				} else {
-					la.Status = "fetched"
-					log.Info().Msgf("Successfully processed page: %s", la.URL)
+		// Check the page status to determine if we need to process it
+		if la.Status == "fetched" {
+			log.Debug().Str("url", la.URL).Msg("Skipping already fetched page")
+			skippedPages++
+			continue
+		}
+		
+		if la.Status == "processing" {
+			log.Info().Str("url", la.URL).Msg("Found page in 'processing' state - will retry")
+			// Continue to process it
+		}
+		
+		// Process this page in a self-contained function to handle panics
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", la.URL, r)
+					la.Status = "error" // Mark as error so we can retry later
+					errorPages++
 					
-					// Handle any discovered channels from this page
-					if len(discoveredChannels) > 0 {
-						log.Info().Msgf("Discovered %d new channels from %s", len(discoveredChannels), la.URL)
+					// Make sure we save the state even after a panic
+					saveErr := sm.SaveState()
+					if saveErr != nil {
+						log.Error().Err(saveErr).Msg("Failed to save state after panic")
 					}
-				}
-
-				//err := sm.StoreLayers(list)
-				if err != nil {
-					log.Error().Stack().Err(err).Msg("Failed to store layers")
 				}
 			}()
+
+			// Update page status and timestamp before processing
+			la.Timestamp = time.Now()
+			la.Status = "processing" // Mark as in-progress
+			
+			// Save state before processing to record that we're working on this page
+			saveErr := sm.SaveState()
+			if saveErr != nil {
+				log.Warn().Err(saveErr).Str("url", la.URL).Msg("Failed to save state before processing page")
+			}
+			
+			// Try to use the connection pool
+			var discoveredChannels []*state.Page
+			var runErr error
+
+			log.Info().Msgf("Processing page: %s", la.URL)
+
+			// Use pool if available, fall back to direct connection
+			//ctx := context.Background()
+			//if crawl.GetConnectionPool() != nil {
+			//	discoveredChannels, err = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+			//} else {
+			//	discoveredChannels, err = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+			//}
+			discoveredChannels, runErr = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+
+			if runErr != nil {
+				log.Error().Stack().Err(runErr).Msgf("Error processing item %s", la.URL)
+				la.Status = "error"
+				errorPages++
+			} else {
+				la.Status = "fetched"
+				log.Info().Msgf("Successfully processed page: %s", la.URL)
+				successPages++
+
+				// Handle any discovered channels from this page
+				if len(discoveredChannels) > 0 {
+					log.Info().Msgf("Discovered %d new channels from %s", len(discoveredChannels), la.URL)
+				}
+			}
+
+			// Save state after processing
+			saveErr = sm.SaveState()
+			if saveErr != nil {
+				log.Error().Stack().Err(saveErr).Msg("Failed to save state after processing page")
+			}
+		}()
+	}
+	
+	// Log statistics about the processing
+	log.Info().
+		Int("totalPages", totalPages).
+		Int("skippedPages", skippedPages).
+		Int("successPages", successPages).
+		Int("errorPages", errorPages).
+		Msg("Page processing statistics")
+		
+	// Update crawl metadata to mark as completed if all pages were processed
+	if errorPages == 0 {
+		metadata := map[string]interface{}{
+			"status":  "completed",
+			"endTime": time.Now(),
 		}
+		err := sm.UpdateCrawlMetadata(crawlCfg.CrawlID, metadata)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to update crawl metadata")
+		} else {
+			log.Info().Msg("Crawl marked as completed successfully")
+		}
+	} else {
+		log.Info().Int("errorPages", errorPages).Msg("Crawl completed with errors - can be resumed later")
 	}
 
 	log.Info().Msg("All items processed successfully.")
-
 }

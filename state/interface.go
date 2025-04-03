@@ -52,8 +52,7 @@ type Config struct {
 	// Base storage location (filesystem path, container name, etc.)
 	StorageRoot string
 
-	// Job and crawl identifiers
-	JobID            string
+	// Crawl identifiers
 	CrawlID          string
 	CrawlExecutionID string
 
