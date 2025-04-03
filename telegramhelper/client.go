@@ -39,7 +39,7 @@ type TelegramService interface {
 	//   - An initialized TDLib client
 	//   - An error if initialization fails
 	InitializeClient(storagePrefix string) (crawler.TDLibClient, error)
-	
+
 	// InitializeClientWithConfig creates and initializes a Telegram client with custom configuration.
 	// This allows for more control over client behavior and storage options.
 	//
@@ -51,7 +51,7 @@ type TelegramService interface {
 	//   - An initialized TDLib client
 	//   - An error if initialization fails
 	InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error)
-	
+
 	// GetMe retrieves information about the authenticated user.
 	// This is typically used to verify successful authentication.
 	//
@@ -94,10 +94,10 @@ func (s *RealTelegramService) InitializeClient(storagePrefix string) (crawler.TD
 // These credentials are sensitive and should be handled securely.
 // The structure is designed to be serialized to/from JSON for persistent storage.
 type Credentials struct {
-	APIId       string `json:"api_id"`      // Telegram API ID obtained from developer portal
-	APIHash     string `json:"api_hash"`    // Telegram API hash obtained from developer portal
+	APIId       string `json:"api_id"`       // Telegram API ID obtained from developer portal
+	APIHash     string `json:"api_hash"`     // Telegram API hash obtained from developer portal
 	PhoneNumber string `json:"phone_number"` // User's phone number in international format
-	PhoneCode   string `json:"phone_code"`  // One-time code received via SMS or Telegram
+	PhoneCode   string `json:"phone_code"`   // One-time code received via SMS or Telegram
 }
 
 // readCredentials loads Telegram API authentication details from a JSON file.
@@ -170,7 +170,7 @@ func SetupAuth(phoneNumber, phoneCode string) {
 	} else {
 		log.Debug().Msg("No phone number provided, will use existing TG_PHONE_NUMBER or prompt user")
 	}
-	
+
 	if phoneCode != "" {
 		os.Setenv("TG_PHONE_CODE", phoneCode)
 		log.Debug().Msg("Set TG_PHONE_CODE environment variable for authentication")
@@ -184,19 +184,19 @@ func maskPhoneNumber(phoneNumber string) string {
 	if len(phoneNumber) <= 4 {
 		return "***" // Too short to mask meaningfully
 	}
-	
+
 	// Keep country code (first few digits) and last 2 digits
 	visiblePrefix := 3
 	if len(phoneNumber) > 10 {
 		visiblePrefix = 4 // For international format with + and country code
 	}
-	
+
 	masked := phoneNumber[:visiblePrefix]
 	for i := visiblePrefix; i < len(phoneNumber)-2; i++ {
 		masked += "*"
 	}
 	masked += phoneNumber[len(phoneNumber)-2:]
-	
+
 	return masked
 }
 
@@ -223,7 +223,7 @@ func maskPhoneNumber(phoneNumber string) string {
 // the function will prompt for input through the CLI interactor.
 func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	authorizer := client.ClientAuthorizer()
-	
+
 	// We'll use the default CLI interactor but prepare environment variables
 	// so we need to track the phoneCode for later
 
@@ -281,7 +281,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		apiHash = os.Getenv("TG_API_HASH")
 		phoneNumber = os.Getenv("TG_PHONE_NUMBER")
 		phoneCode = os.Getenv("TG_PHONE_CODE")
-		
+
 		// Create credentials object to use locally (don't save it)
 		creds = &Credentials{
 			APIId:       apiIdStr,
@@ -331,7 +331,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	// Set up authentication environment variables
 	// The phone number will be picked up by the default CLI interactor
 	SetupAuth(phoneNumber, phoneCode)
-	
+
 	// Use the default CLI interactor which will read the environment variables
 	go client.CliInteractor(authorizer)
 
@@ -341,7 +341,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
 
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 1}
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 4}
 		tdlibClient.SetLogVerbosityLevel(&verb)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
