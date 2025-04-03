@@ -65,6 +65,7 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 }
 
 func generatePCode() {
+	// This function doesn't receive crawler config, so we use a default verbosity level
 	var (
 		apiIdRaw    = os.Getenv("TG_API_ID")
 		apiHash     = os.Getenv("TG_API_HASH")
@@ -109,8 +110,12 @@ func generatePCode() {
 	// Use the default CLI interactor
 	go client.CliInteractor(authorizer)
 
+	// Get verbosity level from configuration (default is 1, will use 0 if not specified)
+	verbosityLevel := 1 // Default
+	
+	log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level for code generation")
 	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
-		NewVerbosityLevel: 0,
+		NewVerbosityLevel: int32(verbosityLevel),
 	})
 	if err != nil {
 		log.Fatal().Msgf("SetLogVerbosityLevel error: %s", err)

@@ -341,8 +341,16 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
 
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: 4}
+		// Set verbosity level from config (default is 1, lower values increase verbosity)
+		verbosityLevel := 1 // Default value if not configured
+		if cfg.TDLibVerbosity > 0 {
+			verbosityLevel = cfg.TDLibVerbosity
+		}
+		
+		log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level")
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: int32(verbosityLevel)}
 		tdlibClient.SetLogVerbosityLevel(&verb)
+		
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
