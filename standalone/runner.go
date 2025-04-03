@@ -1,6 +1,7 @@
 package standalone
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
@@ -376,14 +377,21 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 			log.Info().Msgf("Processing page: %s", la.URL)
 
-			// Use pool if available, fall back to direct connection
-			//ctx := context.Background()
-			//if crawl.GetConnectionPool() != nil {
-			//	discoveredChannels, err = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
-			//} else {
-			//	discoveredChannels, err = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
-			//}
-			discoveredChannels, runErr = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+			// Use the connection pool if it's initialized
+			ctx := context.Background()
+			
+			// Try to get the connection pool stats
+			poolStats := crawl.GetConnectionPoolStats()
+			log.Info().Interface("poolStats", poolStats).Msg("Connection pool status")
+			
+			// Use the connection pool if it's initialized
+			if crawl.IsConnectionPoolInitialized() {
+				log.Info().Msg("Using connection pool for channel processing")
+				discoveredChannels, runErr = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+			} else {
+				log.Info().Msg("No connection pool available, using single connection")
+				discoveredChannels, runErr = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+			}
 
 			if runErr != nil {
 				log.Error().Stack().Err(runErr).Msgf("Error processing item %s", la.URL)

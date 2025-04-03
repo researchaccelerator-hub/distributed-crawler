@@ -75,6 +75,33 @@ func CloseConnectionPool() {
 	}
 }
 
+// IsConnectionPoolInitialized checks if the connection pool is initialized
+func IsConnectionPoolInitialized() bool {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	
+	return connectionPool != nil
+}
+
+// GetConnectionPoolStats returns statistics about the connection pool
+func GetConnectionPoolStats() map[string]int {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	
+	if connectionPool == nil {
+		return map[string]int{
+			"available": 0,
+			"inUse":     0,
+			"maxSize":   0,
+			"initialized": 0,
+		}
+	}
+	
+	stats := connectionPool.Stats()
+	stats["initialized"] = 1
+	return stats
+}
+
 // RunForChannelWithPool connects to a Telegram channel and crawls its messages.
 // This version uses the connection pool for more efficient client management.
 func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
