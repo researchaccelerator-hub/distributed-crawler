@@ -6,22 +6,24 @@ import (
 
 // Configuration structure
 type CrawlerConfig struct {
-	DaprMode         bool
-	DaprPort         int
-	Concurrency      int
-	Timeout          int
-	UserAgent        string
-	OutputFormat     string
-	StorageRoot      string
-	TDLibDatabaseURL string
-	MinPostDate      time.Time
-	PostRecency      time.Time
-	DaprJobMode      bool
-	MinUsers         int
-	CrawlID          string
-	MaxComments      int
-	MaxPosts         int
-	MaxDepth         int
+	DaprMode          bool
+	DaprPort          int
+	Concurrency       int
+	Timeout           int
+	UserAgent         string
+	OutputFormat      string
+	StorageRoot       string
+	TDLibDatabaseURL  string         // Single database URL (for backward compatibility)
+	TDLibDatabaseURLs []string       // Multiple database URLs for connection pooling
+	MinPostDate       time.Time
+	PostRecency       time.Time
+	DaprJobMode       bool
+	MinUsers          int
+	CrawlID           string
+	MaxComments       int
+	MaxPosts          int
+	MaxDepth          int
+	MaxPages          int            // Maximum number of pages to crawl (default: 108000)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

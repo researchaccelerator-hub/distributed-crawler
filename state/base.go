@@ -150,6 +150,7 @@ func (bsm *BaseStateManager) UpdateMessage(pageID string, chatID int64, messageI
 }
 
 // AddLayer adds a new layer of pages, ensuring URLs are unique across all layers
+// and respecting the maximum page limit if set in the config
 func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 	if len(pages) == 0 {
 		return nil
@@ -157,6 +158,34 @@ func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
+
+	// Count total existing pages and deadend pages
+	totalExistingPages := 0
+	deadendPageCount := 0
+	for _, page := range bsm.pageMap {
+		totalExistingPages++
+		if page.Status == "deadend" {
+			deadendPageCount++
+		}
+	}
+
+	// Check if we've reached the maximum page limit and if it's set
+	// Only applies if config.MaxPages is greater than 0 (otherwise, unlimited)
+	maxPagesReached := false
+	maxPagesAllowed := 0
+	if bsm.config.MaxPagesConfig != nil && bsm.config.MaxPagesConfig.MaxPages > 0 {
+		maxPagesAllowed = bsm.config.MaxPagesConfig.MaxPages
+		maxPagesReached = totalExistingPages >= maxPagesAllowed
+		
+		if maxPagesReached {
+			log.Info().
+				Int("currentPages", totalExistingPages).
+				Int("maxPages", maxPagesAllowed).
+				Int("deadendPages", deadendPageCount).
+				Msgf("Maximum page limit reached (%d/%d), will only add replacements for deadend pages",
+					totalExistingPages, maxPagesAllowed)
+		}
+	}
 
 	// Create URL to existing page ID map for deduplication
 	existingURLs := make(map[string]string)
@@ -174,13 +203,28 @@ func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 
 	// Track the IDs of pages we're actually adding (after deduplication)
 	addedIDs := make([]string, 0)
-
+	
+	// Counter for pages we can add as replacements for deadend pages
+	replacementsAvailable := deadendPageCount
+	
 	// Process each page
 	for i := range pages {
 		// Check if URL already exists in any layer
 		if existingID, exists := existingURLs[pages[i].URL]; exists {
 			log.Debug().Msgf("Skipping duplicate URL: %s (already exists with ID: %s)", pages[i].URL, existingID)
 			continue
+		}
+		
+		// If we've reached the max pages limit, only add if we have replacements available
+		if maxPagesReached {
+			if replacementsAvailable <= 0 {
+				log.Debug().Msgf("Skipping URL %s: maximum page limit reached and no deadend replacements available", pages[i].URL)
+				continue
+			}
+			
+			// Consume one replacement slot
+			replacementsAvailable--
+			log.Debug().Msgf("Adding URL %s as a replacement for a deadend page (%d replacements remaining)", pages[i].URL, replacementsAvailable)
 		}
 
 		// Ensure the page has an ID
@@ -350,6 +394,60 @@ func (bsm *BaseStateManager) GetMaxDepth() (int, error) {
 	}
 
 	return maxDepth, nil
+}
+
+// FindIncompleteCrawl checks if there is an existing incomplete crawl with the given crawl ID
+// and returns its execution ID if found
+func (bsm *BaseStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) {
+	bsm.mutex.RLock()
+	defer bsm.mutex.RUnlock()
+
+	// First check the current metadata
+	if bsm.metadata.CrawlID == crawlID {
+		// If this crawl isn't marked as completed and has a valid execution ID
+		if bsm.metadata.Status != "completed" && bsm.metadata.ExecutionID != "" {
+			log.Info().
+				Str("crawlID", crawlID).
+				Str("executionID", bsm.metadata.ExecutionID).
+				Str("status", bsm.metadata.Status).
+				Msg("Found incomplete crawl in memory")
+			return bsm.metadata.ExecutionID, true, nil
+		}
+		
+		// Check if the crawl has any incomplete pages even if it's marked as completed
+		hasIncompletePages := false
+		
+		// Look through layers to find incomplete pages
+		for _, pageIDs := range bsm.layerMap {
+			for _, pageID := range pageIDs {
+				if page, exists := bsm.pageMap[pageID]; exists {
+					if page.Status != "fetched" {
+						hasIncompletePages = true
+						log.Debug().
+							Str("pageID", pageID).
+							Str("status", page.Status).
+							Msg("Found incomplete page in memory")
+						break
+					}
+				}
+			}
+			if hasIncompletePages {
+				break
+			}
+		}
+		
+		if hasIncompletePages {
+			log.Info().
+				Str("crawlID", crawlID).
+				Str("executionID", bsm.metadata.ExecutionID).
+				Msg("Found crawl with incomplete pages in memory")
+			return bsm.metadata.ExecutionID, true, nil
+		}
+	}
+	
+	// The memory-only implementation doesn't have a way to check previous crawls, 
+	// so we'll return false. The DaprStateManager implementation handles that case.
+	return "", false, nil
 }
 
 // StorePost and StoreFile are left to specific implementations

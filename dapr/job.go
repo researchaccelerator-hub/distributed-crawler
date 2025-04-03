@@ -318,7 +318,6 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
-		JobID:            crawlexecid, // Use the crawl execution ID as job ID
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
 	}

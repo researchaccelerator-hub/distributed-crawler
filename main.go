@@ -14,17 +14,18 @@ import (
 )
 
 var (
-	cfgFile      string
-	crawlerCfg   common.CrawlerConfig
-	urlList      []string
-	urlFile      string
-	generateCode bool
-	crawlType    string
-	minPostDate  string
-	daprMode     string
-	minUsers     int
-	crawlID      string
-	timeAgo      string // Add this line for the new parameter
+	cfgFile           string
+	crawlerCfg        common.CrawlerConfig
+	urlList           []string
+	urlFile           string
+	generateCode      bool
+	crawlType         string
+	minPostDate       string
+	daprMode          string
+	minUsers          int
+	crawlID           string
+	timeAgo           string // Time ago parameter
+	tdlibDatabaseURLs []string // Multiple TDLib database URLs
 )
 
 func main() {
@@ -116,11 +117,22 @@ var rootCmd = &cobra.Command{
 		crawlerCfg.OutputFormat = viper.GetString("output.format")
 		crawlerCfg.StorageRoot = viper.GetString("storage.root")
 		crawlerCfg.TDLibDatabaseURL = viper.GetString("tdlib.database_url")
+		
+		// Get the multiple TDLib database URLs
+		tdlibDatabaseURLs = viper.GetStringSlice("tdlib.database_urls")
+		crawlerCfg.TDLibDatabaseURLs = tdlibDatabaseURLs
+		
+		// If no multiple URLs are provided but the single URL is, add it to the list
+		if len(crawlerCfg.TDLibDatabaseURLs) == 0 && crawlerCfg.TDLibDatabaseURL != "" {
+			crawlerCfg.TDLibDatabaseURLs = append(crawlerCfg.TDLibDatabaseURLs, crawlerCfg.TDLibDatabaseURL)
+		}
+		
 		crawlerCfg.MinUsers = viper.GetInt("crawler.minusers")
 		crawlerCfg.CrawlID = viper.GetString("crawler.crawlid")
 		crawlerCfg.MaxComments = viper.GetInt("crawler.maxcomments")
 		crawlerCfg.MaxPosts = viper.GetInt("crawler.maxposts")
 		crawlerCfg.MaxDepth = viper.GetInt("crawler.maxdepth")
+		crawlerCfg.MaxPages = viper.GetInt("crawler.maxpages")
 
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
@@ -199,12 +211,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.StorageRoot, "storage-root", "/tmp/crawl", "Storage root directory")
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "1m", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
-	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive (deprecated, use --tdlib-database-urls)")
+	rootCmd.PersistentFlags().StringSliceVar(&tdlibDatabaseURLs, "tdlib-database-urls", []string{}, "Comma-separated list of URLs to pre-seeded TDLib database archives for connection pooling")
 	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 100, "Minimum number of users in a channel to crawl")
 	rootCmd.PersistentFlags().StringVar(&crawlID, "crawl-id", "", "Unique identifier for this crawl operation")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxComments, "max-comments", -1, "The maximum number of comments to crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxDepth, "max-depth", -1, "The maximum depth of the crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPosts, "max-posts", -1, "The maximum posts to collect")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPages, "max-pages", 108000, "The maximum number of pages/channels to crawl")
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
@@ -224,11 +238,13 @@ func init() {
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("crawler.timeago", rootCmd.PersistentFlags().Lookup("time-ago"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
+	viper.BindPFlag("tdlib.database_urls", rootCmd.PersistentFlags().Lookup("tdlib-database-urls"))
 	viper.BindPFlag("crawler.minusers", rootCmd.PersistentFlags().Lookup("min-users"))
 	viper.BindPFlag("crawler.crawlid", rootCmd.PersistentFlags().Lookup("crawl-id"))
 	viper.BindPFlag("crawler.maxcomments", rootCmd.PersistentFlags().Lookup("max-comments"))
 	viper.BindPFlag("crawler.maxposts", rootCmd.PersistentFlags().Lookup("max-posts"))
 	viper.BindPFlag("crawler.maxdepth", rootCmd.PersistentFlags().Lookup("max-depth"))
+	viper.BindPFlag("crawler.maxpages", rootCmd.PersistentFlags().Lookup("max-pages"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
