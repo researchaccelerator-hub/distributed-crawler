@@ -130,7 +130,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 	const fileSizeLimit = 150.0 // MB
 	isOverLimit := sizeInMB > fileSizeLimit
 	if isOverLimit {
-		return "", fmt.Errorf("file size is too large (%d MB)", sizeInMB)
+		return "", fmt.Errorf("file size is too large (%.2f MB)", sizeInMB)
 	}
 	_, err = sm.StoreFile(channelName, path, remoteid)
 	e := os.Remove(path)
