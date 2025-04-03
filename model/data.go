@@ -1,7 +1,11 @@
+// Package model defines the data structures used to represent Telegram data
+// in a standardized format for storage and processing.
 package model
 
 import "time"
 
+// Post represents a complete Telegram post with all associated metadata.
+// This struct is used for storing and exporting post data in a standardized format.
 type Post struct {
 	PostLink                string            `json:"post_link"`
 	ChannelID               int64             `json:"channel_id"`
@@ -68,6 +72,8 @@ type Post struct {
 	CaptureTime             time.Time         `json:"capture_time"`
 	Handle                  string            `json:"handle"`
 }
+// Comment represents a single comment on a Telegram post, including
+// its text content, reaction counts, and metadata.
 type Comment struct {
 	Text       string         `json:"text"`
 	Reactions  map[string]int `json:"reactions"`
@@ -75,6 +81,8 @@ type Comment struct {
 	ReplyCount int            `json:"reply_count"`
 	Handle     string         `json:"handle"`
 }
+// ChannelData contains information about a Telegram channel, including
+// its identifying information, engagement metrics, and URLs.
 type ChannelData struct {
 	ChannelID             int64          `json:"channel_id"`
 	ChannelName           string         `json:"channel_name"`
@@ -84,6 +92,8 @@ type ChannelData struct {
 	ChannelURL            string         `json:"channel_url"`
 }
 
+// EngagementData contains metrics about a channel's audience engagement,
+// including follower counts, like counts, and other interaction statistics.
 type EngagementData struct {
 	FollowerCount  int `json:"follower_count"`
 	FollowingCount int `json:"following_count"`
@@ -94,11 +104,15 @@ type EngagementData struct {
 	ShareCount     int `json:"share_count"`
 }
 
+// OCRData stores the text extracted from images through optical character recognition (OCR),
+// along with the thumbnail URL of the processed image.
 type OCRData struct {
 	OCRText  string `json:"ocr_text"`
 	ThumbURL string `json:"thumb_url"`
 }
 
+// PerformanceScores tracks engagement metrics for a post, including likes, shares,
+// comments, and views, to measure its performance and reach.
 type PerformanceScores struct {
 	Likes    *int    `json:"likes"`
 	Shares   *int    `json:"shares"`
@@ -106,9 +120,14 @@ type PerformanceScores struct {
 	Views    float64 `json:"views"`
 }
 
+// InnerLink represents internal links within a Telegram post.
+// This is a placeholder struct for future implementation of internal link tracking.
 type InnerLink struct {
 }
 
+// MediaData contains information about media files associated with a post,
+// such as images, videos, or other documents.
 type MediaData struct {
+	// DocumentName is the filename of the document as stored in the system
 	DocumentName string `json:"document_name"`
 }

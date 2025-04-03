@@ -20,14 +20,30 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Hello, World!")
 }
 
-// StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,
-// configures the crawler using the specified configuration, and optionally runs code generation. If no URLs are provided,
-// the function logs a fatal error. The function logs the start and completion of the crawling process.
+// StartDaprStandaloneMode initializes and starts the crawler in standalone mode with Dapr integration.
+//
+// This function handles the end-to-end process of starting a Telegram crawling operation:
+// 1. Sets up a basic HTTP server (port 6481) for health checks and monitoring
+// 2. Collects URLs to crawl from either a direct list or a file
+// 3. Validates the URLs and ensures there's at least one URL to process
+// 4. Optionally runs code generation if specified
+// 5. Initializes a connection pool for Telegram clients based on concurrency settings
+// 6. Launches the crawling process to extract data from the specified channels
+// 7. Maintains the crawler in a blocking state after completion
+//
+// The function uses Dapr conventions for state management and data storage, allowing
+// the crawler to integrate with distributed Dapr components even when running
+// in standalone mode. This enables features like resumable crawls, distributed
+// storage, and integration with other Dapr-aware services.
+//
 // Parameters:
-//   - urlList: A list of URLs to crawl.
-//   - urlFile: A file containing URLs to crawl.
-//   - crawlerCfg: Configuration settings for the crawler.
-//   - generateCode: A flag indicating whether to run code generation.
+//   - urlList: A list of URLs to crawl directly provided as strings
+//   - urlFile: A file path containing URLs to crawl (one per line, comments with #)
+//   - crawlerCfg: Configuration settings for the crawler including connection settings
+//   - generateCode: A flag indicating whether to run code generation for Telegram API
+//
+// The function will log fatal errors if no URLs are provided or if essential
+// initialization steps fail. It will block indefinitely after starting the crawler.
 func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting crawler in standalone mode")
 

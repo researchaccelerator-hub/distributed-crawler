@@ -1,3 +1,6 @@
+// Package crawl implements the core functionality for crawling Telegram channels.
+// It handles connection management, message processing, and channel traversal
+// to extract and store data from Telegram channels in a structured format.
 package crawl
 
 import (
@@ -18,7 +21,16 @@ import (
 var connectionPool *telegramhelper.ConnectionPool
 var poolMu sync.Mutex
 
-// InitConnectionPool initializes the connection pool
+// InitConnectionPool initializes the global connection pool for TDLib clients.
+// This pool is used to manage and reuse Telegram client connections efficiently,
+// minimizing the overhead of creating new connections for each channel.
+//
+// Parameters:
+//   - maxSize: The maximum number of concurrent connections to maintain
+//   - storagePrefix: Path prefix for storing TDLib databases and files
+//   - cfg: Common crawler configuration for all connections
+//
+// The function will create a new connection pool only if one doesn't already exist.
 func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerConfig) {
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -29,7 +41,19 @@ func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerCon
 	}
 }
 
-// Connect creates a new client connection outside the pool
+// Connect creates a new standalone Telegram client connection outside the connection pool.
+// This is typically used as a fallback when the connection pool is exhausted or not initialized.
+//
+// Parameters:
+//   - storagePrefix: Path prefix for storing TDLib databases and files
+//   - cfg: Configuration for the crawler and TDLib client
+//
+// Returns:
+//   - An initialized TDLib client connection
+//   - An error if client initialization fails
+//
+// Unlike pooled connections, clients created with this function need to be explicitly
+// closed when they're no longer needed to avoid resource leaks.
 func Connect(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	// Initialize Telegram client
 	service := &telegramhelper.RealTelegramService{}
@@ -42,7 +66,20 @@ func Connect(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClien
 	return tdlibClient, nil
 }
 
-// GetConnectionFromPool gets a connection from the pool
+// GetConnectionFromPool retrieves a TDLib client connection from the connection pool.
+// This is the primary method for obtaining client connections for channel crawling.
+//
+// Parameters:
+//   - ctx: Context for potential cancellation or timeout of the operation
+//
+// Returns:
+//   - An initialized TDLib client connection
+//   - A unique connection ID that must be used when releasing the connection
+//   - An error if the pool is not initialized or if no connections are available
+//
+// The function is thread-safe with mutex protection. If the pool is not initialized,
+// it returns an error prompting the caller to initialize the pool first or use 
+// a standalone connection.
 func GetConnectionFromPool(ctx context.Context) (crawler.TDLibClient, string, error) {
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -54,7 +91,15 @@ func GetConnectionFromPool(ctx context.Context) (crawler.TDLibClient, string, er
 	return connectionPool.GetConnection(ctx)
 }
 
-// ReleaseConnectionToPool returns a connection to the pool
+// ReleaseConnectionToPool returns a previously obtained connection back to the pool.
+// This makes the connection available for reuse by other crawling operations.
+//
+// Parameters:
+//   - connID: The unique identifier of the connection to release
+//
+// The function is thread-safe with mutex protection and safely handles the case
+// where the pool might have been closed after the connection was obtained.
+// It's critical to release connections to avoid resource exhaustion.
 func ReleaseConnectionToPool(connID string) {
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -64,7 +109,12 @@ func ReleaseConnectionToPool(connID string) {
 	}
 }
 
-// CloseConnectionPool closes all connections in the pool
+// CloseConnectionPool gracefully shuts down all connections in the pool and
+// releases associated resources. This should be called during application
+// shutdown or when the pool is no longer needed.
+//
+// The function is thread-safe with mutex protection. After calling this function,
+// the pool is no longer usable until re-initialized with InitConnectionPool.
 func CloseConnectionPool() {
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -75,7 +125,15 @@ func CloseConnectionPool() {
 	}
 }
 
-// IsConnectionPoolInitialized checks if the connection pool is initialized
+// IsConnectionPoolInitialized checks if the global connection pool has been
+// initialized and is available for use.
+//
+// Returns:
+//   - true if the connection pool is initialized
+//   - false if the connection pool is nil (not initialized)
+//
+// This function is thread-safe with mutex protection and can be used to
+// determine whether to call InitConnectionPool or use standalone connections.
 func IsConnectionPoolInitialized() bool {
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -83,7 +141,19 @@ func IsConnectionPoolInitialized() bool {
 	return connectionPool != nil
 }
 
-// GetConnectionPoolStats returns statistics about the connection pool
+// GetConnectionPoolStats retrieves statistics about the current state of the
+// connection pool, including available connections, connections in use, and 
+// maximum pool size.
+//
+// Returns:
+//   - A map containing statistics about the connection pool:
+//     * "available": Number of connections currently available in the pool
+//     * "inUse": Number of connections currently checked out from the pool
+//     * "maxSize": Maximum size of the pool
+//     * "initialized": 1 if the pool is initialized, 0 otherwise
+//
+// The function is thread-safe with mutex protection and safely handles the case
+// where the pool is not initialized by returning zeroed statistics.
 func GetConnectionPoolStats() map[string]int {
 	poolMu.Lock()
 	defer poolMu.Unlock()
@@ -103,7 +173,25 @@ func GetConnectionPoolStats() map[string]int {
 }
 
 // RunForChannelWithPool connects to a Telegram channel and crawls its messages.
-// This version uses the connection pool for more efficient client management.
+// This version uses the connection pool for more efficient client management,
+// obtaining a client from the pool, processing the channel, and then returning
+// the client to the pool for reuse.
+//
+// Parameters:
+//   - ctx: Context for potential cancellation of the operation
+//   - p: The page (channel) to process
+//   - storagePrefix: Path prefix for storing TDLib databases and files
+//   - sm: State manager interface for storing crawler state
+//   - cfg: Configuration for the crawler operation
+//
+// Returns:
+//   - A slice of discovered channel pages that were linked from this channel
+//   - An error if any step of the crawling process fails
+//
+// The function first tries to get a connection from the pool. If the pool is
+// exhausted or not initialized, it falls back to creating a new connection.
+// After processing, pooled connections are returned to the pool, while
+// fallback connections are closed.
 func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
 	// Get a client from the connection pool
 	tdlibClient, connID, err := GetConnectionFromPool(ctx)
@@ -125,7 +213,23 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }
 
-// Run connects to a Telegram channel and crawls its messages.
+// RunForChannel processes a single Telegram channel using the provided TDLib client.
+// It retrieves channel information, verifies activity requirements, and processes all
+// messages in the channel, storing data and discovering linked channels.
+//
+// Parameters:
+//   - tdlibClient: An initialized TDLib client connection
+//   - p: The page (channel) to process
+//   - storagePrefix: Path prefix for storing TDLib databases and files
+//   - sm: State manager interface for storing crawler state
+//   - cfg: Configuration for the crawler operation
+//
+// Returns:
+//   - A slice of discovered channel pages that were linked from this channel
+//   - An error if any step of the crawling process fails
+//
+// The function applies filtering rules based on channel activity, message count,
+// and member count to determine whether the channel should be fully processed.
 func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
 
 	// Get channel information
@@ -156,6 +260,20 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	return discoveredChannels, nil
 }
 
+// getLatestMessageTime retrieves the timestamp of the most recent message in a chat.
+// This is used to determine if a channel is active within a specified time period.
+//
+// Parameters:
+//   - tdlibClient: An initialized TDLib client connection
+//   - chatID: The ID of the chat (channel) to check
+//
+// Returns:
+//   - The timestamp of the most recent message as a time.Time
+//   - An error if no messages are found or if the fetch operation fails
+//
+// The function queries for a single message (the most recent one) and extracts
+// its timestamp. This is more efficient than fetching multiple messages when
+// only the latest activity time is needed.
 func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.Time, error) {
 	// Fetch the most recent message
 	// fromMessageID=0 means from the latest message
@@ -186,6 +304,23 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 	return timestamp, nil
 }
 
+// isChannelActiveWithinPeriod determines if a channel has had any activity 
+// (new messages) after the specified cutoff time.
+//
+// Parameters:
+//   - tdlibClient: An initialized TDLib client connection
+//   - chatID: The ID of the chat (channel) to check
+//   - cutoffTime: The reference time to compare against; channels with
+//     messages newer than this time are considered active
+//
+// Returns:
+//   - true if the channel has activity after the cutoff time
+//   - false if the channel has no activity after the cutoff time
+//   - an error if retrieving the message timestamp fails
+//
+// This function is used to filter out inactive or abandoned channels
+// that haven't posted within the configured time window. This helps
+// focus crawling resources on currently active channels.
 func isChannelActiveWithinPeriod(tdlibClient crawler.TDLibClient, chatID int64, cutoffTime time.Time) (bool, error) {
 	latestMessageTime, err := getLatestMessageTime(tdlibClient, chatID)
 	if err != nil {
@@ -209,26 +344,76 @@ func closeClient(tdlibClient crawler.TDLibClient) {
 	}
 }
 
-// channelInfo holds all necessary channel data
+// channelInfo holds all necessary data about a Telegram channel.
+// This struct centralizes all channel-related information collected during crawling,
+// including basic chat data, supergroup information if applicable, and key statistics.
 type channelInfo struct {
-	chat           *client.Chat
-	chatDetails    *client.Chat
-	supergroup     *client.Supergroup
-	supergroupInfo *client.SupergroupFullInfo
-	totalViews     int32
-	messageCount   int32
-	memberCount    int32
+	chat           *client.Chat               // Basic chat information
+	chatDetails    *client.Chat               // Detailed chat information
+	supergroup     *client.Supergroup         // Supergroup data if the channel is a supergroup
+	supergroupInfo *client.SupergroupFullInfo // Detailed supergroup information
+	totalViews     int32                      // Total view count across channel messages
+	messageCount   int32                      // Total number of messages in the channel
+	memberCount    int32                      // Total number of members/subscribers
 }
 
-// TotalViewsGetter is a function type for retrieving total view count
+// TotalViewsGetter is a function type for retrieving total view count across
+// all messages in a channel. This abstraction enables dependency injection for testing.
+//
+// Parameters:
+//   - client: TDLib client connection
+//   - messages: Array of messages to analyze
+//   - chatID: ID of the chat/channel
+//   - channelUsername: Username of the channel (for logging)
+//
+// Returns:
+//   - Total number of views across all messages
+//   - Error if view count calculation fails
 type TotalViewsGetter func(client crawler.TDLibClient, messages []*client.Message, chatID int64, channelUsername string) (int, error)
 
-// MessageCountGetter is a function type for retrieving message count
+// MessageCountGetter is a function type for retrieving the total message count
+// in a channel. This abstraction enables dependency injection for testing.
+//
+// Parameters:
+//   - client: TDLib client connection
+//   - messages: Array of messages to analyze
+//   - chatID: ID of the chat/channel
+//   - channelUsername: Username of the channel (for logging)
+//
+// Returns:
+//   - Total number of messages in the channel
+//   - Error if message count retrieval fails
 type MessageCountGetter func(client crawler.TDLibClient, messages []*client.Message, chatID int64, channelUsername string) (int, error)
 
-// MemberCountGetter is a function type for retrieving message count
+// MemberCountGetter is a function type for retrieving the number of members/subscribers
+// in a channel. This abstraction enables dependency injection for testing.
+//
+// Parameters:
+//   - client: TDLib client connection
+//   - channelUsername: Username of the channel to check
+//
+// Returns:
+//   - Number of channel members/subscribers
+//   - Error if member count retrieval fails
 type MemberCountGetter func(client crawler.TDLibClient, channelUsername string) (int, error)
 
+// getChannelInfo retrieves comprehensive information about a Telegram channel.
+// This is a convenience wrapper around getChannelInfoWithDeps that supplies 
+// the standard implementations of the dependency functions.
+//
+// Parameters:
+//   - tdlibClient: An initialized TDLib client connection
+//   - page: State representation of the channel to fetch
+//   - cfg: Configuration settings for the crawler
+//
+// Returns:
+//   - A populated channelInfo struct containing all retrieved channel data
+//   - A slice of messages from the channel
+//   - An error if critical operations fail
+//
+// This function uses the standard implementations for retrieving views, message count,
+// and member count from the telegramhelper package. For testing or custom implementations,
+// use getChannelInfoWithDeps directly.
 func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cfg common.CrawlerConfig) (*channelInfo, []*client.Message, error) {
 	return getChannelInfoWithDeps(
 		tdlibClient,
@@ -240,7 +425,30 @@ func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cfg commo
 	)
 }
 
-// getChannelInfoWithDeps is the dependency-injected version of getChannelInfo
+// getChannelInfoWithDeps is the dependency-injected version of getChannelInfo.
+// This function retrieves comprehensive information about a Telegram channel,
+// including basic details, message content, and various statistics.
+//
+// Parameters:
+//   - tdlibClient: An initialized TDLib client connection
+//   - page: State representation of the channel to fetch
+//   - getTotalViewsFn: Function to retrieve total view count for the channel
+//   - getMessageCountFn: Function to retrieve total message count for the channel
+//   - getMemberCountFn: Function to retrieve member count for the channel
+//   - cfg: Configuration settings for the crawler
+//
+// Returns:
+//   - A populated channelInfo struct containing all retrieved channel data
+//   - A slice of messages from the channel
+//   - An error if critical operations fail
+//
+// The function follows a graceful degradation approach - if non-critical stats (views, 
+// message count, member count) can't be retrieved, it continues with partial information
+// rather than failing completely. This improves crawler resilience while still collecting
+// as much data as possible.
+//
+// The dependency injection pattern allows for easier testing by substituting mock
+// implementations of the stat retrieval functions.
 func getChannelInfoWithDeps(
 	tdlibClient crawler.TDLibClient,
 	page *state.Page,
@@ -338,18 +546,53 @@ func getChannelInfoWithDeps(
 	}, mess, nil
 }
 
+// MessageFetcher defines an interface for retrieving messages from a Telegram chat.
+// This abstraction enables dependency injection for testing by allowing
+// different implementations to be used in place of the actual TDLib client calls.
 type MessageFetcher interface {
+	// FetchMessages retrieves messages from a Telegram chat.
+	//
+	// Parameters:
+	//   - tdlibClient: TDLib client connection
+	//   - chatID: ID of the chat to fetch messages from
+	//   - fromMessageID: Message ID to start fetching from (0 for latest)
+	//
+	// Returns:
+	//   - A slice of fetched messages
+	//   - An error if message fetching fails
 	FetchMessages(tdlibClient crawler.TDLibClient, chatID int64, fromMessageID int64) ([]*client.Message, error)
 }
 
+// DefaultMessageFetcher is the standard implementation of the MessageFetcher interface.
+// It uses the TDLib client directly to fetch messages from Telegram.
 type DefaultMessageFetcher struct{}
 
+// MessageProcessor defines an interface for processing Telegram messages.
+// This abstraction allows for custom processing logic to be injected,
+// facilitating testing and specialized processing workflows.
 type MessageProcessor interface {
 	// ProcessMessage processes a single Telegram message.
+	//
+	// Parameters:
+	//   - tdlibClient: TDLib client connection
+	//   - message: The message to process
+	//   - messageId: ID of the message
+	//   - chatId: ID of the chat containing the message
+	//   - info: Channel information
+	//   - crawlID: Identifier for the current crawl operation
+	//   - channelUsername: Username of the channel being processed
+	//   - sm: State management interface for persistent storage
+	//   - cfg: Configuration settings for the crawler
+	//
+	// Returns:
+	//   - A slice of outlink URLs discovered in the message
+	//   - An error if message processing fails
 	ProcessMessage(tdlibClient crawler.TDLibClient, message *client.Message, messageId int64, chatId int64, info *channelInfo, crawlID string, channelUsername string, sm *state.StateManagementInterface, cfg common.CrawlerConfig) ([]string, error)
 }
 
-// DefaultMessageProcessor implements the MessageProcessor interface using the default processMessage function
+// DefaultMessageProcessor implements the MessageProcessor interface using the default processMessage function.
+// It serves as the standard message processor for the crawler, extracting content,
+// metadata, and outlinks from Telegram messages.
 type DefaultMessageProcessor struct{}
 
 // ProcessMessage implements the MessageProcessor interface
@@ -364,10 +607,28 @@ func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, mess
 
 }
 
-// processAllMessagesWithProcessor retrieves and processes all messages from a channel.
-// This function fetches messages in batches, starting from the most recent message
-// and working backward through the history. It uses the provided MessageProcessor
-// to process each message, allowing for customized message handling.
+// processAllMessagesWithProcessor processes all messages from a Telegram channel
+// using the provided message processor. It coordinates the entire message processing
+// workflow, including message status tracking, outlink discovery, and state updates.
+//
+// Parameters:
+//   - tdlibClient: An initialized TDLib client connection
+//   - info: Channel information including member count, view count, etc.
+//   - messages: Array of retrieved messages from the channel
+//   - crawlID: Identifier for the current crawl operation
+//   - channelUsername: Username of the channel being processed
+//   - sm: State manager for persistent storage of crawl progress
+//   - processor: Implementation of MessageProcessor for custom message handling
+//   - owner: Page (channel) that owns these messages
+//   - cfg: Configuration settings for the crawler
+//
+// Returns:
+//   - A slice of discovered channel pages from outlinks in processed messages
+//   - An error if message processing encounters critical failures
+//
+// The function handles message status tracking (unfetched, fetching, fetched, deleted),
+// processing each message with the provided processor, and collecting outlinks to
+// other channels for further crawling.
 func processAllMessagesWithProcessor(
 	tdlibClient crawler.TDLibClient,
 	info *channelInfo,
@@ -461,6 +722,23 @@ func processAllMessagesWithProcessor(
 	return discoveredChannels, nil
 }
 
+// resampleMarker updates message statuses by comparing existing messages with
+// newly discovered messages from the current crawl. This function helps identify
+// which messages need reprocessing (still exist) and which ones are no longer
+// available in the channel (deleted).
+//
+// Parameters:
+//   - messages: The existing messages from previous crawls
+//   - discoveredMessages: The messages discovered in the current crawl
+//
+// Returns:
+//   - The updated slice of messages with statuses set to either "resample" or "deleted"
+//
+// The function creates a map of discovered messages for efficient lookup, then
+// iterates through existing messages, marking them for resampling if they still
+// exist in the current crawl, or as deleted if they're no longer present.
+// This mechanism allows the crawler to track message lifecycle and avoid
+// unnecessary processing of already processed or deleted messages.
 func resampleMarker(messages []state.Message, discoveredMessages []state.Message) []state.Message {
 	discoveredMap := make(map[string]bool)
 	for _, msg := range discoveredMessages {
@@ -484,6 +762,21 @@ func resampleMarker(messages []state.Message, discoveredMessages []state.Message
 	return messages
 }
 
+// addNewMessages identifies and returns newly discovered messages that don't exist
+// in the channel's current message collection. This ensures that only new messages
+// are added to the processing queue, avoiding duplicate processing of messages.
+//
+// Parameters:
+//   - discoveredMessages: A slice of newly discovered messages from the current crawl
+//   - owner: The page (channel) that owns these messages
+//
+// Returns:
+//   - A slice containing only the messages that don't already exist in owner.Messages
+//
+// The function creates an efficient lookup map of existing messages using a composite
+// key of ChatID and MessageID, then filters the discovered messages to include only
+// those not already present in the map. This optimizes message processing by avoiding
+// redundant work on messages that have already been processed in previous crawls.
 func addNewMessages(discoveredMessages []state.Message, owner *state.Page) []state.Message {
 	var newMessages []state.Message
 	existingMessages := make(map[string]bool)
@@ -510,7 +803,27 @@ func addNewMessages(discoveredMessages []state.Message, owner *state.Page) []sta
 	return newMessages
 }
 
-// processMessage processes a single message
+// processMessage processes a single Telegram message, extracting its content,
+// metadata, and outlinks to other channels. It includes panic recovery to ensure
+// that failures in processing individual messages don't disrupt the entire crawl.
+//
+// Parameters:
+//   - tdlibClient: An initialized TDLib client connection
+//   - message: The Telegram message to process
+//   - messageId: ID of the message
+//   - chatId: ID of the chat containing the message
+//   - info: Channel information including member count, view count, etc.
+//   - crawlID: Identifier for the current crawl operation
+//   - channelUsername: Username of the channel being processed
+//   - sm: State manager for persistent storage
+//   - cfg: Configuration settings for the crawler
+//
+// Returns:
+//   - A slice of outlink URLs discovered in the message
+//   - An error if message processing fails
+//
+// The function handles message parsing, media download (if applicable),
+// and outlink extraction for discovering more channels to crawl.
 func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, messageId int64, chatId int64, info *channelInfo, crawlID, channelUsername string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]string, error) {
 	// Add a defer/recover block at this level to catch any panics
 	// This ensures we can continue processing other messages even if this one fails
