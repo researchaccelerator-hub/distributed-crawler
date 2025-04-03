@@ -10,19 +10,33 @@ import (
 	"time"
 )
 
-// ConnectionPool manages a pool of Telegram client connections
+// ConnectionPool manages a pool of Telegram client connections to enable
+// efficient concurrent processing of multiple Telegram channels.
+// It handles connection lifecycle, reuse, and load distribution across
+// multiple TDLib database instances to maximize throughput while staying
+// within Telegram's rate limits.
 type ConnectionPool struct {
-	mu              sync.Mutex
-	availableConns  map[string]crawler.TDLibClient
-	inUseConns      map[string]crawler.TDLibClient
-	maxSize         int
-	service         *RealTelegramService
-	storagePrefix   string
-	defaultConfig   common.CrawlerConfig
-	connectionCount int
+	mu              sync.Mutex       // Mutex to protect concurrent access to the pool
+	availableConns  map[string]crawler.TDLibClient // Map of available connections, keyed by connection ID
+	inUseConns      map[string]crawler.TDLibClient // Map of in-use connections, keyed by connection ID
+	maxSize         int              // Maximum number of connections the pool can manage
+	service         *RealTelegramService // Service for creating new connections
+	storagePrefix   string           // Prefix for storage paths
+	defaultConfig   common.CrawlerConfig // Default configuration for new connections
+	connectionCount int              // Counter for assigning unique connection IDs
 }
 
-// NewConnectionPool creates a new connection pool with the specified maximum size
+// NewConnectionPool creates a new connection pool with the specified maximum size.
+// It initializes the pool data structures and, if database URLs are provided in the
+// configuration, preloads connections to minimize startup time for subsequent requests.
+//
+// Parameters:
+//   - maxSize: The maximum number of connections the pool will manage
+//   - storagePrefix: The path prefix where TDLib databases will be stored
+//   - defaultConfig: The default configuration for all connections, including database URLs
+//
+// Returns:
+//   - A fully initialized connection pool ready for use
 func NewConnectionPool(maxSize int, storagePrefix string, defaultConfig common.CrawlerConfig) *ConnectionPool {
 	pool := &ConnectionPool{
 		availableConns: make(map[string]crawler.TDLibClient),
@@ -43,7 +57,16 @@ func NewConnectionPool(maxSize int, storagePrefix string, defaultConfig common.C
 	return pool
 }
 
-// PreloadConnections initializes connections using the provided TDLib database URLs
+// PreloadConnections initializes TDLib connections using the provided database URLs.
+// This function pre-creates connections at startup time to minimize connection
+// initialization delays during crawling operations. It handles loading multiple
+// pre-authenticated TDLib database files from the specified URLs.
+//
+// Parameters:
+//   - databaseURLs: A list of URLs pointing to pre-configured TDLib database archives
+//
+// The function will initialize up to maxSize connections (or the number of URLs provided,
+// whichever is smaller) and add them to the pool's available connections map.
 func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -84,7 +107,18 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 	log.Info().Int("available", len(p.availableConns)).Int("maxSize", p.maxSize).Msg("Connection pool initialized")
 }
 
-// GetConnection acquires a connection from the pool or creates a new one if needed
+// GetConnection acquires a connection from the pool or creates a new one if needed.
+// It first attempts to reuse an existing available connection. If none are available
+// and the pool size limit hasn't been reached, it creates a new connection.
+// If all connections are in use and the pool is at capacity, it returns an error.
+//
+// Parameters:
+//   - ctx: Context for potential cancellation or timeout of the connection acquisition
+//
+// Returns:
+//   - A TDLib client connection ready for use
+//   - A string identifier for the connection, needed when releasing it back to the pool
+//   - An error if the pool is exhausted or connection creation fails
 func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -149,7 +183,15 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 	return nil, "", fmt.Errorf("connection pool exhausted (all %d connections in use)", p.maxSize)
 }
 
-// ReleaseConnection returns a connection to the pool
+// ReleaseConnection returns a connection to the pool, making it available
+// for reuse. This should be called when a caller is finished with a connection
+// acquired through GetConnection.
+//
+// Parameters:
+//   - connID: The connection identifier that was returned by GetConnection
+//
+// If the connection ID doesn't exist in the in-use connections map, a warning
+// is logged and no action is taken.
 func (p *ConnectionPool) ReleaseConnection(connID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -168,7 +210,9 @@ func (p *ConnectionPool) ReleaseConnection(connID string) {
 	log.Debug().Str("connectionID", connID).Msg("Connection returned to pool")
 }
 
-// Close closes all connections in the pool
+// Close shuts down all connections in the pool and resets the pool to an empty state.
+// This should be called when the pool is no longer needed to clean up resources properly.
+// It closes both available and in-use connections.
 func (p *ConnectionPool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -190,7 +234,14 @@ func (p *ConnectionPool) Close() {
 	p.inUseConns = make(map[string]crawler.TDLibClient)
 }
 
-// closeClientSafe safely closes a client connection with timeout
+// closeClientSafe safely closes a TDLib client connection with timeout protection.
+// It handles the case where closing might hang or take too long by setting a timeout.
+//
+// Parameters:
+//   - client: The TDLib client connection to close
+//
+// The function will attempt to close the connection gracefully and log any errors.
+// If closing takes longer than 5 seconds, it will log a warning and continue.
 func closeClientSafe(client crawler.TDLibClient) {
 	if client == nil {
 		return
@@ -214,7 +265,15 @@ func closeClientSafe(client crawler.TDLibClient) {
 	}
 }
 
-// Stats returns statistics about the connection pool
+// Stats returns statistics about the current state of the connection pool,
+// including the number of available connections, in-use connections, and
+// the maximum pool size. This is useful for monitoring and debugging.
+//
+// Returns:
+//   - A map with string keys and int values containing pool statistics:
+//     - "available": Number of connections ready for use
+//     - "inUse": Number of connections currently being used
+//     - "maxSize": Maximum pool capacity
 func (p *ConnectionPool) Stats() map[string]int {
 	p.mu.Lock()
 	defer p.mu.Unlock()

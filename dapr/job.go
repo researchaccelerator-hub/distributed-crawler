@@ -19,10 +19,26 @@ import (
 )
 
 // StartDaprMode initializes and starts a Dapr service in job mode using the provided
-// crawler configuration. It sets up service invocation handlers for scheduling and
-// retrieving jobs, and registers job event handlers for predefined job names. The
-// service listens for Dapr requests on the specified port and logs relevant information
-// and errors during the process.
+// crawler configuration. 
+//
+// This function:
+// 1. Initializes a Dapr client for interacting with the Dapr runtime
+// 2. Creates a gRPC service that listens on the configured port
+// 3. Registers service invocation handlers for:
+//    - scheduleJob: For scheduling new crawling jobs
+//    - getJob: For retrieving information about existing jobs
+// 4. Registers job event handlers for predefined job names
+// 5. Starts the service and keeps it running until terminated
+//
+// The function uses the Dapr Jobs API to schedule and manage crawling tasks,
+// which allows for distributed execution and better reliability. Jobs can be
+// scheduled with specific due times and will be executed by the Dapr runtime
+// based on that schedule.
+//
+// Parameters:
+//   - crawlerCfg: Configuration settings for the crawler, including Dapr port and other settings
+//
+// The function will panic if it fails to create the Dapr client or start the service.
 func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 	log.Info().Msg("Starting crawler in DAPR job mode")
 	log.Printf("Listening on port %d for DAPR requests", crawlerCfg.DaprPort)

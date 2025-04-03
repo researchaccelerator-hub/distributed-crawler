@@ -37,7 +37,26 @@ type DaprStateManager struct {
 	urlCacheMutex   sync.RWMutex      // Separate mutex for URL cache to reduce contention
 }
 
-// NewDaprStateManager creates a new DaprStateManager
+// NewDaprStateManager creates a new Dapr-backed state manager for storing and retrieving crawler state.
+//
+// This function initializes a state manager that uses Dapr's state store and binding components
+// to persist crawler state, including:
+// - Page information for each Telegram channel being crawled
+// - Layer structure representing the depth of crawling
+// - Metadata about the crawl execution
+// - Media processing cache to avoid duplicate downloads
+// - URL deduplication cache to prevent processing the same URLs repeatedly
+//
+// The Dapr state manager enables distributed and resilient state management by leveraging
+// Dapr's state store capabilities, which can be backed by various databases (Redis, MongoDB, etc.)
+// based on the Dapr component configuration.
+//
+// Parameters:
+//   - config: Configuration containing storage paths, crawl identifiers, and Dapr-specific settings
+//
+// Returns:
+//   - A fully initialized DaprStateManager ready to manage crawler state
+//   - An error if initialization fails (e.g., Dapr client creation fails)
 func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 	base := NewBaseStateManager(config)
 
