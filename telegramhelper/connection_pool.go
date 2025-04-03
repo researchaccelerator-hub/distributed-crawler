@@ -35,7 +35,8 @@ func NewConnectionPool(maxSize int, storagePrefix string, defaultConfig common.C
 	
 	// If there are pre-configured database URLs, initialize connections with them
 	if len(defaultConfig.TDLibDatabaseURLs) > 0 {
-		log.Info().Msgf("Initializing connection pool with %d pre-configured database URLs", len(defaultConfig.TDLibDatabaseURLs))
+		log.Info().Msgf("Initializing connection pool with %d pre-configured database URLs and max size %d", 
+			len(defaultConfig.TDLibDatabaseURLs), maxSize)
 		pool.PreloadConnections(defaultConfig.TDLibDatabaseURLs)
 	}
 	
@@ -52,6 +53,9 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 	if len(databaseURLs) < maxToInitialize {
 		maxToInitialize = len(databaseURLs)
 	}
+	
+	log.Info().Msgf("Pre-loading %d connections out of %d database URLs (pool max size: %d)", 
+		maxToInitialize, len(databaseURLs), p.maxSize)
 	
 	log.Info().Msgf("Preloading %d connections to the pool", maxToInitialize)
 	
