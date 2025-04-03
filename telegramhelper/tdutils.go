@@ -26,7 +26,7 @@ import (
 //   - An error if there is a failure during removal; otherwise, nil.
 func removeMultimedia(filedir string) error {
 	log.Debug().Str("directory", filedir).Msg("Attempting to remove multimedia directory contents")
-	
+
 	// Check if the directory exists
 	info, err := os.Stat(filedir)
 	if os.IsNotExist(err) {
@@ -53,7 +53,7 @@ func removeMultimedia(filedir string) error {
 		}
 		return nil
 	})
-	
+
 	log.Debug().
 		Str("directory", filedir).
 		Int("file_count", fileCount).
@@ -76,11 +76,11 @@ func removeMultimedia(filedir string) error {
 			log.Error().Err(err).Str("path", path).Msg("Failed to remove path")
 			return err
 		}
-		
+
 		log.Debug().Str("path", path).Msg("Removed path successfully")
 		return nil
 	})
-	
+
 	if err != nil {
 		log.Error().Err(err).Str("directory", filedir).Msg("Error removing directory contents")
 		return err
@@ -207,16 +207,15 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 			Float64("limit_mb", fileSizeLimit).
 			Str("file_id", fileID).
 			Msg("File exceeds size limit, skipping storage")
-		
+
 		// Clean up the file even though we're not storing it
 		if e := os.Remove(path); e != nil {
 			log.Warn().Err(e).Str("path", path).Msg("Failed to remove oversized file")
 		}
-		
+
 		return "", fmt.Errorf("file size is too large (%.2f MB)", sizeInMB)
 	}
 
-	
 	// Store the file
 	storageLocation, err := sm.StoreFile(channelName, path, remoteid)
 	if err != nil {
@@ -233,7 +232,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 			Float64("size_mb", sizeInMB).
 			Msg("File stored successfully")
 	}
-	
+
 	// Clean up the local file regardless of storage success
 	if e := os.Remove(path); e != nil {
 		log.Warn().
@@ -252,7 +251,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 			Msg("Failed to mark media as processed")
 		return "", err
 	}
-	
+
 	log.Debug().
 		Str("remote_id", remoteid).
 		Str("channel", channelName).
@@ -623,7 +622,7 @@ var ParseMessage = func(
 func checkFileCache(sm state.StateManagementInterface, uniqueid string) (string, bool, error) {
 	log.Debug().Str("unique_id", uniqueid).Msg("Checking if media file already processed")
 	exists, err := sm.HasProcessedMedia(uniqueid)
-	
+
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -638,7 +637,7 @@ func checkFileCache(sm state.StateManagementInterface, uniqueid string) (string,
 			Str("unique_id", uniqueid).
 			Msg("Media file not found in cache, needs processing")
 	}
-	
+
 	return "", exists, err
 }
 
@@ -657,7 +656,7 @@ func checkFileCache(sm state.StateManagementInterface, uniqueid string) (string,
 // The function includes error handling and logs relevant information, including any panics that are recovered.
 func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManagementInterface, downloadid string) (string, string, error) {
 	log.Debug().Str("download_id", downloadid).Msg("Fetching file from Telegram")
-	
+
 	defer func() {
 		if r := recover(); r != nil {
 			stack := string(debug.Stack())
@@ -682,14 +681,14 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 			Msg("Failed to get remote file information")
 		return "", "", err
 	}
-	
+
 	log.Debug().
 		Str("download_id", downloadid).
 		Str("file_id", fmt.Sprintf("%d", f.Id)).
 		Str("unique_id", f.Remote.UniqueId).
-		Int32("size", f.Size).
+		Int32("size", int32(f.Size)).
 		Msg("Retrieved remote file information")
-	
+
 	// Check if we've already processed this file
 	if existingPath, exists, err := checkFileCache(sm, f.Remote.UniqueId); err != nil {
 		log.Error().
@@ -711,7 +710,7 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 		Str("download_id", downloadid).
 		Str("file_id", fmt.Sprintf("%d", f.Id)).
 		Msg("Downloading file from Telegram")
-		
+
 	downloadedFile, err := tdlibClient.DownloadFile(&client.DownloadFileRequest{
 		FileId:      f.Id,
 		Priority:    1,
@@ -741,10 +740,10 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 	log.Info().
 		Str("path", downloadedFile.Local.Path).
 		Str("unique_id", f.Remote.UniqueId).
-		Int32("downloaded_size", downloadedFile.Size).
+		Int32("downloaded_size", int32(downloadedFile.Size)).
 		Bool("downloaded_from_memory", downloadedFile.Local.IsDownloadingCompleted).
 		Msg("File downloaded successfully")
-		
+
 	return downloadedFile.Local.Path, f.Remote.UniqueId, nil
 }
 
@@ -760,10 +759,10 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 //     that were found in the message
 //
 // The function searches for channels in three ways:
-//   1. TextEntityTypeTextUrl entities - formatted links with custom text
-//   2. TextEntityTypeMention entities - @username mentions
-//   3. TextEntityTypeUrl entities - plain URLs in text
-//   4. Plain text regex matching for t.me links that might not be formatted as entities
+//  1. TextEntityTypeTextUrl entities - formatted links with custom text
+//  2. TextEntityTypeMention entities - @username mentions
+//  3. TextEntityTypeUrl entities - plain URLs in text
+//  4. Plain text regex matching for t.me links that might not be formatted as entities
 //
 // Each channel name is deduplicated using a map before being returned,
 // ensuring that the same channel isn't added multiple times even if referenced
