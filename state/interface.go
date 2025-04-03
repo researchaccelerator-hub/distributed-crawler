@@ -31,6 +31,7 @@ type StateManagementInterface interface {
 	// Crawl management
 	GetPreviousCrawls() ([]string, error)
 	UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error
+	FindIncompleteCrawl(crawlID string) (string, bool, error) // Returns executionID, exists, error
 
 	// Media cache
 	HasProcessedMedia(mediaID string) (bool, error)
@@ -46,20 +47,26 @@ type StateManagerFactory interface {
 	Create(config Config) (StateManagementInterface, error)
 }
 
+// MaxPagesConfig contains configuration for the max pages limit functionality
+type MaxPagesConfig struct {
+	// Maximum number of pages to crawl (default: 108000)
+	MaxPages int
+}
+
 // Config contains common configuration for all state manager implementations
 type Config struct {
 	// Base storage location (filesystem path, container name, etc.)
 	StorageRoot string
 
-	// Job and crawl identifiers
-	JobID            string
+	// Crawl identifiers
 	CrawlID          string
 	CrawlExecutionID string
 
 	// Specific configuration options for different backends
-	AzureConfig *AzureConfig
-	DaprConfig  *DaprConfig
-	LocalConfig *LocalConfig
+	AzureConfig   *AzureConfig
+	DaprConfig    *DaprConfig
+	LocalConfig   *LocalConfig
+	MaxPagesConfig *MaxPagesConfig
 }
 
 // AzureConfig contains Azure-specific configuration

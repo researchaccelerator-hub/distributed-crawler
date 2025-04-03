@@ -16,6 +16,7 @@ import (
 	daprc "github.com/dapr/go-sdk/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -27,12 +28,13 @@ const (
 // DaprStateManager implements StateManagementInterface using Dapr
 type DaprStateManager struct {
 	*BaseStateManager
-	client         *daprc.Client
-	stateStoreName string
-	storageBinding string
-	mediaCache     map[string]MediaCacheItem
-	urlCache       map[string]string // Maps URL -> "crawlID:pageID" for all known URLs
-	urlCacheMutex  sync.RWMutex      // Separate mutex for URL cache to reduce contention
+	client          *daprc.Client
+	stateStoreName  string
+	storageBinding  string
+	mediaCache      map[string]MediaCacheItem
+	mediaCacheMutex sync.RWMutex      // Separate mutex for media cache to reduce contention
+	urlCache        map[string]string // Maps URL -> "crawlID:pageID" for all known URLs
+	urlCacheMutex   sync.RWMutex      // Separate mutex for URL cache to reduce contention
 }
 
 // NewDaprStateManager creates a new DaprStateManager
@@ -139,7 +141,86 @@ func (dsm *DaprStateManager) GetPreviousCrawls() ([]string, error) {
 
 // Initialize sets up the state in Dapr
 func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
-	// Try to load metadata and layer structure
+	log.Info().Str("crawlID", dsm.config.CrawlID).Str("executionID", dsm.config.CrawlExecutionID).
+		Msg("Initializing state manager")
+
+	// First, check if we're resuming a specific execution ID
+	// If so, try to load the layer map for this execution ID directly
+	if dsm.config.CrawlExecutionID != "" && dsm.config.CrawlExecutionID != dsm.config.CrawlID {
+		log.Info().Str("executionID", dsm.config.CrawlExecutionID).
+			Msg("Resuming with specific execution ID - trying to load state")
+
+		// First try to load the layer map for the specific execution ID
+		// This is the most direct method when we know the execution ID
+		layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
+		layerMapResponse, err := (*dsm.client).GetState(
+			context.Background(),
+			dsm.stateStoreName,
+			layerMapKey,
+			nil,
+		)
+
+		if err == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+			// Found layer map for this execution ID, load it
+			err = json.Unmarshal(layerMapResponse.Value, &dsm.layerMap)
+			if err != nil {
+				log.Warn().Err(err).Str("executionID", dsm.config.CrawlExecutionID).
+					Msg("Failed to parse layer map for execution ID, but continuing")
+			} else {
+				log.Info().Str("executionID", dsm.config.CrawlExecutionID).
+					Int("layerCount", len(dsm.layerMap)).
+					Msg("Successfully loaded layer map for execution ID")
+
+				// Also load the URL cache
+				err = dsm.loadURLsForCrawl(dsm.config.CrawlExecutionID)
+				if err != nil {
+					log.Warn().Err(err).Str("executionID", dsm.config.CrawlExecutionID).
+						Msg("Failed to load URLs for execution ID, but continuing")
+				}
+
+				// Load all the pages from this layer map into memory with "unfetched" status
+				err = dsm.loadPagesIntoMemory(dsm.config.CrawlExecutionID, false)
+				if err != nil {
+					log.Warn().Err(err).Str("executionID", dsm.config.CrawlExecutionID).
+						Msg("Failed to load pages into memory for execution ID, but continuing")
+				}
+
+				// Try to load metadata too so we have complete state
+				metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+				metadataResponse, err := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					metadataKey,
+					nil,
+				)
+
+				if err == nil && metadataResponse.Value != nil {
+					err = json.Unmarshal(metadataResponse.Value, &dsm.metadata)
+					if err != nil {
+						log.Warn().Err(err).Msg("Failed to parse metadata, but continuing")
+					}
+				}
+
+				// After loading state, check if we have any pages at layer 0
+				dsm.mutex.RLock()
+				layerZeroPages, hasLayerZero := dsm.layerMap[0]
+				dsm.mutex.RUnlock()
+
+				if !hasLayerZero || len(layerZeroPages) == 0 {
+					log.Warn().Msg("No layer 0 pages found in loaded state, will create from seed URLs")
+				} else {
+					log.Info().Int("pageCount", len(layerZeroPages)).Msg("Loaded layer 0 pages from previous execution")
+					return nil
+				}
+			}
+		} else {
+			log.Warn().Str("executionID", dsm.config.CrawlExecutionID).
+				Msg("Could not find layer map for execution ID directly, trying general initialization")
+		}
+	}
+
+	// Regular initialization path - try to load metadata and layer structure
+	// using crawl ID rather than execution ID
 	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
 	metadataResponse, err := (*dsm.client).GetState(
 		context.Background(),
@@ -155,10 +236,25 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 			return fmt.Errorf("failed to parse metadata: %w", err)
 		}
 
-		// Try each crawl ID in reverse order until we find one with a valid layer map
-		var loadedLayerMap bool = false
+		// If we're resuming a specific execution, prioritize that one
+		var crawlIDsToTry []string
+		if dsm.config.CrawlExecutionID != "" && dsm.config.CrawlExecutionID != dsm.config.CrawlID {
+			// Put the execution ID first in the list to try
+			crawlIDsToTry = append(crawlIDsToTry, dsm.config.CrawlExecutionID)
+		}
+
+		// Add all previous crawl IDs in reverse order (newest first)
 		for i := len(dsm.metadata.PreviousCrawlID) - 1; i >= 0; i-- {
-			crawlID := dsm.metadata.PreviousCrawlID[i]
+			crawlIDsToTry = append(crawlIDsToTry, dsm.metadata.PreviousCrawlID[i])
+		}
+
+		// Try each crawl ID until we find one with a valid layer map
+		var loadedLayerMap bool = false
+		for _, crawlID := range crawlIDsToTry {
+			// Skip if this is a duplicate in our list
+			if crawlID == dsm.config.CrawlExecutionID && crawlIDsToTry[0] == dsm.config.CrawlExecutionID {
+				continue
+			}
 
 			// Load layer structure
 			layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
@@ -184,7 +280,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 					continue // Try next crawl ID
 				}
 
-				// NEW CODE: Load all pages from this layer map into memory
+				// Load all pages from this layer map into memory with reset status
 				err = dsm.loadPagesIntoMemory(crawlID, false)
 				if err != nil {
 					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load pages into memory")
@@ -197,54 +293,33 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 			}
 		}
 
-		if !loadedLayerMap {
-			crawlID := "20250327185808"
-
-			// Load layer structure
-			layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
-			layerMapResponse, err := (*dsm.client).GetState(
-				context.Background(),
-				dsm.stateStoreName,
-				layerMapKey,
-				nil,
-			)
-
-			if err == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
-				// Layer map exists and is not empty, load it
-				err = json.Unmarshal(layerMapResponse.Value, &dsm.layerMap)
-				if err != nil {
-					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to parse layer map for crawl ID")
-
-				}
-
-				// Load URL cache for this crawl
-				err = dsm.loadURLsForCrawl(crawlID)
-				if err != nil {
-					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load URLs for crawl")
-
-				}
-
-				// NEW CODE: Load all pages from this layer map into memory
-				err = dsm.loadPagesIntoMemory(crawlID, true)
-				if err != nil {
-					log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to load pages into memory")
-
-				}
-
-				log.Info().Str("crawlID", crawlID).Msg("Successfully loaded existing state structure from DAPR")
-				loadedLayerMap = true
-
-			}
-		}
+		// No hardcoded fallback needed
 
 		if !loadedLayerMap {
 			log.Warn().Msg("Could not find any valid layer maps in previous crawls")
-		}
+		} else {
+			// Check if we have any layer 0 pages before returning
+			dsm.mutex.RLock()
+			layerZeroPages, hasLayerZero := dsm.layerMap[0]
+			dsm.mutex.RUnlock()
 
-		return nil
+			if !hasLayerZero || len(layerZeroPages) == 0 {
+				log.Warn().Msg("No layer 0 pages found in loaded state, will create from seed URLs")
+			} else {
+				log.Info().Int("pageCount", len(layerZeroPages)).Msg("Successfully loaded layer 0 pages")
+				return nil
+			}
+		}
 	}
 
-	// Load URLs from all previous crawls
+	// If we reached here, either:
+	// 1. No previous state was found, or
+	// 2. We found previous state but there are no layer 0 pages
+	// So we need to initialize with seed URLs
+
+	log.Info().Msg("Initializing with new seed URLs")
+
+	// Load URLs from all previous crawls for deduplication
 	err = dsm.initializeURLCache()
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to initialize URL cache from previous crawls")
@@ -262,7 +337,15 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	}
 	dsm.urlCacheMutex.RUnlock()
 
-	log.Info().Int("originalCount", len(seedURLs)).Int("uniqueCount", len(uniqueSeedURLs)).Msg("Filtered seed URLs against previous crawls")
+	log.Info().Int("originalCount", len(seedURLs)).Int("uniqueCount", len(uniqueSeedURLs)).
+		Msg("Filtered seed URLs against previous crawls")
+
+	// If we have no unique seed URLs, it's probably a problem
+	if len(uniqueSeedURLs) == 0 && len(seedURLs) > 0 {
+		log.Warn().Msg("All seed URLs were filtered as duplicates - this may be unintended")
+		// Use the original seed URLs anyway
+		uniqueSeedURLs = seedURLs
+	}
 
 	// Create pages from the unique seed URLs
 	pages := make([]Page, 0, len(uniqueSeedURLs))
@@ -274,6 +357,12 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 			Status:    "unfetched",
 			Timestamp: time.Now(),
 		})
+	}
+
+	// In case we don't have any seed URLs, don't try to create an empty layer
+	if len(pages) == 0 {
+		log.Warn().Msg("No seed URLs available - cannot initialize crawler")
+		return fmt.Errorf("cannot initialize crawler with zero seed URLs")
 	}
 
 	// Add initial pages
@@ -375,24 +464,20 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 		return nil
 	}
 
-	dsm.mutex.Lock()
-	defer dsm.mutex.Unlock()
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// Determine the depth
 	depth := pages[0].Depth
 
-	// Initialize the layer if it doesn't exist
-	if _, exists := dsm.layerMap[depth]; !exists {
-		dsm.layerMap[depth] = make([]string, 0)
-	}
-
-	// Track the IDs of pages we're actually adding (after deduplication)
-	addedIDs := make([]string, 0)
+	// First pass: filter out duplicate URLs and prepare pages to add
+	// This minimizes the time we need to hold locks
+	var pagesToAdd []Page
 	duplicateCount := 0
 
-	// Save each page individually
+	// Check for duplicates using read lock on URL cache
 	for i := range pages {
-		// Check if URL already exists in any crawl using our cached map
 		dsm.urlCacheMutex.RLock()
 		existingID, exists := dsm.urlCache[pages[i].URL]
 		dsm.urlCacheMutex.RUnlock()
@@ -413,38 +498,82 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 			pages[i].Timestamp = time.Now()
 		}
 
-		// Store the page in memory
-		dsm.pageMap[pages[i].ID] = pages[i]
+		// Add to our list of pages to process
+		pagesToAdd = append(pagesToAdd, pages[i])
+	}
 
-		// Add URL to our URL cache for future deduplication
-		dsm.urlCacheMutex.Lock()
-		dsm.urlCache[pages[i].URL] = fmt.Sprintf("%s:%s", dsm.config.CrawlExecutionID, pages[i].ID)
-		dsm.urlCacheMutex.Unlock()
+	// If all pages were duplicates, return early
+	if len(pagesToAdd) == 0 {
+		log.Debug().Msgf("All %d pages were duplicates, skipping layer addition", len(pages))
+		return nil
+	}
+
+	// Create a wait group to track parallel page saves
+	var eg errgroup.Group
+	var addedIDs []string
+
+	// Take a write lock to update in-memory structures
+	dsm.mutex.Lock()
+
+	// Initialize the layer if it doesn't exist
+	if _, exists := dsm.layerMap[depth]; !exists {
+		dsm.layerMap[depth] = make([]string, 0)
+	}
+
+	// Update in-memory structures for each page
+	for i := range pagesToAdd {
+		page := pagesToAdd[i]
+
+		// Store the page in memory
+		dsm.pageMap[page.ID] = page
 
 		// Add to layer map
-		dsm.layerMap[depth] = append(dsm.layerMap[depth], pages[i].ID)
-
-		// Marshal page data for Dapr
-		pageData, err := json.Marshal(pages[i])
-		if err != nil {
-			return fmt.Errorf("failed to marshal page: %w", err)
-		}
-
-		// Save page to Dapr
-		pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, pages[i].ID)
-		err = (*dsm.client).SaveState(
-			context.Background(),
-			dsm.stateStoreName,
-			pageKey,
-			pageData,
-			nil,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to save page to Dapr: %w", err)
-		}
+		dsm.layerMap[depth] = append(dsm.layerMap[depth], page.ID)
 
 		// Track this ID as successfully added
-		addedIDs = append(addedIDs, pages[i].ID)
+		addedIDs = append(addedIDs, page.ID)
+
+		// Capture the page for the closure
+		pageCopy := page
+
+		// Launch a goroutine to save this page to Dapr
+		eg.Go(func() error {
+			// Marshal page data for Dapr
+			pageData, err := json.Marshal(pageCopy)
+			if err != nil {
+				return fmt.Errorf("failed to marshal page %s: %w", pageCopy.ID, err)
+			}
+
+			// Save page to Dapr
+			pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, pageCopy.ID)
+			err = (*dsm.client).SaveState(
+				ctx,
+				dsm.stateStoreName,
+				pageKey,
+				pageData,
+				nil,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to save page %s to Dapr: %w", pageCopy.ID, err)
+			}
+
+			return nil
+		})
+	}
+
+	// Update URL cache after processing - we do this separately to minimize lock contention
+	dsm.urlCacheMutex.Lock()
+	for _, page := range pagesToAdd {
+		dsm.urlCache[page.URL] = fmt.Sprintf("%s:%s", dsm.config.CrawlExecutionID, page.ID)
+	}
+	dsm.urlCacheMutex.Unlock()
+
+	// Release main lock
+	dsm.mutex.Unlock()
+
+	// Wait for all page saves to complete
+	if err := eg.Wait(); err != nil {
+		return fmt.Errorf("error saving pages to Dapr: %w", err)
 	}
 
 	log.Debug().Msgf("Added %d unique pages to depth %d (filtered out %d duplicates from current and previous crawls)",
@@ -454,17 +583,41 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 	return dsm.SaveState()
 }
 
-// In DaprStateManager
+// UpdateCrawlMetadata updates the crawl metadata with the provided values
+// and saves it to the Dapr state store in a non-blocking way
 func (dsm *DaprStateManager) UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error {
+	// Create a context with timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// First update in-memory metadata using the base implementation
+	// BaseStateManager already handles locking appropriately
 	if err := dsm.BaseStateManager.UpdateCrawlMetadata(crawlID, metadata); err != nil {
 		return err
 	}
 
-	// Get the current metadata from the base state manager
-	dsm.mutex.RLock()
-	metadataCopy := dsm.metadata // Use the direct metadata field instead of state.Metadata
-	dsm.mutex.RUnlock()
+	// Make a clean copy of the metadata to work with
+	var metadataCopy CrawlMetadata
+
+	// Use an immediately-invoked function to scope the lock
+	func() {
+		// Use a read lock to copy the metadata
+		dsm.mutex.RLock()
+		defer dsm.mutex.RUnlock()
+
+		// Deep copy the metadata
+		metadataCopy = dsm.metadata
+	}()
+
+	// Add any missing fields outside the lock
+	if metadataCopy.ExecutionID == "" {
+		metadataCopy.ExecutionID = dsm.config.CrawlExecutionID
+	}
+
+	// If explicitly setting to completed, record end time if not set
+	if status, ok := metadata["status"]; ok && status == "completed" && metadataCopy.EndTime.IsZero() {
+		metadataCopy.EndTime = time.Now()
+	}
 
 	// Marshal metadata to JSON
 	metadataData, err := json.Marshal(metadataCopy)
@@ -472,64 +625,184 @@ func (dsm *DaprStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Store metadata in DAPR using appropriate key
-	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
-	err = (*dsm.client).SaveState(
-		context.Background(),
-		dsm.stateStoreName,
-		metadataKey,
-		metadataData,
-		nil,
-	)
+	// Use errgroup to perform save operations concurrently
+	var eg errgroup.Group
 
-	if err != nil {
-		return fmt.Errorf("failed to save metadata to DAPR: %w", err)
+	// 1. Save with formatted key
+	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
+		if err != nil {
+			log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
+			return err
+		}
+		return nil
+	})
+
+	// 2. Save with direct crawl ID key
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
+		if err != nil {
+			log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+		}
+		// Continue even if this fails as it's redundant
+		return nil
+	})
+
+	// 3. Save with execution ID key
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
+		if err != nil {
+			log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
+		}
+		// Continue even if this fails as it's redundant
+		return nil
+	})
+
+	// Wait for all operations to complete, fail only if the primary one fails
+	if err := eg.Wait(); err != nil {
+		return fmt.Errorf("failed to update metadata: %w", err)
 	}
 
-	log.Debug().Str("crawlID", crawlID).Msg("Crawl metadata updated in DAPR")
+	log.Info().
+		Str("crawlID", crawlID).
+		Str("executionID", dsm.config.CrawlExecutionID).
+		Str("status", metadataCopy.Status).
+		Msg("Crawl metadata updated in DAPR")
+
 	return nil
 }
 
 // SaveState persists the current state to Dapr
+// This implementation minimizes lock contention by using goroutines for async writes
 func (dsm *DaprStateManager) SaveState() error {
-	// Save metadata
-	metadataData, err := json.Marshal(dsm.metadata)
+	// Use a context with timeout for all DAPR operations
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Copy all data we need to save under a short-lived lock
+	var metadataCopy CrawlMetadata
+	var layerMapCopy map[int][]string
+
+	// Copy metadata with a read-write lock
+	func() {
+		dsm.mutex.Lock()
+		defer dsm.mutex.Unlock()
+
+		// Ensure execution ID is set
+		if dsm.metadata.ExecutionID == "" {
+			dsm.metadata.ExecutionID = dsm.config.CrawlExecutionID
+		}
+
+		// Ensure status is set - default to "running" unless explicitly completed
+		if dsm.metadata.Status == "" {
+			dsm.metadata.Status = "running"
+		}
+
+		// Ensure CrawlID is set
+		if dsm.metadata.CrawlID == "" {
+			dsm.metadata.CrawlID = dsm.config.CrawlID
+		}
+
+		// Create a deep copy of metadata
+		metadataCopy = dsm.metadata
+
+		// Create a deep copy of the layer map
+		layerMapCopy = make(map[int][]string, len(dsm.layerMap))
+		for depth, ids := range dsm.layerMap {
+			// Make a copy of the slice
+			idsCopy := make([]string, len(ids))
+			copy(idsCopy, ids)
+			layerMapCopy[depth] = idsCopy
+		}
+	}()
+
+	// Now that we have copies of all data, release the lock and process asynchronously
+
+	// Marshal metadata and layer map
+	metadataData, err := json.Marshal(metadataCopy)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
-	err = (*dsm.client).SaveState(
-		context.Background(),
-		dsm.stateStoreName,
-		metadataKey,
-		metadataData,
-		nil,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to save metadata: %w", err)
-	}
-
-	// Save layer structure
-	layerMapData, err := json.Marshal(dsm.layerMap)
+	layerMapData, err := json.Marshal(layerMapCopy)
 	if err != nil {
 		return fmt.Errorf("failed to marshal layer map: %w", err)
 	}
 
-	layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
-	err = (*dsm.client).SaveState(
-		context.Background(),
-		dsm.stateStoreName,
-		layerMapKey,
-		layerMapData,
-		nil,
-	)
+	// Use errgroup to manage all concurrent DAPR operations
+	var eg errgroup.Group
 
-	if err != nil {
-		return fmt.Errorf("failed to save layer map: %w", err)
+	// 1. Save metadata with different key formats
+	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
+		if err != nil {
+			log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
+			return err
+		}
+		return nil
+	})
+
+	// Also save with direct crawl ID
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
+		if err != nil {
+			log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+		}
+		return nil // Non-critical, continue even if it fails
+	})
+
+	// Also save with execution ID
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
+		if err != nil {
+			log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
+		}
+		return nil // Non-critical, continue even if it fails
+	})
+
+	// 2. Save layer map data
+	layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, layerMapKey, layerMapData, nil)
+		if err != nil {
+			log.Error().Err(err).Str("key", layerMapKey).Msg("Failed to save layer map")
+			return err
+		}
+		return nil
+	})
+
+	// Save with alternate key format as well
+	alternateLayerMapKey := fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID)
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, alternateLayerMapKey, layerMapData, nil)
+		if err != nil {
+			log.Warn().Err(err).Str("key", alternateLayerMapKey).Msg("Failed to save layer map with alternate key")
+		}
+		return nil // Non-critical, continue even if it fails
+	})
+
+	// 3. Save active crawl indicator
+	activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
+	activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
+		dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
+
+	eg.Go(func() error {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
+		if err != nil {
+			log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator")
+		}
+		return nil // Non-critical, continue even if it fails
+	})
+
+	// Wait for all operations to complete
+	if err := eg.Wait(); err != nil {
+		return fmt.Errorf("failed to save state: %w", err)
 	}
 
+	log.Debug().Str("crawlID", dsm.config.CrawlID).Str("executionID", dsm.config.CrawlExecutionID).
+		Msg("Successfully saved state to DAPR")
 	return nil
 }
 
@@ -647,15 +920,22 @@ func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fi
 
 // HasProcessedMedia checks if media has been processed before
 func (dsm *DaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
-	// Check in memory cache first
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Check in memory cache first with read lock
+	dsm.mediaCacheMutex.RLock()
 	if _, exists := dsm.mediaCache[mediaID]; exists {
+		dsm.mediaCacheMutex.RUnlock()
 		return true, nil
 	}
+	dsm.mediaCacheMutex.RUnlock()
 
 	// If not in memory, check Dapr state store
 	cacheKey := dsm.getMediaCacheKey()
 	response, err := (*dsm.client).GetState(
-		context.Background(),
+		ctx,
 		dsm.stateStoreName,
 		cacheKey,
 		nil,
@@ -677,30 +957,50 @@ func (dsm *DaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 		return false, fmt.Errorf("failed to parse media cache: %w", err)
 	}
 
-	// Update memory cache
-	dsm.mediaCache = cacheItems
+	// Update memory cache with the write lock
+	dsm.mediaCacheMutex.Lock()
+	// Merge with existing cache instead of replacing
+	if dsm.mediaCache == nil {
+		dsm.mediaCache = cacheItems
+	} else {
+		for k, v := range cacheItems {
+			dsm.mediaCache[k] = v
+		}
+	}
 
-	// Check if mediaID exists
-	_, exists := cacheItems[mediaID]
+	// Check if mediaID exists while we still have the lock
+	_, exists := dsm.mediaCache[mediaID]
+	dsm.mediaCacheMutex.Unlock()
+
 	return exists, nil
 }
 
 func (dsm *DaprStateManager) UpdatePage(page Page) error {
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Make a copy of the page first
+	pageCopy := page
+
 	// First update in memory
-	err := dsm.BaseStateManager.UpdatePage(page)
+	err := dsm.BaseStateManager.UpdatePage(pageCopy)
 	if err != nil {
 		return err
 	}
 
-	// Then save to DAPR
-	pageData, err := json.Marshal(page)
+	// Marshal page data outside any locks
+	pageData, err := json.Marshal(pageCopy)
 	if err != nil {
 		return fmt.Errorf("failed to marshal page: %w", err)
 	}
 
-	pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, page.ID)
+	// Save to DAPR asynchronously
+	pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, pageCopy.ID)
+
+	// Save the page to the state store
 	err = (*dsm.client).SaveState(
-		context.Background(),
+		ctx,
 		dsm.stateStoreName,
 		pageKey,
 		pageData,
@@ -716,21 +1016,33 @@ func (dsm *DaprStateManager) UpdatePage(page Page) error {
 
 // MarkMediaAsProcessed marks media as processed
 func (dsm *DaprStateManager) MarkMediaAsProcessed(mediaID string) error {
-	// Add to memory cache
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Add to memory cache with the dedicated media cache mutex
+	dsm.mediaCacheMutex.Lock()
 	dsm.mediaCache[mediaID] = MediaCacheItem{
 		ID:        mediaID,
 		FirstSeen: time.Now(),
 	}
 
-	// Save cache to Dapr
-	cacheData, err := json.Marshal(dsm.mediaCache)
+	// Create a copy of the entire cache to avoid holding the lock during serialization and IO
+	mediaCacheCopy := make(map[string]MediaCacheItem, len(dsm.mediaCache))
+	for k, v := range dsm.mediaCache {
+		mediaCacheCopy[k] = v
+	}
+	dsm.mediaCacheMutex.Unlock()
+
+	// Save cache to Dapr - working with the copy instead of the original
+	cacheData, err := json.Marshal(mediaCacheCopy)
 	if err != nil {
 		return fmt.Errorf("failed to marshal media cache: %w", err)
 	}
 
 	cacheKey := dsm.getMediaCacheKey()
 	err = (*dsm.client).SaveState(
-		context.Background(),
+		ctx,
 		dsm.stateStoreName,
 		cacheKey,
 		cacheData,
@@ -748,6 +1060,439 @@ func (dsm *DaprStateManager) MarkMediaAsProcessed(mediaID string) error {
 func (dsm *DaprStateManager) Close() error {
 	// No special cleanup needed
 	return nil
+}
+
+// FindIncompleteCrawl looks for an incomplete crawl with the given crawl ID
+// in the Dapr state store and returns its execution ID if found
+func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) {
+	// Skip the base implementation check which only works for in-memory state
+	// Instead, directly check the persisted state in Dapr
+
+	log.Info().Str("crawlID", crawlID).Msg("Checking for incomplete crawl in Dapr state store")
+
+	// Try all possible variations of metadata keys
+	// First try the direct key format
+	metadataKey := fmt.Sprintf("%s/metadata", crawlID)
+	log.Debug().Str("lookingForKey", metadataKey).Msg("Checking metadata key")
+
+	// Also look for the crawl ID directly
+	response, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		crawlID,
+		nil,
+	)
+
+	// If direct crawl ID has data, check that first
+	if err == nil && response.Value != nil {
+		log.Info().Str("crawlID", crawlID).Msg("Found direct crawl ID data")
+		var metadata CrawlMetadata
+		err = json.Unmarshal(response.Value, &metadata)
+		if err == nil && metadata.ExecutionID != "" {
+			// Check if the crawl is incomplete
+			if metadata.Status != "completed" {
+				log.Info().
+					Str("crawlID", crawlID).
+					Str("executionID", metadata.ExecutionID).
+					Str("status", metadata.Status).
+					Msg("Found incomplete crawl with direct key")
+
+				// Verify that the execution ID has a layer map before returning it
+				layerMapKey := fmt.Sprintf("%s/layer_map", metadata.ExecutionID)
+				layerMapResponse, lmErr := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					layerMapKey,
+					nil,
+				)
+
+				if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+					log.Info().
+						Str("executionID", metadata.ExecutionID).
+						Msg("Verified layer map exists for execution ID")
+					return metadata.ExecutionID, true, nil
+				} else {
+					log.Warn().
+						Str("executionID", metadata.ExecutionID).
+						Err(lmErr).
+						Msg("Found execution ID but it has no layer map, continuing search")
+				}
+			}
+		}
+	}
+
+	// Now check the formatted metadata key
+	response, err = (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		metadataKey,
+		nil,
+	)
+
+	// If we got metadata for this crawl ID
+	if err == nil && response.Value != nil {
+		var metadata CrawlMetadata
+		err = json.Unmarshal(response.Value, &metadata)
+		if err == nil {
+			// Check if the most recent execution is incomplete
+			if metadata.Status != "completed" && metadata.ExecutionID != "" {
+				// Verify the layer map exists
+				layerMapKey := fmt.Sprintf("%s/layer_map", metadata.ExecutionID)
+				layerMapResponse, lmErr := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					layerMapKey,
+					nil,
+				)
+
+				if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+					log.Info().
+						Str("crawlID", crawlID).
+						Str("executionID", metadata.ExecutionID).
+						Str("status", metadata.Status).
+						Msg("Found incomplete crawl with layer map")
+					return metadata.ExecutionID, true, nil
+				} else {
+					log.Warn().
+						Str("executionID", metadata.ExecutionID).
+						Err(lmErr).
+						Msg("Found incomplete execution ID in metadata but it has no layer map")
+				}
+			}
+
+			// Check each of the previous executions in reverse order (newest first)
+			// to find the most recent incomplete one
+			for i := len(metadata.PreviousCrawlID) - 1; i >= 0; i-- {
+				prevExecID := metadata.PreviousCrawlID[i]
+
+				// See if this execution has pages that can be processed
+				layerMapKey := fmt.Sprintf("%s/layer_map", prevExecID)
+				layerMapResponse, err := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					layerMapKey,
+					nil,
+				)
+
+				if err != nil || layerMapResponse.Value == nil || len(layerMapResponse.Value) == 0 {
+					log.Warn().Err(err).Str("executionID", prevExecID).Msg("Failed to load layer map for execution")
+					continue
+				}
+
+				// Verify the layer map has at least one page
+				var layerMap map[int][]string
+				err = json.Unmarshal(layerMapResponse.Value, &layerMap)
+				if err != nil {
+					log.Warn().Err(err).Str("executionID", prevExecID).Msg("Failed to parse layer map")
+					continue
+				}
+
+				// Make sure there's at least one layer with pages
+				hasPages := false
+				for _, pageIDs := range layerMap {
+					if len(pageIDs) > 0 {
+						hasPages = true
+						break
+					}
+				}
+
+				if !hasPages {
+					log.Warn().Str("executionID", prevExecID).Msg("Layer map exists but has no pages")
+					continue
+				}
+
+				// Get this execution's specific metadata
+				execMetadataKey := fmt.Sprintf("%s/metadata", prevExecID)
+				execMetadataResponse, err := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					execMetadataKey,
+					nil,
+				)
+
+				// If we can find metadata, check its status
+				if err == nil && execMetadataResponse.Value != nil {
+					var execMetadata CrawlMetadata
+					err = json.Unmarshal(execMetadataResponse.Value, &execMetadata)
+					if err == nil {
+						// If this execution isn't marked as completed, use it
+						if execMetadata.Status != "completed" {
+							log.Info().
+								Str("crawlID", crawlID).
+								Str("executionID", prevExecID).
+								Str("status", execMetadata.Status).
+								Msg("Found incomplete previous execution with valid layer map")
+							return prevExecID, true, nil
+						}
+					}
+				}
+
+				// Even if the execution is marked as completed or we couldn't find metadata,
+				// check if there are any incomplete pages
+				hasIncompletePages, err := dsm.checkForIncompletePages(prevExecID)
+				if err != nil {
+					log.Warn().Err(err).Str("executionID", prevExecID).Msg("Error checking for incomplete pages")
+					continue
+				}
+
+				if hasIncompletePages {
+					log.Info().
+						Str("crawlID", crawlID).
+						Str("executionID", prevExecID).
+						Msg("Found execution with incomplete pages and valid layer map")
+					return prevExecID, true, nil
+				}
+
+				// If we get here, the execution has a complete layer map with pages,
+				// but all pages are processed. We'll keep it as a fallback option
+				// but continue checking other executions first
+				log.Info().
+					Str("crawlID", crawlID).
+					Str("executionID", prevExecID).
+					Msg("Found previous execution with valid layer map but all pages are completed")
+
+				// If this is the last execution we'll check and we have no better options,
+				// use this one even though all its pages are complete
+				if i == 0 {
+					log.Info().
+						Str("crawlID", crawlID).
+						Str("executionID", prevExecID).
+						Msg("Using completed execution with valid layer map as a last resort")
+					return prevExecID, true, nil
+				}
+			}
+		} else {
+			log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to parse crawl metadata")
+		}
+	}
+
+	// If we reach here, we need to check for any executions related to this crawl ID
+	// by looking for active crawl indicators and direct layer maps
+
+	// Check for active crawl indicator
+	activeKey := fmt.Sprintf("active_crawl/%s", crawlID)
+	activeResponse, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		activeKey,
+		nil,
+	)
+
+	if err == nil && activeResponse.Value != nil {
+		log.Info().Str("crawlID", crawlID).Msg("Found active crawl indicator")
+		// Parse the active crawl data to get the execution ID
+		var activeData struct {
+			CrawlID     string `json:"crawl_id"`
+			ExecutionID string `json:"execution_id"`
+			Timestamp   string `json:"timestamp"`
+		}
+
+		if err := json.Unmarshal(activeResponse.Value, &activeData); err == nil && activeData.ExecutionID != "" {
+			// Verify it has a layer map
+			layerMapKey := fmt.Sprintf("%s/layer_map", activeData.ExecutionID)
+			layerMapResponse, lmErr := (*dsm.client).GetState(
+				context.Background(),
+				dsm.stateStoreName,
+				layerMapKey,
+				nil,
+			)
+
+			if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+				log.Info().
+					Str("crawlID", crawlID).
+					Str("executionID", activeData.ExecutionID).
+					Str("timestamp", activeData.Timestamp).
+					Msg("Found active crawl with execution ID and valid layer map")
+				return activeData.ExecutionID, true, nil
+			} else {
+				log.Warn().
+					Str("executionID", activeData.ExecutionID).
+					Err(lmErr).
+					Msg("Found active crawl but it has no layer map")
+			}
+		}
+
+		// If we can't parse it or there's no layer map but the active crawl exists,
+		// use the crawl ID as the execution ID as a fallback
+		return crawlID, true, nil
+	}
+
+	// Check for alternate layer map formats with the direct crawl ID
+	layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+	layerMapResponse, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		layerMapKey,
+		nil,
+	)
+
+	if err == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+		// Verify it has pages
+		var layerMap map[int][]string
+		err = json.Unmarshal(layerMapResponse.Value, &layerMap)
+		if err == nil {
+			// Check if there are any pages in the layer map
+			hasPages := false
+			for _, pageIDs := range layerMap {
+				if len(pageIDs) > 0 {
+					hasPages = true
+					break
+				}
+			}
+
+			if hasPages {
+				log.Info().Str("crawlID", crawlID).Msg("Found layer map with pages for crawl ID")
+				// If we have a layer map with pages but no execution ID, use the crawl ID itself
+				return crawlID, true, nil
+			} else {
+				log.Warn().Str("crawlID", crawlID).Msg("Found layer map but it has no pages")
+			}
+		}
+	}
+
+	// Finally check any generic state key format
+	stateKey := fmt.Sprintf("%s/state", crawlID)
+	stateResponse, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		stateKey,
+		nil,
+	)
+
+	if err == nil && stateResponse.Value != nil {
+		log.Info().Str("crawlID", crawlID).Msg("Found state data for crawl ID")
+		// One more attempt - check if this crawl ID itself has a layer map
+		layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+		layerMapResponse, lmErr := (*dsm.client).GetState(
+			context.Background(),
+			dsm.stateStoreName,
+			layerMapKey,
+			nil,
+		)
+
+		if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+			log.Info().Str("crawlID", crawlID).Msg("Found state and layer map using crawl ID")
+			return crawlID, true, nil
+		}
+
+		// If we have state but no layer map, not usable
+		log.Warn().Str("crawlID", crawlID).
+			Msg("Found state data but no layer map for crawl ID")
+	}
+
+	// Last resort - check one more common format
+	crawlExecKey := fmt.Sprintf("crawl/%s", crawlID)
+	crawlExecResponse, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		crawlExecKey,
+		nil,
+	)
+
+	if err == nil && crawlExecResponse.Value != nil {
+		// Try to extract an execution ID
+		var execData struct {
+			ExecutionID string `json:"execution_id"`
+		}
+
+		if err := json.Unmarshal(crawlExecResponse.Value, &execData); err == nil && execData.ExecutionID != "" {
+			// Verify it has a layer map
+			layerMapKey := fmt.Sprintf("%s/layer_map", execData.ExecutionID)
+			layerMapResponse, lmErr := (*dsm.client).GetState(
+				context.Background(),
+				dsm.stateStoreName,
+				layerMapKey,
+				nil,
+			)
+
+			if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+				log.Info().
+					Str("crawlID", crawlID).
+					Str("executionID", execData.ExecutionID).
+					Msg("Found execution ID with layer map in crawl key format")
+				return execData.ExecutionID, true, nil
+			}
+		}
+
+		// Last attempt - check if crawl ID itself has a layer map
+		layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+		layerMapResponse, lmErr := (*dsm.client).GetState(
+			context.Background(),
+			dsm.stateStoreName,
+			layerMapKey,
+			nil,
+		)
+
+		if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+			log.Info().Str("crawlID", crawlID).Msg("Found layer map using crawl ID as fallback")
+			return crawlID, true, nil
+		}
+	}
+
+	// Exhausted all possibilities, no incomplete crawl found
+	log.Info().Str("crawlID", crawlID).Msg("No incomplete crawl found after exhaustive search")
+	return "", false, nil
+}
+
+// checkForIncompletePages checks if an execution has any pages that weren't successfully processed
+func (dsm *DaprStateManager) checkForIncompletePages(executionID string) (bool, error) {
+	// Fetch the layer map for this execution
+	layerMapKey := fmt.Sprintf("%s/layer_map", executionID)
+	layerMapResponse, err := (*dsm.client).GetState(
+		context.Background(),
+		dsm.stateStoreName,
+		layerMapKey,
+		nil,
+	)
+
+	if err != nil || layerMapResponse.Value == nil {
+		return false, fmt.Errorf("failed to load layer map: %w", err)
+	}
+
+	// Parse the layer map
+	var layerMap map[string][]string
+	err = json.Unmarshal(layerMapResponse.Value, &layerMap)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse layer map: %w", err)
+	}
+
+	// Check each layer for pages
+	for depth, pageIDs := range layerMap {
+		for _, pageID := range pageIDs {
+			// Get the page data
+			pageKey := fmt.Sprintf("%s/page/%s", executionID, pageID)
+			pageResponse, err := (*dsm.client).GetState(
+				context.Background(),
+				dsm.stateStoreName,
+				pageKey,
+				nil,
+			)
+
+			if err != nil || pageResponse.Value == nil {
+				log.Warn().Err(err).Str("pageID", pageID).Str("depth", depth).Msg("Failed to load page data")
+				continue
+			}
+
+			var page Page
+			err = json.Unmarshal(pageResponse.Value, &page)
+			if err != nil {
+				log.Warn().Err(err).Str("pageID", pageID).Msg("Failed to parse page data")
+				continue
+			}
+
+			// If the page isn't marked as fetched, this execution has incomplete pages
+			if page.Status != "fetched" {
+				log.Debug().
+					Str("executionID", executionID).
+					Str("pageID", pageID).
+					Str("status", page.Status).
+					Msg("Found incomplete page")
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }
 
 // Helper methods
@@ -782,7 +1527,7 @@ func (dsm *DaprStateManager) loadStateForCrawl(crawlID string) (State, error) {
 
 // getStateKey generates a key for the state in Dapr
 func (dsm *DaprStateManager) getStateKey(crawlID string) string {
-	return fmt.Sprintf("%s/state/%s", dsm.config.JobID, crawlID)
+	return fmt.Sprintf("state/%s", crawlID)
 }
 
 // getMediaCacheKey generates a key for the media cache in Dapr
@@ -793,9 +1538,8 @@ func (dsm *DaprStateManager) getMediaCacheKey() string {
 // generateStoragePath creates a standardized storage path
 func (dsm *DaprStateManager) generateStoragePath(channelID, subPath string) (string, error) {
 	return fmt.Sprintf(
-		"%s/%s/%s/%s/%s",
+		"%s/%s/%s/%s",
 		dsm.config.StorageRoot,
-		dsm.config.JobID,
 		dsm.config.CrawlID,
 		channelID,
 		subPath,
@@ -804,9 +1548,8 @@ func (dsm *DaprStateManager) generateStoragePath(channelID, subPath string) (str
 
 func (dsm *DaprStateManager) generateCrawlLevelStoragePath(subPath string) (string, error) {
 	return fmt.Sprintf(
-		"%s/%s/%s/%s",
+		"%s/%s/%s",
 		dsm.config.StorageRoot,
-		dsm.config.JobID,
 		dsm.config.CrawlID,
 		subPath,
 	), nil
@@ -815,9 +1558,8 @@ func (dsm *DaprStateManager) generateCrawlLevelStoragePath(subPath string) (stri
 // generateStoragePath creates a standardized storage path
 func (dsm *DaprStateManager) generateCrawlExecutableStoragePath(channelID, subPath string) (string, error) {
 	return fmt.Sprintf(
-		"%s/%s/%s/%s/%s/%s",
+		"%s/%s/%s/%s/%s",
 		dsm.config.StorageRoot,
-		dsm.config.JobID,
 		dsm.config.CrawlID,
 		dsm.config.CrawlExecutionID,
 		channelID,
