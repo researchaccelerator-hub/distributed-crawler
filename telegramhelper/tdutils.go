@@ -215,6 +215,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 		
 		return "", fmt.Errorf("file size is too large (%.2f MB)", sizeInMB)
 	}
+
 	
 	// Store the file
 	storageLocation, err := sm.StoreFile(channelName, path, remoteid)

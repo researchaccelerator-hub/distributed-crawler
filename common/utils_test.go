@@ -33,6 +33,27 @@ func TestGenerateCrawlID(t *testing.T) {
 
 	// Note: We're not checking the exact time range because this can lead to flaky tests
 	// Especially in CI environments where time execution might vary
+	// For this test, we'll simply verify that the parsed time is within a reasonable
+	// window of "now" (last 24 hours), rather than a specific range, to avoid timezone issues
+	now := time.Now()
+	dayAgo := now.Add(-24 * time.Hour)
+	dayLater := now.Add(24 * time.Hour)
+	
+	if parsedTime.Before(dayAgo) || parsedTime.After(dayLater) {
+		t.Errorf("Parsed time %v is not within a reasonable time range of now", parsedTime)
+	} else {
+		// Additional check - the difference between the parsed time and now should be less than 5 minutes
+		// This will detect if the times are way off but within the 24 hour window
+		diff := now.Sub(parsedTime)
+		if diff < 0 {
+			diff = -diff
+		}
+		
+		if diff > 5*time.Minute {
+			t.Logf("Warning: Parsed time %v differs from current time %v by %v", 
+				parsedTime, now, diff)
+		}
+	}
 }
 
 func ExampleGenerateCrawlID() {
