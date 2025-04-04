@@ -26,6 +26,7 @@ type CrawlerConfig struct {
 	MaxPages          int            // Maximum number of pages to crawl (default: 108000)
 	TDLibVerbosity    int            // TDLib verbosity level for logging (default: 1)
 	Platform          string         // Platform to crawl: "telegram", "youtube", etc.
+	YouTubeAPIKey     string         // API key for YouTube Data API
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.
