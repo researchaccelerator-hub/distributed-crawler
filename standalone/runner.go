@@ -217,7 +217,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	// Initialize state manager factory
 	log.Info().Msgf("Starting scraper for crawl ID: %s", crawlCfg.CrawlID)
-	smfact := state.DefaultStateManagerFactory{}
+	smfact := state.NewStateManagerFactory()
 
 	// Create a state manager configuration specifically for checking incomplete crawls
 	// Include all necessary configuration to ensure proper state loading
@@ -370,7 +370,9 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		for i, la := range currentLayer {
 			// Check the page status to determine if we need to process it
 			if la.Status == "fetched" {
-				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page")
+				// When resuming with the same crawlexecutionid, skip already fetched pages
+				// regardless of message status - this prevents reprocessing
+				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page during resume")
 				layerSkipped++
 				totalPagesSkipped++
 				startIndex = i + 1
@@ -389,7 +391,9 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			
 			// Double-check status since we're now using an index-based approach
 			if la.Status == "fetched" {
-				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page")
+				// When resuming with the same crawlexecutionid, skip already fetched pages
+				// regardless of message status - this prevents reprocessing
+				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page during processing loop")
 				layerSkipped++
 				totalPagesSkipped++
 				continue

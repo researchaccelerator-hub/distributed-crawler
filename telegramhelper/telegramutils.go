@@ -221,7 +221,7 @@ func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Me
 //
 // The function fetches comments in batches of up to 100 and continues until no more comments are available.
 // It extracts the text, reactions, view count, and reply count for each comment.
-func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string, maxcomments int) ([]model.Comment, error) {
+func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string, maxcomments int, commentcount int) ([]model.Comment, error) {
 	// Check if tdlibClient is nil
 	if tdlibClient == nil {
 		log.Error().
@@ -237,6 +237,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		Int64("chatID", chatID).
 		Int64("messageID", messageID).
 		Int("maxcomments", maxcomments).
+		Int("commentcount", commentcount).
 		Msg("Starting GetMessageComments function")
 
 	// Fetch the comments in the thread
@@ -352,7 +353,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 		// Determine batch size based on remaining comments to fetch
 		batchSize := 100 // Default batch size
-		
+
 		// If maxcomments is specified and we know how many more comments we need
 		if maxcomments > 0 {
 			remainingNeeded := maxcomments - len(comments)
@@ -361,13 +362,24 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 				done = true
 				break
 			}
-			
+
+			// If we have a commentcount, check that we're not fetching more than available
+			if commentcount > 0 && commentcount < maxcomments {
+				// We should only get up to commentcount total comments
+				remainingNeeded = commentcount - len(comments)
+				if remainingNeeded <= 0 {
+					// We've already fetched all available comments
+					done = true
+					break
+				}
+			}
+
 			// Only request as many comments as we still need
 			if remainingNeeded < batchSize {
 				batchSize = remainingNeeded
 			}
 		}
-		
+
 		// Get the message thread history directly (without function wrapper)
 		log.Debug().
 			Str("channel", channelname).
