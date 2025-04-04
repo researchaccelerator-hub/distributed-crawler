@@ -266,6 +266,14 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		crawlexecid = common.GenerateCrawlID()
 		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
 	}
+	
+	// Track whether we're resuming the same execution ID or starting a new one
+	var isResumingSameCrawlExecution bool
+	if tempSM != nil {
+		existingExecID, exists, _ := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
+		isResumingSameCrawlExecution = exists && existingExecID != "" && crawlexecid == existingExecID
+	}
+	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Crawl execution mode")
 
 	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
@@ -370,13 +378,20 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		for i, la := range currentLayer {
 			// Check the page status to determine if we need to process it
 			if la.Status == "fetched" {
-				// When resuming with the same crawlexecutionid, skip already fetched pages
-				// regardless of message status - this prevents reprocessing
-				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page during resume")
-				layerSkipped++
-				totalPagesSkipped++
-				startIndex = i + 1
-				continue
+				if isResumingSameCrawlExecution {
+					// When resuming with the same crawlexecutionid, skip already fetched pages
+					// regardless of message status - this prevents reprocessing
+					log.Debug().Str("url", la.URL).Msg("Skipping already fetched page during same execution resume")
+					layerSkipped++
+					totalPagesSkipped++
+					startIndex = i + 1
+					continue
+				} else {
+					// When starting a new crawlexecutionid, we'll process fetched pages
+					// and rely on the resample flag for message level decisions
+					log.Debug().Str("url", la.URL).Msg("Processing fetched page in new execution, will use resample flag")
+					break
+				}
 			}
 			
 			// If we found a page that's not fetched, this is where we want to start
@@ -391,12 +406,18 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			
 			// Double-check status since we're now using an index-based approach
 			if la.Status == "fetched" {
-				// When resuming with the same crawlexecutionid, skip already fetched pages
-				// regardless of message status - this prevents reprocessing
-				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page during processing loop")
-				layerSkipped++
-				totalPagesSkipped++
-				continue
+				if isResumingSameCrawlExecution {
+					// When resuming with the same crawlexecutionid, skip already fetched pages
+					// regardless of message status - this prevents reprocessing
+					log.Debug().Str("url", la.URL).Msg("Skipping already fetched page during same execution resume")
+					layerSkipped++
+					totalPagesSkipped++
+					continue
+				} else {
+					// For new execution IDs, process the page and rely on message status checks
+					log.Debug().Str("url", la.URL).Msg("Processing fetched page in new execution, will use resample flag")
+					// Continue processing this page
+				}
 			}
 			
 			if la.Status == "processing" {

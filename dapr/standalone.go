@@ -187,6 +187,14 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
 	}
 	
+	// Track whether we're resuming the same execution ID or starting a new one
+	var isResumingSameCrawlExecution bool
+	if tempSM != nil {
+		existingExecID, exists, _ := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
+		isResumingSameCrawlExecution = exists && existingExecID != "" && crawlexecid == existingExecID
+	}
+	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Crawl execution mode")
+	
 	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
@@ -289,6 +297,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 // It uses a semaphore pattern to limit concurrency and ensures all pages are processed before returning.
 // This version uses the connection pool for efficient client management.
 func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+	// In dapr mode it's harder to accurately detect this, so we'll simplify the approach
+	// to prevent reprocessing of fetched pages, always skip them
+	isResumingSameCrawlExecution := true
+	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Dapr always skips fetched pages")
 	// Map to collect all discovered channels
 	allDiscoveredChannels := make([]*state.Page, 0)
 	
@@ -311,10 +323,17 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		
 		// Skip already processed pages
 		if pageToProcess.Status == "fetched" {
-			// When resuming with the same crawlexecutionid, skip already fetched pages
-			// regardless of message status - this prevents reprocessing
-			log.Debug().Msgf("Skipping already fetched page during resume: %s", pageToProcess.URL)
-			continue
+			if isResumingSameCrawlExecution {
+				// When resuming with the same crawlexecutionid, skip already fetched pages
+				// regardless of message status - this prevents reprocessing
+				log.Debug().Msgf("Skipping already fetched page during same execution resume: %s", pageToProcess.URL)
+				continue
+			} else {
+				// When starting a new crawlexecutionid, we'll process fetched pages
+				// and rely on the resample flag for message level decisions
+				log.Debug().Msgf("Processing fetched page in new execution, will use resample flag: %s", pageToProcess.URL)
+				// Continue processing this page
+			}
 		}
 		
 		// Acquire semaphore slot (block if we're at max workers)
