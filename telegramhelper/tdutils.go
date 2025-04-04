@@ -233,16 +233,6 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 			Msg("File stored successfully")
 	}
 
-	// Clean up the local file regardless of storage success
-	if e := os.Remove(path); e != nil {
-		log.Warn().
-			Err(e).
-			Str("path", path).
-			Msg("Failed to remove local file after storage")
-	} else {
-		log.Debug().Str("path", path).Msg("Local file removed successfully")
-	}
-
 	// Mark as processed to avoid future downloads
 	if err := sm.MarkMediaAsProcessed(remoteid); err != nil {
 		log.Error().
