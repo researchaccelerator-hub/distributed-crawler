@@ -365,8 +365,29 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		totalPagesProcessed += layerPages
 		
 		// Process each page in the current layer
-		for _, la := range currentLayer {
+		// Find the first page in the layer that needs processing
+		startIndex := 0
+		for i, la := range currentLayer {
 			// Check the page status to determine if we need to process it
+			if la.Status == "fetched" {
+				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page")
+				layerSkipped++
+				totalPagesSkipped++
+				startIndex = i + 1
+				continue
+			}
+			
+			// If we found a page that's not fetched, this is where we want to start
+			break
+		}
+		
+		// Process from the first page that needs processing
+		log.Info().Int("starting_index", startIndex).Int("total_pages", len(currentLayer)).Msg("Starting processing from index")
+		
+		for i := startIndex; i < len(currentLayer); i++ {
+			la := currentLayer[i]
+			
+			// Double-check status since we're now using an index-based approach
 			if la.Status == "fetched" {
 				log.Debug().Str("url", la.URL).Msg("Skipping already fetched page")
 				layerSkipped++
