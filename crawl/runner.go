@@ -739,6 +739,9 @@ func processAllMessagesWithProcessor(
 // exist in the current crawl, or as deleted if they're no longer present.
 // This mechanism allows the crawler to track message lifecycle and avoid
 // unnecessary processing of already processed or deleted messages.
+//
+// IMPORTANT: Messages that are already marked as "fetched" will NOT be marked for
+// resampling. This prevents unnecessary reprocessing of messages when resuming a crawl.
 func resampleMarker(messages []state.Message, discoveredMessages []state.Message) []state.Message {
 	discoveredMap := make(map[string]bool)
 	for _, msg := range discoveredMessages {
@@ -748,6 +751,11 @@ func resampleMarker(messages []state.Message, discoveredMessages []state.Message
 
 	// Process each message in the original messages slice
 	for i := range messages {
+		// Skip messages that are already marked as "fetched" - don't reprocess them
+		if messages[i].Status == "fetched" {
+			continue
+		}
+		
 		key := fmt.Sprintf("%d_%d", messages[i].ChatID, messages[i].MessageID)
 
 		// If message exists in discoveredMessages, mark as unfetched for re-processing
