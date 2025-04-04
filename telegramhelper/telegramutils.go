@@ -350,20 +350,40 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 			}
 		}
 
+		// Determine batch size based on remaining comments to fetch
+		batchSize := 100 // Default batch size
+		
+		// If maxcomments is specified and we know how many more comments we need
+		if maxcomments > 0 {
+			remainingNeeded := maxcomments - len(comments)
+			if remainingNeeded <= 0 {
+				// We've already fetched all the comments we need
+				done = true
+				break
+			}
+			
+			// Only request as many comments as we still need
+			if remainingNeeded < batchSize {
+				batchSize = remainingNeeded
+			}
+		}
+		
 		// Get the message thread history directly (without function wrapper)
 		log.Debug().
 			Str("channel", channelname).
 			Int64("chatID", chatID).
 			Int64("messageID", messageID).
 			Int64("fromMessageId", fromMessageId).
+			Int("batchSize", batchSize).
 			Int("iteration", iterationCount).
 			Msg("Attempting to get message thread history")
 
+		// Get the message thread history with proper batch size
 		threadHistory, err = tdlibClient.GetMessageThreadHistory(&client.GetMessageThreadHistoryRequest{
 			ChatId:        chatID,
 			MessageId:     messageID,
 			FromMessageId: fromMessageId,
-			Limit:         100, // Fetch up to 100 comments at a time
+			Limit:         int32(batchSize), // Fetch comments in appropriate batch size
 		})
 
 		// Log the result of the GetMessageThreadHistory call
@@ -398,17 +418,18 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 			errStr := err.Error()
 
 			if strings.Contains(errStr, "Receive messages in an unexpected chat") {
-				log.Error().
+				log.Warn().
 					Err(err).
 					Str("channel", channelname).
 					Int64("chatID", chatID).
 					Int64("messageID", messageID).
 					Int("iteration", iterationCount).
-					Str("errorMsg", errStr).
-					Msg("Cloud environment error: Unable to access chat or message thread")
+					Int("commentsCollected", len(comments)).
+					Msg("Received 'unexpected chat' error - ending pagination")
 
-				// You might want to handle this specific error differently
-				return comments, fmt.Errorf("chat access error (%s): %w", channelname, err)
+				// End pagination loop - we've collected what we can
+				done = true
+				break
 			}
 
 			log.Error().
