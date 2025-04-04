@@ -113,6 +113,36 @@ func (bsm *BaseStateManager) UpdatePage(page Page) error {
 	return nil
 }
 
+// Additional methods to help with testing
+func (bsm *BaseStateManager) GetPageMap() map[string]Page {
+	bsm.mutex.RLock()
+	defer bsm.mutex.RUnlock()
+	return bsm.pageMap
+}
+
+func (bsm *BaseStateManager) SetPageMap(pageMap map[string]Page) {
+	bsm.mutex.Lock()
+	defer bsm.mutex.Unlock()
+	bsm.pageMap = pageMap
+}
+
+func (bsm *BaseStateManager) GetLayerMap() map[int][]string {
+	bsm.mutex.RLock()
+	defer bsm.mutex.RUnlock()
+	return bsm.layerMap
+}
+
+func (bsm *BaseStateManager) SetLayerMap(layerMap map[int][]string) {
+	bsm.mutex.Lock()
+	defer bsm.mutex.Unlock()
+	bsm.layerMap = layerMap
+}
+
+// GetConfig returns the configuration
+func (bsm *BaseStateManager) GetConfig() Config {
+	return bsm.config
+}
+
 // UpdateMessage updates or adds a message to a page
 func (bsm *BaseStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error {
 	bsm.mutex.Lock()
