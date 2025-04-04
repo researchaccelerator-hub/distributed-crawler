@@ -26,7 +26,7 @@ func TestGenerateCrawlID(t *testing.T) {
 	}
 
 	// Try to parse the crawlID back to a time
-	_, err = time.Parse("20060102150405", crawlID)
+	parsedTime, err := time.Parse("20060102150405", crawlID)
 	if err != nil {
 		t.Fatalf("Could not parse crawlID %s back to time: %v", crawlID, err)
 	}
