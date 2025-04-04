@@ -217,7 +217,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	// Initialize state manager factory
 	log.Info().Msgf("Starting scraper for crawl ID: %s", crawlCfg.CrawlID)
-	smfact := state.DefaultStateManagerFactory{}
+	smfact := state.NewStateManagerFactory()
 
 	// Create a state manager configuration specifically for checking incomplete crawls
 	// Include all necessary configuration to ensure proper state loading
