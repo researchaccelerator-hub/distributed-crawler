@@ -311,7 +311,9 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		
 		// Skip already processed pages
 		if pageToProcess.Status == "fetched" {
-			log.Debug().Msgf("Skipping already processed page: %s", pageToProcess.URL)
+			// When resuming with the same crawlexecutionid, skip already fetched pages
+			// regardless of message status - this prevents reprocessing
+			log.Debug().Msgf("Skipping already fetched page during resume: %s", pageToProcess.URL)
 			continue
 		}
 		
