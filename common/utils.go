@@ -25,6 +25,7 @@ type CrawlerConfig struct {
 	MaxDepth          int
 	MaxPages          int            // Maximum number of pages to crawl (default: 108000)
 	TDLibVerbosity    int            // TDLib verbosity level for logging (default: 1)
+	Platform          string         // Platform to crawl: "telegram", "youtube", etc.
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.
@@ -38,3 +39,14 @@ func GenerateCrawlID() string {
 
 	return crawlID
 }
+
+// PlatformType defines the supported platform types for crawling
+type PlatformType string
+
+const (
+	// PlatformTelegram represents the Telegram platform
+	PlatformTelegram PlatformType = "telegram"
+	
+	// PlatformYouTube represents the YouTube platform
+	PlatformYouTube PlatformType = "youtube"
+)

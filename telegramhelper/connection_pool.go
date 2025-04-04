@@ -26,35 +26,43 @@ type ConnectionPool struct {
 	connectionCount int              // Counter for assigning unique connection IDs
 }
 
-// NewConnectionPool creates a new connection pool with the specified maximum size.
+// ConnectionPoolConfig provides configuration options for the connection pool
+type ConnectionPoolConfig struct {
+	PoolSize          int       // Number of connections to maintain in the pool
+	TDLibDatabaseURLs []string  // URLs to pre-seeded TDLib database archives
+	Verbosity         int       // TDLib verbosity level (0-10, where 10 is most verbose)
+}
+
+// NewConnectionPool creates a new connection pool with the specified configuration.
 // It initializes the pool data structures and, if database URLs are provided in the
 // configuration, preloads connections to minimize startup time for subsequent requests.
 //
 // Parameters:
-//   - maxSize: The maximum number of connections the pool will manage
-//   - storagePrefix: The path prefix where TDLib databases will be stored
-//   - defaultConfig: The default configuration for all connections, including database URLs
+//   - config: The configuration for the connection pool
 //
 // Returns:
 //   - A fully initialized connection pool ready for use
-func NewConnectionPool(maxSize int, storagePrefix string, defaultConfig common.CrawlerConfig) *ConnectionPool {
+func NewConnectionPool(config ConnectionPoolConfig) (*ConnectionPool, error) {
 	pool := &ConnectionPool{
 		availableConns: make(map[string]crawler.TDLibClient),
 		inUseConns:     make(map[string]crawler.TDLibClient),
-		maxSize:        maxSize,
+		maxSize:        config.PoolSize,
 		service:        &RealTelegramService{},
-		storagePrefix:  storagePrefix,
-		defaultConfig:  defaultConfig,
+		storagePrefix:  ".", // Default to current directory
+		defaultConfig:  common.CrawlerConfig{
+			TDLibDatabaseURLs: config.TDLibDatabaseURLs,
+			TDLibVerbosity:    config.Verbosity,
+		},
 	}
 	
 	// If there are pre-configured database URLs, initialize connections with them
-	if len(defaultConfig.TDLibDatabaseURLs) > 0 {
+	if len(config.TDLibDatabaseURLs) > 0 {
 		log.Info().Msgf("Initializing connection pool with %d pre-configured database URLs and max size %d", 
-			len(defaultConfig.TDLibDatabaseURLs), maxSize)
-		pool.PreloadConnections(defaultConfig.TDLibDatabaseURLs)
+			len(config.TDLibDatabaseURLs), config.PoolSize)
+		pool.PreloadConnections(config.TDLibDatabaseURLs)
 	}
 	
-	return pool
+	return pool, nil
 }
 
 // PreloadConnections initializes TDLib connections using the provided database URLs.

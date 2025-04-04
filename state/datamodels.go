@@ -3,7 +3,36 @@ package state
 import (
 	"sync"
 	"time"
+
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
 )
+
+// StateManager extends StateManagementInterface with additional methods
+// needed for the new crawler architecture
+type StateManager interface {
+	StateManagementInterface
+
+	// SavePost saves a post to the storage
+	SavePost(ctx interface{}, post model.Post) error
+
+	// GetChannelInfo retrieves information about a channel
+	GetChannelInfo(channelID string) (*ChannelInfo, error)
+
+	// SaveChannelInfo saves channel information to the storage
+	SaveChannelInfo(info *ChannelInfo) error
+}
+
+// ChannelInfo represents information about a channel/source
+type ChannelInfo struct {
+	ChannelID   string                 `json:"channelId"`   // Channel identifier
+	Name        string                 `json:"name"`        // Channel name
+	Description string                 `json:"description"` // Channel description
+	MemberCount int64                  `json:"memberCount"` // Number of members/subscribers
+	URL         string                 `json:"url"`         // External URL to the channel
+	Platform    string                 `json:"platform"`    // Platform type ("telegram", "youtube")
+	LastCrawled time.Time              `json:"lastCrawled"` // Last time this channel was crawled
+	Metadata    map[string]interface{} `json:"metadata"`    // Additional platform-specific metadata
+}
 
 // Page represents a URL/page being crawled
 type Page struct {
@@ -14,18 +43,20 @@ type Page struct {
 	Status    string    `json:"status"` // "unfetched", "fetching", "fetched", "error"
 	Error     string    `json:"error,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
+	Platform  string    `json:"platform,omitempty"` // Added for multi-platform support
 
 	// Relationships
 	ParentID string    `json:"parentId,omitempty"`
 	Messages []Message `json:"messages,omitempty"`
 }
 
-// Message represents a Telegram message associated with a page
+// Message represents a message associated with a page
 type Message struct {
 	ChatID    int64  `json:"chatId"`
 	MessageID int64  `json:"messageId"`
 	Status    string `json:"status"`
 	PageID    string `json:"pageId"`
+	Platform  string `json:"platform,omitempty"` // Added for multi-platform support
 }
 
 // Layer represents a collection of pages at the same depth level
@@ -43,6 +74,10 @@ type CrawlMetadata struct {
 	EndTime         time.Time `json:"endTime,omitempty"`
 	Status          string    `json:"status"` // "running", "completed", "failed"
 	PreviousCrawlID []string  `json:"previousCrawlId,omitempty"`
+	Platform        string    `json:"platform,omitempty"` // Added for multi-platform support
+	TargetChannels  []string  `json:"targetChannels,omitempty"` // Target channels for this crawl
+	MessagesCount   int       `json:"messagesCount,omitempty"` // Number of messages retrieved
+	ErrorsCount     int       `json:"errorsCount,omitempty"` // Number of errors encountered
 }
 
 // MediaCacheItem represents an item in the media cache
@@ -50,6 +85,7 @@ type MediaCacheItem struct {
 	ID        string    `json:"id"`
 	FirstSeen time.Time `json:"firstSeen"`
 	Metadata  string    `json:"metadata,omitempty"`
+	Platform  string    `json:"platform,omitempty"` // Added for multi-platform support
 }
 
 // State represents the complete state of a crawl operation

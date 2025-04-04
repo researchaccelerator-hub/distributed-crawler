@@ -39,6 +39,9 @@ func TestGenerateCrawlID(t *testing.T) {
 	dayAgo := now.Add(-24 * time.Hour)
 	dayLater := now.Add(24 * time.Hour)
 	
+	// Parse the crawlID back to a time
+	parsedTime, _ := time.Parse("20060102150405", crawlID)
+	
 	if parsedTime.Before(dayAgo) || parsedTime.After(dayLater) {
 		t.Errorf("Parsed time %v is not within a reasonable time range of now", parsedTime)
 	} else {
