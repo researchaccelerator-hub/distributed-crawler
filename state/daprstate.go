@@ -28,27 +28,27 @@ const (
 // DaprStateManager implements StateManagementInterface using Dapr
 type DaprStateManager struct {
 	*BaseStateManager
-	client          *daprc.Client
-	stateStoreName  string
-	storageBinding  string
-	
+	client         *daprc.Client
+	stateStoreName string
+	storageBinding string
+
 	// For compatibility with old code during transition
 	mediaCache      map[string]MediaCacheItem
-	mediaCacheMutex sync.RWMutex      // Separate mutex for media cache to reduce contention
-	
+	mediaCacheMutex sync.RWMutex // Separate mutex for media cache to reduce contention
+
 	// New sharded media cache implementation
-	mediaCacheIndex     MediaCacheIndex          // Index of which shard contains which media ID
-	activeMediaCache    MediaCache               // Current active shard being written to
-	mediaCacheShards    map[string]*MediaCache   // All loaded shards
-	mediaCacheIndexMutex sync.RWMutex            // Mutex for media cache index operations
-	
+	mediaCacheIndex      MediaCacheIndex        // Index of which shard contains which media ID
+	activeMediaCache     MediaCache             // Current active shard being written to
+	mediaCacheShards     map[string]*MediaCache // All loaded shards
+	mediaCacheIndexMutex sync.RWMutex           // Mutex for media cache index operations
+
 	// URL cache
-	urlCache        map[string]string // Maps URL -> "crawlID:pageID" for all known URLs
-	urlCacheMutex   sync.RWMutex      // Separate mutex for URL cache to reduce contention
-	
+	urlCache      map[string]string // Maps URL -> "crawlID:pageID" for all known URLs
+	urlCacheMutex sync.RWMutex      // Separate mutex for URL cache to reduce contention
+
 	// Cache configuration
-	maxCacheItemsPerShard int                // Maximum number of items per shard
-	cacheExpirationDays   int                // Number of days after which cache entries are considered stale
+	maxCacheItemsPerShard int // Maximum number of items per shard
+	cacheExpirationDays   int // Number of days after which cache entries are considered stale
 }
 
 // NewDaprStateManager creates a new Dapr-backed state manager for storing and retrieving crawler state.
@@ -93,11 +93,11 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 
 	// Generate a new cache ID for the active cache
 	newCacheID := uuid.New().String()
-	
+
 	// Default cache configuration
 	maxCacheItemsPerShard := 5000 // Limit each shard to 5000 items
 	cacheExpirationDays := 30     // Expire items after 30 days
-	
+
 	dsm := &DaprStateManager{
 		BaseStateManager: base,
 		client:           &client,
@@ -105,7 +105,7 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 		storageBinding:   storageBinding,
 		mediaCache:       make(map[string]MediaCacheItem), // For backward compatibility
 		urlCache:         make(map[string]string),
-		
+
 		// Initialize new sharded cache structure
 		mediaCacheShards: make(map[string]*MediaCache),
 		activeMediaCache: MediaCache{
@@ -118,19 +118,19 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 			MediaIndex: make(map[string]string),
 			UpdateTime: time.Now(),
 		},
-		
+
 		// Default configuration
 		maxCacheItemsPerShard: maxCacheItemsPerShard,
 		cacheExpirationDays:   cacheExpirationDays,
 	}
-	
+
 	// Load the media cache index as part of initialization
 	err = dsm.loadMediaCacheIndex()
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to load media cache index, starting with a fresh index")
 		// Continue with the fresh index initialized above
 	}
-	
+
 	return dsm, nil
 }
 
@@ -997,19 +997,19 @@ func (dsm *DaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 		return true, nil
 	}
 	dsm.mediaCacheMutex.RUnlock()
-	
+
 	// Check the index to find which shard has the media ID
 	dsm.mediaCacheIndexMutex.RLock()
 	shardID, exists := dsm.mediaCacheIndex.MediaIndex[mediaID]
 	dsm.mediaCacheIndexMutex.RUnlock()
-	
+
 	// If found in the index, look for it in the corresponding shard
 	if exists {
 		// Check if the shard is already loaded in memory
 		dsm.mediaCacheIndexMutex.RLock()
 		shard, shardLoaded := dsm.mediaCacheShards[shardID]
 		dsm.mediaCacheIndexMutex.RUnlock()
-		
+
 		// If shard is not in memory, load it from Dapr
 		if !shardLoaded {
 			err := dsm.loadMediaCacheShard(shardID)
@@ -1022,23 +1022,23 @@ func (dsm *DaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 				dsm.mediaCacheIndexMutex.RUnlock()
 			}
 		}
-		
+
 		// If we have the shard, check if the media ID exists in it
 		if shard != nil {
 			_, itemExists := shard.Items[mediaID]
 			return itemExists, nil
 		}
 	}
-	
+
 	// If not found in the index or shard, check if it's in the active cache
 	dsm.mediaCacheIndexMutex.RLock()
 	_, activeExists := dsm.activeMediaCache.Items[mediaID]
 	dsm.mediaCacheIndexMutex.RUnlock()
-	
+
 	if activeExists {
 		return true, nil
 	}
-	
+
 	// As a last resort, check all loaded shards - this handles cases where the index might be out of sync
 	var found bool
 	dsm.mediaCacheIndexMutex.RLock()
@@ -1049,7 +1049,7 @@ func (dsm *DaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 		}
 	}
 	dsm.mediaCacheIndexMutex.RUnlock()
-	
+
 	// If still not found, try loading from the old format in Dapr
 	if !found {
 		cacheKey := dsm.getMediaCacheKey()
@@ -1091,15 +1091,15 @@ func (dsm *DaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 func (dsm *DaprStateManager) migrateMediaCacheItem(mediaID string, item MediaCacheItem) {
 	dsm.mediaCacheIndexMutex.Lock()
 	defer dsm.mediaCacheIndexMutex.Unlock()
-	
+
 	// Add to active shard
 	dsm.activeMediaCache.Items[mediaID] = item
 	dsm.activeMediaCache.UpdateTime = time.Now()
-	
+
 	// Update the index
 	dsm.mediaCacheIndex.MediaIndex[mediaID] = dsm.activeMediaCache.CacheID
 	dsm.mediaCacheIndex.UpdateTime = time.Now()
-	
+
 	log.Debug().Str("mediaID", mediaID).Msg("Migrated media cache item from legacy format to sharded cache")
 }
 
@@ -1155,13 +1155,13 @@ func (dsm *DaprStateManager) MarkMediaAsProcessed(mediaID string) error {
 		FirstSeen: time.Now(),
 	}
 	dsm.mediaCacheMutex.Unlock()
-	
+
 	// Create the new cache item
 	item := MediaCacheItem{
 		ID:        mediaID,
 		FirstSeen: time.Now(),
 	}
-	
+
 	// Add to the sharded cache system
 	return dsm.addMediaToCacheWithSharding(ctx, mediaID, item)
 }
@@ -1170,7 +1170,7 @@ func (dsm *DaprStateManager) MarkMediaAsProcessed(mediaID string) error {
 func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, mediaID string, item MediaCacheItem) error {
 	dsm.mediaCacheIndexMutex.Lock()
 	defer dsm.mediaCacheIndexMutex.Unlock()
-	
+
 	// Check if we need to create a new shard (current shard is at or near capacity)
 	if len(dsm.activeMediaCache.Items) >= dsm.maxCacheItemsPerShard {
 		// Save current shard before creating a new one
@@ -1178,7 +1178,7 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 		if err != nil {
 			return fmt.Errorf("failed to save full media cache shard: %w", err)
 		}
-		
+
 		// Create a new shard with a fresh UUID
 		newShardID := uuid.New().String()
 		dsm.activeMediaCache = MediaCache{
@@ -1186,7 +1186,7 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 			UpdateTime: time.Now(),
 			CacheID:    newShardID,
 		}
-		
+
 		// Add new shard to the index
 		dsm.mediaCacheIndex.Shards = append(dsm.mediaCacheIndex.Shards, newShardID)
 		log.Info().
@@ -1194,24 +1194,24 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 			Int("totalShards", len(dsm.mediaCacheIndex.Shards)).
 			Msg("Created new media cache shard after reaching capacity limit")
 	}
-	
+
 	// Add the item to the active shard
 	dsm.activeMediaCache.Items[mediaID] = item
 	dsm.activeMediaCache.UpdateTime = time.Now()
-	
+
 	// Update the index to point to the correct shard
 	dsm.mediaCacheIndex.MediaIndex[mediaID] = dsm.activeMediaCache.CacheID
 	dsm.mediaCacheIndex.UpdateTime = time.Now()
-	
+
 	// Periodically save active shard (every 100 items)
-	shouldSave := len(dsm.activeMediaCache.Items) % 100 == 0
-	
+	shouldSave := len(dsm.activeMediaCache.Items)%100 == 0
+
 	// Periodically clean up stale cache entries (every 500 items)
-	shouldCleanup := len(dsm.activeMediaCache.Items) % 500 == 0
-	
+	shouldCleanup := len(dsm.activeMediaCache.Items)%500 == 0
+
 	// Release the lock before any IO operations
 	dsm.mediaCacheIndexMutex.Unlock()
-	
+
 	// Execute these operations outside the lock to improve concurrency
 	if shouldSave {
 		// Create a copy of active shard for thread safety
@@ -1220,22 +1220,22 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to save active media cache shard")
 		}
-		
+
 		// Also save the index
 		err = dsm.saveMediaCacheIndex()
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to save media cache index")
 		}
 	}
-	
+
 	// Perform cache cleanup if needed
 	if shouldCleanup {
 		go dsm.cleanupStaleMediaCacheEntries(ctx)
 	}
-	
+
 	// Re-acquire the lock since we're using defer Unlock()
 	dsm.mediaCacheIndexMutex.Lock()
-	
+
 	return nil
 }
 
@@ -1244,13 +1244,13 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 	// Define the expiration cutoff time
 	cutoffTime := time.Now().AddDate(0, 0, -dsm.cacheExpirationDays)
 	log.Debug().Time("cutoffTime", cutoffTime).Msg("Starting stale media cache cleanup")
-	
+
 	// Keep track of shards that were modified and need to be saved
 	modifiedShards := make(map[string]bool)
-	
+
 	// Take a write lock on the index
 	dsm.mediaCacheIndexMutex.Lock()
-	
+
 	// First clean up the active shard
 	initialActiveCount := len(dsm.activeMediaCache.Items)
 	for mediaID, item := range dsm.activeMediaCache.Items {
@@ -1260,7 +1260,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 		}
 	}
 	finalActiveCount := len(dsm.activeMediaCache.Items)
-	
+
 	if initialActiveCount > finalActiveCount {
 		modifiedShards[dsm.activeMediaCache.CacheID] = true
 		log.Debug().
@@ -1269,7 +1269,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 			Str("shardID", dsm.activeMediaCache.CacheID).
 			Msg("Cleaned up expired entries from active shard")
 	}
-	
+
 	// Clean up loaded shards
 	for shardID, shard := range dsm.mediaCacheShards {
 		initialCount := len(shard.Items)
@@ -1279,7 +1279,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 				delete(dsm.mediaCacheIndex.MediaIndex, mediaID)
 			}
 		}
-		
+
 		finalCount := len(shard.Items)
 		if initialCount > finalCount {
 			modifiedShards[shardID] = true
@@ -1290,7 +1290,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 				Msg("Cleaned up expired entries from shard")
 		}
 	}
-	
+
 	// Check if any shards are now empty and can be removed
 	var nonEmptyShards []string
 	for _, shardID := range dsm.mediaCacheIndex.Shards {
@@ -1299,7 +1299,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 			nonEmptyShards = append(nonEmptyShards, shardID)
 			continue
 		}
-		
+
 		// Check if shard is in memory
 		shard, exists := dsm.mediaCacheShards[shardID]
 		if exists {
@@ -1310,7 +1310,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 				// Remove empty shard from memory
 				delete(dsm.mediaCacheShards, shardID)
 				log.Debug().Str("shardID", shardID).Msg("Removing empty shard from memory")
-				
+
 				// Add to modified list so we delete from Dapr
 				modifiedShards[shardID] = true
 			}
@@ -1320,13 +1320,13 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 			nonEmptyShards = append(nonEmptyShards, shardID)
 		}
 	}
-	
+
 	// Update the shards list if changed
 	if len(nonEmptyShards) < len(dsm.mediaCacheIndex.Shards) {
 		dsm.mediaCacheIndex.Shards = nonEmptyShards
 		dsm.mediaCacheIndex.UpdateTime = time.Now()
 	}
-	
+
 	// Make a copy of modified shards and the index for saving after releasing lock
 	var shardsToSave []*MediaCache
 	if len(modifiedShards) > 0 {
@@ -1340,13 +1340,13 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 			}
 		}
 	}
-	
+
 	// Make index copy
 	indexCopy := dsm.mediaCacheIndex
-	
+
 	// Release the lock before any IO operations
 	dsm.mediaCacheIndexMutex.Unlock()
-	
+
 	// Save modified shards and index
 	for _, shard := range shardsToSave {
 		// If shard is empty, delete it from Dapr
@@ -1366,7 +1366,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 			}
 		}
 	}
-	
+
 	// Save the updated index if it was modified
 	if len(modifiedShards) > 0 {
 		err := dsm.saveMediaCacheIndex()
@@ -1374,7 +1374,7 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 			log.Warn().Err(err).Msg("Failed to save media cache index during cleanup")
 		}
 	}
-	
+
 	log.Info().
 		Int("modifiedShards", len(modifiedShards)).
 		Int("currentShardCount", len(indexCopy.Shards)).
@@ -1414,8 +1414,15 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 		var metadata CrawlMetadata
 		err = json.Unmarshal(response.Value, &metadata)
 		if err == nil && metadata.ExecutionID != "" {
-			// Check if the crawl is incomplete
-			if metadata.Status != "completed" {
+			// Check if the crawl is completed - never return completed crawls
+			if metadata.Status == "completed" {
+				log.Info().
+					Str("crawlID", crawlID).
+					Str("executionID", metadata.ExecutionID).
+					Msg("Skipping completed crawl from direct key")
+				return "", false, nil
+			} else {
+				// Only consider incomplete crawls
 				log.Info().
 					Str("crawlID", crawlID).
 					Str("executionID", metadata.ExecutionID).
@@ -1459,8 +1466,14 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 		var metadata CrawlMetadata
 		err = json.Unmarshal(response.Value, &metadata)
 		if err == nil {
-			// Check if the most recent execution is incomplete
-			if metadata.Status != "completed" && metadata.ExecutionID != "" {
+			// Skip if metadata shows completed status
+			if metadata.Status == "completed" {
+				log.Info().
+					Str("crawlID", crawlID).
+					Str("executionID", metadata.ExecutionID).
+					Msg("Skipping metadata with completed status")
+			} else if metadata.ExecutionID != "" {
+				// Only check for layer map if status is not completed
 				// Verify the layer map exists
 				layerMapKey := fmt.Sprintf("%s/layer_map", metadata.ExecutionID)
 				layerMapResponse, lmErr := (*dsm.client).GetState(
@@ -1487,6 +1500,36 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 
 			// Check each of the previous executions in reverse order (newest first)
 			// to find the most recent incomplete one
+
+			// First check the newest execution's metadata to see if it's completed
+			// If the newest execution is completed, we should stop searching entirely
+			if len(metadata.PreviousCrawlID) > 0 {
+				newestExecID := metadata.PreviousCrawlID[len(metadata.PreviousCrawlID)-1]
+				newestMetadataKey := fmt.Sprintf("%s/metadata", newestExecID)
+				newestMetadataResponse, err := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					newestMetadataKey,
+					nil,
+				)
+
+				// Check if the newest execution is completed
+				if err == nil && newestMetadataResponse.Value != nil {
+					var newestMetadata CrawlMetadata
+					if jsonErr := json.Unmarshal(newestMetadataResponse.Value, &newestMetadata); jsonErr == nil {
+						if newestMetadata.Status == "completed" {
+							log.Info().
+								Str("crawlID", crawlID).
+								Str("newestExecutionID", newestExecID).
+								Msg("Latest execution is marked as completed, not checking older executions")
+							return "", false, nil
+						}
+					}
+				}
+			}
+
+			// If we get here, the newest execution is not marked as completed
+			// or we couldn't determine its status, so check all executions
 			for i := len(metadata.PreviousCrawlID) - 1; i >= 0; i-- {
 				prevExecID := metadata.PreviousCrawlID[i]
 
@@ -1536,12 +1579,21 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 				)
 
 				// If we can find metadata, check its status
+				// Completed crawls should NEVER be returned
+				var isCompleted bool = false
 				if err == nil && execMetadataResponse.Value != nil {
 					var execMetadata CrawlMetadata
 					err = json.Unmarshal(execMetadataResponse.Value, &execMetadata)
 					if err == nil {
-						// If this execution isn't marked as completed, use it
-						if execMetadata.Status != "completed" {
+						// Check if the execution is marked as completed
+						if execMetadata.Status == "completed" {
+							log.Info().
+								Str("crawlID", crawlID).
+								Str("executionID", prevExecID).
+								Msg("Skipping execution marked as completed")
+							isCompleted = true
+						} else {
+							// If this execution isn't marked as completed, use it
 							log.Info().
 								Str("crawlID", crawlID).
 								Str("executionID", prevExecID).
@@ -1552,7 +1604,15 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 					}
 				}
 
-				// Even if the execution is marked as completed or we couldn't find metadata,
+				// Skip completed executions entirely, regardless of page status
+				if isCompleted {
+					log.Debug().
+						Str("executionID", prevExecID).
+						Msg("Skipping completed execution, even if it has incomplete pages")
+					continue
+				}
+
+				// If we couldn't find metadata or status wasn't "completed",
 				// check if there are any incomplete pages
 				hasIncompletePages, err := dsm.checkForIncompletePages(prevExecID)
 				if err != nil {
@@ -1605,32 +1665,83 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 		}
 
 		if err := json.Unmarshal(activeResponse.Value, &activeData); err == nil && activeData.ExecutionID != "" {
-			// Verify it has a layer map
-			layerMapKey := fmt.Sprintf("%s/layer_map", activeData.ExecutionID)
-			layerMapResponse, lmErr := (*dsm.client).GetState(
+			// Check if this active execution is already marked as completed
+			// by looking up its metadata
+			execMetadataKey := fmt.Sprintf("%s/metadata", activeData.ExecutionID)
+			execMetadataResponse, metaErr := (*dsm.client).GetState(
 				context.Background(),
 				dsm.stateStoreName,
-				layerMapKey,
+				execMetadataKey,
 				nil,
 			)
 
-			if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
-				log.Info().
-					Str("crawlID", crawlID).
-					Str("executionID", activeData.ExecutionID).
-					Str("timestamp", activeData.Timestamp).
-					Msg("Found active crawl with execution ID and valid layer map")
-				return activeData.ExecutionID, true, nil
-			} else {
-				log.Warn().
-					Str("executionID", activeData.ExecutionID).
-					Err(lmErr).
-					Msg("Found active crawl but it has no layer map")
+			var isCompleted bool = false
+			if metaErr == nil && execMetadataResponse.Value != nil {
+				var execMetadata CrawlMetadata
+				if jsonErr := json.Unmarshal(execMetadataResponse.Value, &execMetadata); jsonErr == nil {
+					if execMetadata.Status == "completed" {
+						isCompleted = true
+						log.Info().
+							Str("crawlID", crawlID).
+							Str("executionID", activeData.ExecutionID).
+							Msg("Skipping active crawl marker that points to a completed execution")
+					}
+				}
+			}
+
+			// Only proceed with non-completed executions
+			if !isCompleted {
+				// Verify it has a layer map
+				layerMapKey := fmt.Sprintf("%s/layer_map", activeData.ExecutionID)
+				layerMapResponse, lmErr := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					layerMapKey,
+					nil,
+				)
+
+				if lmErr == nil && layerMapResponse.Value != nil && len(layerMapResponse.Value) > 0 {
+					log.Info().
+						Str("crawlID", crawlID).
+						Str("executionID", activeData.ExecutionID).
+						Str("timestamp", activeData.Timestamp).
+						Msg("Found active crawl with execution ID and valid layer map")
+					return activeData.ExecutionID, true, nil
+				} else {
+					log.Warn().
+						Str("executionID", activeData.ExecutionID).
+						Err(lmErr).
+						Msg("Found active crawl but it has no layer map")
+				}
 			}
 		}
 
-		// If we can't parse it or there's no layer map but the active crawl exists,
+		// Check if crawl ID itself is marked as completed
+		crawlMetadataKey := fmt.Sprintf("%s/metadata", crawlID)
+		crawlMetadataResponse, metaErr := (*dsm.client).GetState(
+			context.Background(),
+			dsm.stateStoreName,
+			crawlMetadataKey,
+			nil,
+		)
+
+		if metaErr == nil && crawlMetadataResponse.Value != nil {
+			var crawlMetadata CrawlMetadata
+			if json.Unmarshal(crawlMetadataResponse.Value, &crawlMetadata) == nil {
+				if crawlMetadata.Status == "completed" {
+					log.Info().
+						Str("crawlID", crawlID).
+						Msg("Skipping crawl ID itself as it is marked as completed")
+					return "", false, nil
+				}
+			}
+		}
+
+		// If we can't parse it or there's no layer map but the active crawl exists and isn't completed,
 		// use the crawl ID as the execution ID as a fallback
+		log.Info().
+			Str("crawlID", crawlID).
+			Msg("Using crawl ID as execution ID (fallback) after verifying it's not completed")
 		return crawlID, true, nil
 	}
 
@@ -1658,6 +1769,28 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 			}
 
 			if hasPages {
+				// Before returning, check if the crawl is marked as completed
+				crawlMetadataKey := fmt.Sprintf("%s/metadata", crawlID)
+				metadataResponse, metaErr := (*dsm.client).GetState(
+					context.Background(),
+					dsm.stateStoreName,
+					crawlMetadataKey,
+					nil,
+				)
+
+				// Check for completed status
+				if metaErr == nil && metadataResponse.Value != nil {
+					var metadata CrawlMetadata
+					if jsonErr := json.Unmarshal(metadataResponse.Value, &metadata); jsonErr == nil {
+						if metadata.Status == "completed" {
+							log.Info().
+								Str("crawlID", crawlID).
+								Msg("Found layer map with pages, but crawl is marked as completed")
+							return "", false, nil
+						}
+					}
+				}
+
 				log.Info().Str("crawlID", crawlID).Msg("Found layer map with pages for crawl ID")
 				// If we have a layer map with pages but no execution ID, use the crawl ID itself
 				return crawlID, true, nil
@@ -1867,10 +2000,10 @@ func (dsm *DaprStateManager) loadMediaCacheIndex() error {
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	// Get the index key
 	indexKey := dsm.getMediaCacheIndexKey()
-	
+
 	// Load the index from Dapr
 	response, err := (*dsm.client).GetState(
 		ctx,
@@ -1878,15 +2011,15 @@ func (dsm *DaprStateManager) loadMediaCacheIndex() error {
 		indexKey,
 		nil,
 	)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to get media cache index from Dapr: %w", err)
 	}
-	
+
 	// If no index exists yet, check if we need to migrate from old format
 	if response.Value == nil {
 		log.Debug().Msg("No media cache index found in Dapr, checking for legacy format")
-		
+
 		// Check if old format exists and migrate if needed
 		migrated, err := dsm.migrateFromLegacyCache(ctx)
 		if err != nil {
@@ -1895,24 +2028,24 @@ func (dsm *DaprStateManager) loadMediaCacheIndex() error {
 			log.Info().Msg("Successfully migrated from legacy cache format")
 			return nil
 		}
-		
+
 		log.Debug().Msg("No legacy format found, using new empty index")
 		return nil
 	}
-	
+
 	// Parse the index
 	var index MediaCacheIndex
 	err = json.Unmarshal(response.Value, &index)
 	if err != nil {
 		return fmt.Errorf("failed to parse media cache index: %w", err)
 	}
-	
+
 	// Update our instance with the loaded index
 	dsm.mediaCacheIndexMutex.Lock()
 	defer dsm.mediaCacheIndexMutex.Unlock()
-	
+
 	dsm.mediaCacheIndex = index
-	
+
 	// Load the active shard (the last one in the list)
 	if len(index.Shards) > 0 {
 		activeCacheID := index.Shards[len(index.Shards)-1]
@@ -1926,12 +2059,12 @@ func (dsm *DaprStateManager) loadMediaCacheIndex() error {
 			}
 		}
 	}
-	
+
 	log.Info().
 		Int("indexSize", len(index.MediaIndex)).
 		Int("shardCount", len(index.Shards)).
 		Msg("Media cache index loaded from Dapr")
-	
+
 	return nil
 }
 
@@ -1970,30 +2103,30 @@ func (dsm *DaprStateManager) migrateFromLegacyCache(ctx context.Context) (bool, 
 
 	// Initialize the migration
 	dsm.mediaCacheIndexMutex.Lock()
-	
+
 	// Create a new batch counter to track when to save
 	batchCount := 0
 	batchSize := 500 // Save every 500 items
-	
+
 	// For each item in the legacy cache
 	for mediaID, item := range legacyCache {
 		// Add to the active shard
 		dsm.activeMediaCache.Items[mediaID] = item
-		
+
 		// Update the index
 		dsm.mediaCacheIndex.MediaIndex[mediaID] = dsm.activeMediaCache.CacheID
-		
+
 		// Increment batch counter
 		batchCount++
-		
+
 		// If we've reached the shard capacity, save and create a new shard
 		if len(dsm.activeMediaCache.Items) >= dsm.maxCacheItemsPerShard {
 			// Update timestamp
 			dsm.activeMediaCache.UpdateTime = time.Now()
-			
+
 			// Make a copy to save
 			shardToSave := dsm.activeMediaCache
-			
+
 			// Create a new shard
 			newShardID := uuid.New().String()
 			dsm.activeMediaCache = MediaCache{
@@ -2001,19 +2134,19 @@ func (dsm *DaprStateManager) migrateFromLegacyCache(ctx context.Context) (bool, 
 				UpdateTime: time.Now(),
 				CacheID:    newShardID,
 			}
-			
+
 			// Add new shard to the index
 			dsm.mediaCacheIndex.Shards = append(dsm.mediaCacheIndex.Shards, newShardID)
-			
+
 			// Release lock temporarily for IO
 			dsm.mediaCacheIndexMutex.Unlock()
-			
+
 			// Save the full shard
 			err = dsm.saveMediaCacheShard(&shardToSave)
 			if err != nil {
 				log.Warn().Err(err).Str("shardID", shardToSave.CacheID).Msg("Failed to save shard during migration")
 			}
-			
+
 			// Save the index periodically
 			if batchCount >= batchSize {
 				err = dsm.saveMediaCacheIndex()
@@ -2022,10 +2155,10 @@ func (dsm *DaprStateManager) migrateFromLegacyCache(ctx context.Context) (bool, 
 				}
 				batchCount = 0
 			}
-			
+
 			// Re-acquire lock
 			dsm.mediaCacheIndexMutex.Lock()
-			
+
 			log.Info().
 				Str("oldShardID", shardToSave.CacheID).
 				Str("newShardID", newShardID).
@@ -2033,26 +2166,26 @@ func (dsm *DaprStateManager) migrateFromLegacyCache(ctx context.Context) (bool, 
 				Msg("Created new shard during migration after reaching capacity")
 		}
 	}
-	
+
 	// Update timestamps
 	dsm.activeMediaCache.UpdateTime = time.Now()
 	dsm.mediaCacheIndex.UpdateTime = time.Now()
-	
+
 	// Release lock for final save operations
 	dsm.mediaCacheIndexMutex.Unlock()
-	
+
 	// Save the final active shard
 	err = dsm.saveMediaCacheShard(&dsm.activeMediaCache)
 	if err != nil {
 		log.Warn().Err(err).Str("shardID", dsm.activeMediaCache.CacheID).Msg("Failed to save final active shard during migration")
 	}
-	
+
 	// Save the final index
 	err = dsm.saveMediaCacheIndex()
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to save final index during migration")
 	}
-	
+
 	// Optionally: rename the old cache to avoid reprocessing if this runs again
 	backupKey := fmt.Sprintf("%s-backup-%s", cacheKey, time.Now().Format("20060102-150405"))
 	backupErr := (*dsm.client).SaveState(
@@ -2062,7 +2195,7 @@ func (dsm *DaprStateManager) migrateFromLegacyCache(ctx context.Context) (bool, 
 		response.Value,
 		nil,
 	)
-	
+
 	if backupErr != nil {
 		log.Warn().Err(backupErr).Msg("Failed to backup legacy cache")
 	} else {
@@ -2072,12 +2205,12 @@ func (dsm *DaprStateManager) migrateFromLegacyCache(ctx context.Context) (bool, 
 			log.Warn().Err(deleteErr).Msg("Failed to delete legacy cache after migration")
 		}
 	}
-	
+
 	log.Info().
 		Int("totalItems", len(legacyCache)).
 		Int("shards", len(dsm.mediaCacheIndex.Shards)).
 		Msg("Completed migration from legacy cache to sharded format")
-		
+
 	return true, nil
 }
 
@@ -2086,10 +2219,10 @@ func (dsm *DaprStateManager) loadMediaCacheShard(shardID string) error {
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	// Get the shard key
 	shardKey := dsm.getShardKey(shardID)
-	
+
 	// Load the shard from Dapr
 	response, err := (*dsm.client).GetState(
 		ctx,
@@ -2097,31 +2230,31 @@ func (dsm *DaprStateManager) loadMediaCacheShard(shardID string) error {
 		shardKey,
 		nil,
 	)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to get media cache shard from Dapr: %w", err)
 	}
-	
+
 	if response.Value == nil {
 		return fmt.Errorf("shard %s not found in Dapr", shardID)
 	}
-	
+
 	// Parse the shard
 	var shard MediaCache
 	err = json.Unmarshal(response.Value, &shard)
 	if err != nil {
 		return fmt.Errorf("failed to parse media cache shard: %w", err)
 	}
-	
+
 	// Add to our cache
 	dsm.mediaCacheShards[shardID] = &shard
-	
+
 	log.Debug().
 		Str("shardID", shardID).
 		Int("itemCount", len(shard.Items)).
 		Time("updateTime", shard.UpdateTime).
 		Msg("Media cache shard loaded from Dapr")
-	
+
 	return nil
 }
 
@@ -2130,16 +2263,16 @@ func (dsm *DaprStateManager) saveMediaCacheIndex() error {
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	// Update timestamp
 	dsm.mediaCacheIndex.UpdateTime = time.Now()
-	
+
 	// Marshal the index
 	indexData, err := json.Marshal(dsm.mediaCacheIndex)
 	if err != nil {
 		return fmt.Errorf("failed to marshal media cache index: %w", err)
 	}
-	
+
 	// Save to Dapr
 	indexKey := dsm.getMediaCacheIndexKey()
 	err = (*dsm.client).SaveState(
@@ -2149,16 +2282,16 @@ func (dsm *DaprStateManager) saveMediaCacheIndex() error {
 		indexData,
 		nil,
 	)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to save media cache index to Dapr: %w", err)
 	}
-	
+
 	log.Debug().
 		Int("indexSize", len(dsm.mediaCacheIndex.MediaIndex)).
 		Int("shardCount", len(dsm.mediaCacheIndex.Shards)).
 		Msg("Media cache index saved to Dapr")
-	
+
 	return nil
 }
 
@@ -2167,16 +2300,16 @@ func (dsm *DaprStateManager) saveMediaCacheShard(shard *MediaCache) error {
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	// Update timestamp
 	shard.UpdateTime = time.Now()
-	
+
 	// Marshal the shard
 	shardData, err := json.Marshal(shard)
 	if err != nil {
 		return fmt.Errorf("failed to marshal media cache shard: %w", err)
 	}
-	
+
 	// Save to Dapr
 	shardKey := dsm.getShardKey(shard.CacheID)
 	err = (*dsm.client).SaveState(
@@ -2186,16 +2319,16 @@ func (dsm *DaprStateManager) saveMediaCacheShard(shard *MediaCache) error {
 		shardData,
 		nil,
 	)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to save media cache shard to Dapr: %w", err)
 	}
-	
+
 	log.Debug().
 		Str("shardID", shard.CacheID).
 		Int("itemCount", len(shard.Items)).
 		Msg("Media cache shard saved to Dapr")
-	
+
 	return nil
 }
 
@@ -2301,6 +2434,15 @@ func (dsm *DaprStateManager) loadURLsFromPreviousCrawls() (map[string]string, er
 
 func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) error {
 	loadedCount := 0
+	
+	// Check if we're resuming the same crawl execution
+	// We consider it the same execution if we're using the exact same executionID
+	isResumingSameCrawlExecution := dsm.config.CrawlExecutionID == crawlID
+	log.Info().
+		Bool("isResumingSameCrawlExecution", isResumingSameCrawlExecution).
+		Str("configExecutionID", dsm.config.CrawlExecutionID).
+		Str("loadingCrawlID", crawlID).
+		Msg("Loading pages with execution context")
 
 	// For each layer in the layer map
 	for _, pageIDs := range dsm.layerMap {
@@ -2334,19 +2476,34 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) erro
 
 			// Add page to in-memory page map
 			if !cont {
-				// Preserve fetched status when loading from DAPR
-				if page.Status != "fetched" {
+				if !isResumingSameCrawlExecution {
+					// When not resuming the same execution, mark ALL pages as unfetched
+					// to ensure they get reprocessed with the new execution ID
+					oldStatus := page.Status
 					page.Status = "unfetched"
 					log.Debug().
 						Str("pageID", pageID).
 						Str("url", page.URL).
-						Str("old_status", page.Status).
-						Msg("Resetting non-fetched page status to unfetched")
+						Str("old_status", oldStatus).
+						Bool("resuming_same_execution", isResumingSameCrawlExecution).
+						Msg("New execution: Marking page as unfetched regardless of previous status")
 				} else {
-					log.Debug().
-						Str("pageID", pageID).
-						Str("url", page.URL).
-						Msg("Preserving fetched status from Dapr storage")
+					// When resuming same execution, preserve fetched status when loading from DAPR
+					if page.Status != "fetched" {
+						page.Status = "unfetched"
+						log.Debug().
+							Str("pageID", pageID).
+							Str("url", page.URL).
+							Str("old_status", page.Status).
+							Bool("resuming_same_execution", isResumingSameCrawlExecution).
+							Msg("Resetting non-fetched page status to unfetched in same execution")
+					} else {
+						log.Debug().
+							Str("pageID", pageID).
+							Str("url", page.URL).
+							Bool("resuming_same_execution", isResumingSameCrawlExecution).
+							Msg("Preserving fetched status from Dapr storage in same execution")
+					}
 				}
 				page.Timestamp = time.Now()
 			}
@@ -2360,7 +2517,11 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) erro
 		}
 	}
 
-	log.Info().Str("crawlID", crawlID).Int("pageCount", loadedCount).Msg("Loaded pages into memory from DAPR")
+	log.Info().
+		Str("crawlID", crawlID).
+		Int("pageCount", loadedCount).
+		Bool("resuming_same_execution", isResumingSameCrawlExecution).
+		Msg("Loaded pages into memory from DAPR")
 	return nil
 }
 
@@ -2508,7 +2669,7 @@ func (dsm *DaprStateManager) GetLayerByDepth(depth int) ([]Page, error) {
 			page.Status = "unfetched"
 			page.Messages = []Message{}
 			page.Timestamp = time.Now()
-			
+
 			// Save the updated page back to memory
 			dsm.mutex.Lock()
 			dsm.pageMap[id] = page
@@ -2520,7 +2681,7 @@ func (dsm *DaprStateManager) GetLayerByDepth(depth int) ([]Page, error) {
 				Str("pageID", id).
 				Str("url", page.URL).
 				Msg("Preserving fetched status from Dapr storage")
-				
+
 			// Still update memory cache with the fetched page
 			dsm.mutex.Lock()
 			dsm.pageMap[id] = page
