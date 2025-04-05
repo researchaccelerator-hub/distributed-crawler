@@ -246,6 +246,25 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			depth++
 			continue
 		}
+		
+		// Print all page statuses before processing
+		log.Info().Int("page_count", len(pages)).Int("depth", depth).Msg("Page status summary before processing")
+		pageStatusCount := make(map[string]int)
+		for _, page := range pages {
+			pageStatusCount[page.Status]++
+			log.Debug().
+				Str("url", page.URL).
+				Str("status", page.Status).
+				Str("id", page.ID).
+				Int("message_count", len(page.Messages)).
+				Time("timestamp", page.Timestamp).
+				Bool("resuming_execution", isResumingSameCrawlExecution).
+				Msg("Page status before processing in Dapr mode")
+		}
+		// Log the counts of pages by status
+		for status, count := range pageStatusCount {
+			log.Info().Str("status", status).Int("count", count).Int("depth", depth).Msg("Page status count")
+		}
 
 		// Skip if there are no pages at this depth
 		if len(pages) == 0 {
@@ -276,6 +295,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		depth++
 	}
 
+	// Explicitly save any pending media cache data before completing the crawl
+	log.Info().Msg("Saving final state before marking crawl as completed")
+	if closeErr := sm.Close(); closeErr != nil {
+		log.Warn().Err(closeErr).Msg("Error during final state save, but will continue with crawl completion")
+	}
+	
 	completionMetadata := map[string]interface{}{
 		"status":          "completed",
 		"endTime":         time.Now(),
@@ -320,6 +345,15 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	// Process each page in the current layer
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
 		pageToProcess := layer.Pages[pageIndex]
+		
+		// Print debug information about each page discovered during crawl restart
+		log.Debug().
+			Str("url", pageToProcess.URL).
+			Str("status", pageToProcess.Status).
+			Str("id", pageToProcess.ID).
+			Int("message_count", len(pageToProcess.Messages)).
+			Bool("resuming_execution", isResumingSameCrawlExecution).
+			Msg("Page discovered during crawl restart in Dapr mode")
 		
 		// Skip already processed pages
 		if pageToProcess.Status == "fetched" {

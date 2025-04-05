@@ -661,8 +661,24 @@ func processAllMessagesWithProcessor(
 	if err != nil {
 		return nil, err
 	}
+	
+	log.Info().
+		Int("total_messages", len(owner.Messages)).
+		Str("page_url", owner.URL).
+		Str("page_id", owner.ID).
+		Msg("Starting message processing after resampling")
+		
 	var processErrors []error
+	var fetched, deleted, processed, failed int
+	
 	for _, message := range owner.Messages {
+		log.Debug().
+			Int64("chat_id", message.ChatID).
+			Int64("message_id", message.MessageID).
+			Str("status", message.Status).
+			Str("page_id", message.PageID).
+			Msg("Evaluating message for processing")
+			
 		if message.Status != "fetched" && message.Status != "deleted" {
 			var discMessage *client.Message
 			for _, m := range messages {
@@ -674,20 +690,39 @@ func processAllMessagesWithProcessor(
 
 			// Skip messages that don't exist in the latest fetch
 			if discMessage == nil {
-				log.Warn().Msgf("Message %d not found in latest fetch, marking as deleted", message.MessageID)
+				log.Warn().
+					Int64("chat_id", message.ChatID).
+					Int64("message_id", message.MessageID).
+					Str("page_id", message.PageID).
+					Msg("Message not found in latest fetch, marking as deleted")
 				sm.UpdateMessage(owner.ID, message.ChatID, message.MessageID, "deleted")
+				deleted++
 				continue
 			}
 
+			processed++
+			log.Debug().
+				Int64("chat_id", message.ChatID).
+				Int64("message_id", message.MessageID).
+				Str("status", message.Status).
+				Str("page_id", message.PageID).
+				Msg("Processing message")
+				
 			// Try to process the message, but continue even if it fails
 			outlinks, err := processor.ProcessMessage(tdlibClient, discMessage, message.MessageID, message.ChatID, info, crawlID, channelUsername, &sm, cfg)
 
 			if err != nil {
-				log.Error().Err(err).Msgf("Error processing message %d", message.MessageID)
+				log.Error().Err(err).
+					Int64("chat_id", message.ChatID).
+					Int64("message_id", message.MessageID).
+					Str("page_id", message.PageID).
+					Msg("Error processing message")
 				processErrors = append(processErrors, err)
 				sm.UpdateMessage(owner.ID, message.MessageID, message.ChatID, "failed")
+				failed++
 			} else {
 				sm.UpdateMessage(owner.ID, message.MessageID, message.ChatID, "fetched")
+				fetched++
 
 				if outlinks != nil {
 					// Get the current channel URL from the owner's URL
@@ -714,6 +749,17 @@ func processAllMessagesWithProcessor(
 		}
 	}
 
+	// Log processing summary
+	log.Info().
+		Int("messages_processed", processed).
+		Int("messages_fetched", fetched).
+		Int("messages_deleted", deleted).
+		Int("messages_failed", failed).
+		Int("discovered_channels", len(discoveredChannels)).
+		Str("page_url", owner.URL).
+		Str("page_id", owner.ID).
+		Msg("Message processing summary")
+	
 	owner.Status = "fetched"
 	err = sm.UpdatePage(*owner)
 	if err != nil {
@@ -743,29 +789,64 @@ func processAllMessagesWithProcessor(
 // IMPORTANT: Messages that are already marked as "fetched" will NOT be marked for
 // resampling. This prevents unnecessary reprocessing of messages when resuming a crawl.
 func resampleMarker(messages []state.Message, discoveredMessages []state.Message) []state.Message {
+	log.Debug().
+		Int("existing_message_count", len(messages)).
+		Int("discovered_message_count", len(discoveredMessages)).
+		Msg("Starting message resample marking")
+		
+	// Build lookup map for efficient checking
 	discoveredMap := make(map[string]bool)
 	for _, msg := range discoveredMessages {
 		key := fmt.Sprintf("%d_%d", msg.ChatID, msg.MessageID)
 		discoveredMap[key] = true
 	}
 
+	var keptFetched, markedResample, markedDeleted int
+	
 	// Process each message in the original messages slice
 	for i := range messages {
+		key := fmt.Sprintf("%d_%d", messages[i].ChatID, messages[i].MessageID)
+		originalStatus := messages[i].Status
+		
 		// Skip messages that are already marked as "fetched" - don't reprocess them
 		if messages[i].Status == "fetched" {
+			keptFetched++
+			log.Debug().
+				Int64("chat_id", messages[i].ChatID).
+				Int64("message_id", messages[i].MessageID).
+				Str("page_id", messages[i].PageID).
+				Msg("Keeping message marked as fetched")
 			continue
 		}
 		
-		key := fmt.Sprintf("%d_%d", messages[i].ChatID, messages[i].MessageID)
-
 		// If message exists in discoveredMessages, mark as unfetched for re-processing
 		if discoveredMap[key] {
 			messages[i].Status = "resample"
+			markedResample++
+			log.Debug().
+				Int64("chat_id", messages[i].ChatID).
+				Int64("message_id", messages[i].MessageID).
+				Str("page_id", messages[i].PageID).
+				Str("old_status", originalStatus).
+				Msg("Marking message for resampling")
 		} else {
 			// If message doesn't exist in discoveredMessages, mark as deleted
 			messages[i].Status = "deleted"
+			markedDeleted++
+			log.Debug().
+				Int64("chat_id", messages[i].ChatID).
+				Int64("message_id", messages[i].MessageID).
+				Str("page_id", messages[i].PageID).
+				Str("old_status", originalStatus).
+				Msg("Marking message as deleted")
 		}
 	}
+	
+	log.Debug().
+		Int("kept_fetched", keptFetched).
+		Int("marked_resample", markedResample).
+		Int("marked_deleted", markedDeleted).
+		Msg("Message resample marking completed")
 
 	return messages
 }
@@ -786,6 +867,13 @@ func resampleMarker(messages []state.Message, discoveredMessages []state.Message
 // those not already present in the map. This optimizes message processing by avoiding
 // redundant work on messages that have already been processed in previous crawls.
 func addNewMessages(discoveredMessages []state.Message, owner *state.Page) []state.Message {
+	log.Debug().
+		Int("discovered_message_count", len(discoveredMessages)).
+		Int("existing_message_count", len(owner.Messages)).
+		Str("page_url", owner.URL).
+		Str("page_id", owner.ID).
+		Msg("Adding new messages to page")
+		
 	var newMessages []state.Message
 	existingMessages := make(map[string]bool)
 
@@ -803,10 +891,26 @@ func addNewMessages(discoveredMessages []state.Message, owner *state.Page) []sta
 
 		// If the message doesn't already exist, add it to the new messages list
 		if !existingMessages[key] {
-			// Add a pointer to the message to the new messages list
+			// Add the message to the new messages list
 			newMessages = append(newMessages, discoveredMessages[i])
+			log.Debug().
+				Int64("chat_id", msg.ChatID).
+				Int64("message_id", msg.MessageID).
+				Str("page_id", owner.ID).
+				Msg("Adding new message to collection")
+		} else {
+			log.Debug().
+				Int64("chat_id", msg.ChatID).
+				Int64("message_id", msg.MessageID).
+				Str("page_id", owner.ID).
+				Msg("Skipping already existing message")
 		}
 	}
+	
+	log.Debug().
+		Int("new_message_count", len(newMessages)).
+		Str("page_url", owner.URL).
+		Msg("New messages identified for page")
 
 	return newMessages
 }

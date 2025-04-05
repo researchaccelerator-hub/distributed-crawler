@@ -13,7 +13,7 @@ import (
 )
 
 func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPosts int) ([]*client.Message, error) {
-	log.Info().Msgf("Fetching messages for channel %s since %s", page.URL, minPostDate.Format("2006-01-02 15:04:05"))
+	log.Debug().Msgf("Fetching messages for channel %s since %s", page.URL, minPostDate.Format("2006-01-02 15:04:05"))
 	var allMessages []*client.Message
 	var fromMessageId int64 = 0 // Start from the latest message
 	var oldestMessageId int64 = 0
@@ -22,7 +22,7 @@ func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *s
 	minPostUnix := minPostDate.Unix()
 
 	for {
-		log.Info().Msgf("Fetching message batch for channel %s starting from ID %d at depth: %v", page.URL, fromMessageId, page.Depth)
+		log.Debug().Msgf("Fetching message batch for channel %s starting from ID %d at depth: %v", page.URL, fromMessageId, page.Depth)
 		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 			ChatId:        chatID,
 			FromMessageId: fromMessageId,
@@ -43,7 +43,7 @@ func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *s
 		for _, msg := range chatHistory.Messages {
 			// Compare message timestamp with minPostDate
 			if int64(msg.Date) < minPostUnix {
-				log.Info().Msgf("Reached messages older than minimum date (message date: %v, min date: %v)",
+				log.Debug().Msgf("Reached messages older than minimum date (message date: %v, min date: %v)",
 					time.Unix(int64(msg.Date), 0).Format("2006-01-02 15:04:05"),
 					minPostDate.Format("2006-01-02 15:04:05"))
 				reachedOldMessages = true
@@ -76,7 +76,7 @@ func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *s
 		fromMessageId = lastMessageId
 	}
 
-	log.Info().Msgf("Fetched a total of %d messages for channel %s since %s",
+	log.Debug().Msgf("Fetched a total of %d messages for channel %s since %s",
 		len(allMessages), page.URL, minPostDate.Format("2006-01-02 15:04:05"))
 	return allMessages, nil
 }
@@ -143,7 +143,7 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelUsername stri
 //	An integer representing the total number of messages in the chat, or an error if the
 //	operation fails.
 func GetMessageCount(tdlibClient crawler.TDLibClient, messages []*client.Message, chatID int64, channelname string) (int, error) {
-	log.Info().Msgf("Getting message count for channel %s", channelname)
+	log.Debug().Msgf("Getting message count for channel %s", channelname)
 
 	return len(messages), nil
 }
@@ -151,7 +151,7 @@ func GetMessageCount(tdlibClient crawler.TDLibClient, messages []*client.Message
 // GetViewCount retrieves the view count from a given message's InteractionInfo.
 // If InteractionInfo is nil, it returns 0 as the default view count.
 func GetViewCount(message *client.Message, channelname string) int {
-	log.Info().Msgf("Getting message view count for channel %s", channelname)
+	log.Debug().Msgf("Getting message view count for channel %s", channelname)
 	if message.InteractionInfo != nil {
 		return int(message.InteractionInfo.ViewCount)
 	}
@@ -164,7 +164,7 @@ func GetViewCount(message *client.Message, channelname string) int {
 // If InteractionInfo is nil or an error occurs, it returns 0 and an error, respectively.
 func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) (int, error) {
 	// Fetch the message details
-	log.Info().Msgf("Getting message share count for channel %s", channelname)
+	log.Debug().Msgf("Getting message share count for channel %s", channelname)
 	message, err := tdlibClient.GetMessage(&client.GetMessageRequest{
 		ChatId:    chatID,
 		MessageId: messageID,
@@ -195,7 +195,7 @@ func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int
 //	An integer representing the total number of views across all messages in the channel, or an error if the operation fails.
 func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Message, channelID int64, channelname string) (int, error) {
 	var totalViews int64
-	log.Info().Msgf("Getting total views for channel %s", channelname)
+	log.Debug().Msgf("Getting total views for channel %s", channelname)
 	for _, m := range messages {
 
 		if m.InteractionInfo != nil {
@@ -204,7 +204,7 @@ func GetTotalChannelViews(tdlibClient crawler.TDLibClient, messages []*client.Me
 
 	}
 
-	log.Info().Msgf("Total views for channel %s: %d", channelname, totalViews)
+	log.Debug().Msgf("Total views for channel %s: %d", channelname, totalViews)
 	return int(totalViews), nil
 }
 
@@ -232,7 +232,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		return nil, fmt.Errorf("tdlibClient is nil")
 	}
 
-	log.Info().
+	log.Debug().
 		Str("channel", channelname).
 		Int64("chatID", chatID).
 		Int64("messageID", messageID).
@@ -459,7 +459,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 		// Check if threadHistory is nil or empty
 		if threadHistory == nil || len(threadHistory.Messages) == 0 {
-			log.Info().
+			log.Debug().
 				Str("channel", channelname).
 				Int64("chatID", chatID).
 				Int64("messageID", messageID).
@@ -471,7 +471,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		}
 
 		// Log the number of messages retrieved in this batch
-		log.Info().
+		log.Debug().
 			Str("channel", channelname).
 			Int64("chatID", chatID).
 			Int64("messageID", messageID).
@@ -564,7 +564,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 			// Check if we've reached the maximum number of comments
 			if maxcomments > -1 && len(comments) >= maxcomments {
-				log.Info().
+				log.Debug().
 					Str("channel", channelname).
 					Int64("chatID", chatID).
 					Int64("messageID", messageID).
@@ -579,7 +579,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		}
 
 		// Log the number of comments added in this batch
-		log.Info().
+		log.Debug().
 			Str("channel", channelname).
 			Int64("chatID", chatID).
 			Int64("messageID", messageID).
@@ -594,7 +594,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 
 		// Check if we have messages to get the last ID
 		if len(threadHistory.Messages) == 0 {
-			log.Info().
+			log.Debug().
 				Str("channel", channelname).
 				Int64("chatID", chatID).
 				Int64("messageID", messageID).
@@ -644,7 +644,7 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 		}
 	}
 
-	log.Info().
+	log.Debug().
 		Str("channel", channelname).
 		Int64("chatID", chatID).
 		Int64("messageID", messageID).
@@ -753,7 +753,7 @@ func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 		}
 
 	default:
-		log.Info().
+		log.Debug().
 			Str("senderType", fmt.Sprintf("%T", msg.SenderId)).
 			Msg("Unknown sender type")
 	}
