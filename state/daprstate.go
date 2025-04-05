@@ -1689,7 +1689,20 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) erro
 
 			// Add page to in-memory page map
 			if !cont {
-				page.Status = "unfetched"
+				// Preserve fetched status when loading from DAPR
+				if page.Status != "fetched" {
+					page.Status = "unfetched"
+					log.Debug().
+						Str("pageID", pageID).
+						Str("url", page.URL).
+						Str("old_status", page.Status).
+						Msg("Resetting non-fetched page status to unfetched")
+				} else {
+					log.Debug().
+						Str("pageID", pageID).
+						Str("url", page.URL).
+						Msg("Preserving fetched status from Dapr storage")
+				}
 				page.Timestamp = time.Now()
 			}
 
@@ -1844,13 +1857,26 @@ func (dsm *DaprStateManager) GetLayerByDepth(depth int) ([]Page, error) {
 			continue
 		}
 
-		// Reset status when fetching for a new crawl
-		if page.Status != "unfetched" {
+		// Preserve the "fetched" status from Dapr storage
+		// Only reset non-fetched pages to "unfetched" status
+		if page.Status != "unfetched" && page.Status != "fetched" {
 			page.Status = "unfetched"
 			page.Messages = []Message{}
 			page.Timestamp = time.Now()
-
-			// Save the updated page back to memory and Dapr
+			
+			// Save the updated page back to memory
+			dsm.mutex.Lock()
+			dsm.pageMap[id] = page
+			dsm.mutex.Unlock()
+		} else if page.Status == "fetched" {
+			// When status is "fetched", preserve it in memory
+			// This prevents re-processing pages that were already completed
+			log.Debug().
+				Str("pageID", id).
+				Str("url", page.URL).
+				Msg("Preserving fetched status from Dapr storage")
+				
+			// Still update memory cache with the fetched page
 			dsm.mutex.Lock()
 			dsm.pageMap[id] = page
 			dsm.mutex.Unlock()

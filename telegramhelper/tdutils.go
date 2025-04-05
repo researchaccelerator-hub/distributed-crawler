@@ -86,7 +86,7 @@ func removeMultimedia(filedir string) error {
 		return err
 	}
 
-	log.Info().
+	log.Debug().
 		Str("directory", filedir).
 		Int("files_removed", fileCount).
 		Msg("Directory contents removed successfully")
@@ -226,7 +226,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 			Str("remote_id", remoteid).
 			Msg("Failed to store file")
 	} else {
-		log.Info().
+		log.Debug().
 			Str("storage_location", storageLocation).
 			Str("channel", channelName).
 			Float64("size_mb", sizeInMB).
@@ -688,7 +688,7 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 			Str("unique_id", f.Remote.UniqueId).
 			Msg("Error checking file cache")
 	} else if exists {
-		log.Info().
+		log.Debug().
 			Str("path", existingPath).
 			Str("unique_id", f.Remote.UniqueId).
 			Msg("File already processed, skipping download")
@@ -727,7 +727,7 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 		return "", "", fmt.Errorf("empty file path received from TDLib")
 	}
 
-	log.Info().
+	log.Debug().
 		Str("path", downloadedFile.Local.Path).
 		Str("unique_id", f.Remote.UniqueId).
 		Int32("downloaded_size", int32(downloadedFile.Size)).

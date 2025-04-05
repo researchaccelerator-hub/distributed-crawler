@@ -367,6 +367,25 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		
 		log.Info().Msgf("Processing layer at depth %d with %d pages", currentDepth, len(currentLayer))
 		
+		// Print all page statuses before processing
+		log.Info().Int("page_count", len(currentLayer)).Int("depth", currentDepth).Msg("Page status summary before processing")
+		pageStatusCount := make(map[string]int)
+		for _, page := range currentLayer {
+			pageStatusCount[page.Status]++
+			log.Debug().
+				Str("url", page.URL).
+				Str("status", page.Status).
+				Str("id", page.ID).
+				Int("message_count", len(page.Messages)).
+				Time("timestamp", page.Timestamp).
+				Bool("resuming_execution", isResumingSameCrawlExecution).
+				Msg("Page status before processing in standalone mode")
+		}
+		// Log the counts of pages by status
+		for status, count := range pageStatusCount {
+			log.Info().Str("status", status).Int("count", count).Int("depth", currentDepth).Msg("Page status count")
+		}
+		
 		// Track statistics for this layer
 		var layerPages, layerSkipped, layerSuccess, layerError int
 		layerPages = len(currentLayer)
@@ -376,6 +395,15 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		// Find the first page in the layer that needs processing
 		startIndex := 0
 		for i, la := range currentLayer {
+			// Print debug information about each page discovered during crawl restart
+			log.Debug().
+				Str("url", la.URL).
+				Str("status", la.Status).
+				Str("id", la.ID).
+				Int("message_count", len(la.Messages)).
+				Bool("resuming_execution", isResumingSameCrawlExecution).
+				Msg("Page discovered during crawl restart")
+				
 			// Check the page status to determine if we need to process it
 			if la.Status == "fetched" {
 				if isResumingSameCrawlExecution {
