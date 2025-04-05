@@ -1569,22 +1569,14 @@ func (dsm *DaprStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 				}
 
 				// If we get here, the execution has a complete layer map with pages,
-				// but all pages are processed. We'll keep it as a fallback option
-				// but continue checking other executions first
+				// but all pages are processed or the execution is marked as completed.
 				log.Info().
 					Str("crawlID", crawlID).
 					Str("executionID", prevExecID).
 					Msg("Found previous execution with valid layer map but all pages are completed")
 
-				// If this is the last execution we'll check and we have no better options,
-				// use this one even though all its pages are complete
-				if i == 0 {
-					log.Info().
-						Str("crawlID", crawlID).
-						Str("executionID", prevExecID).
-						Msg("Using completed execution with valid layer map as a last resort")
-					return prevExecID, true, nil
-				}
+				// Do NOT use completed crawls as fallbacks
+				// Skip this execution and continue looking for truly incomplete ones
 			}
 		} else {
 			log.Warn().Err(err).Str("crawlID", crawlID).Msg("Failed to parse crawl metadata")
