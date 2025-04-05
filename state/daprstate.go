@@ -1203,8 +1203,8 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 	dsm.mediaCacheIndex.MediaIndex[mediaID] = dsm.activeMediaCache.CacheID
 	dsm.mediaCacheIndex.UpdateTime = time.Now()
 
-	// Periodically save active shard (every 100 items)
-	shouldSave := len(dsm.activeMediaCache.Items)%100 == 0
+	// Periodically save active shard (every 20 items instead of 100 to reduce potential data loss)
+	shouldSave := len(dsm.activeMediaCache.Items)%20 == 0
 
 	// Periodically clean up stale cache entries (every 500 items)
 	shouldCleanup := len(dsm.activeMediaCache.Items)%500 == 0
@@ -1381,9 +1381,25 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 		Msg("Completed media cache cleanup")
 }
 
-// Close releases resources
+// Close releases resources and ensures all data is persisted
 func (dsm *DaprStateManager) Close() error {
-	// No special cleanup needed
+	// Save the current media cache state before closing
+	// This ensures any unsaved cache data is persisted
+	
+	log.Info().Msg("Performing final media cache save during shutdown")
+	
+	// Save the active media cache shard
+	activeCacheCopy := dsm.activeMediaCache
+	if err := dsm.saveMediaCacheShard(&activeCacheCopy); err != nil {
+		log.Warn().Err(err).Msg("Failed to save active media cache shard during shutdown")
+	}
+	
+	// Save the media cache index
+	if err := dsm.saveMediaCacheIndex(); err != nil {
+		log.Warn().Err(err).Msg("Failed to save media cache index during shutdown")
+	}
+	
+	log.Info().Msg("Media cache successfully saved during shutdown")
 	return nil
 }
 

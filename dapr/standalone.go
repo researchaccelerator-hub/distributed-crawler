@@ -295,6 +295,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		depth++
 	}
 
+	// Explicitly save any pending media cache data before completing the crawl
+	log.Info().Msg("Saving final state before marking crawl as completed")
+	if closeErr := sm.Close(); closeErr != nil {
+		log.Warn().Err(closeErr).Msg("Error during final state save, but will continue with crawl completion")
+	}
+	
 	completionMetadata := map[string]interface{}{
 		"status":          "completed",
 		"endTime":         time.Now(),
