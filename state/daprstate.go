@@ -1169,17 +1169,22 @@ func (dsm *DaprStateManager) MarkMediaAsProcessed(mediaID string) error {
 // addMediaToCacheWithSharding handles adding a media item to the sharded cache system
 func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, mediaID string, item MediaCacheItem) error {
 	dsm.mediaCacheIndexMutex.Lock()
-	defer dsm.mediaCacheIndexMutex.Unlock()
 
 	// Check if we need to create a new shard (current shard is at or near capacity)
 	if len(dsm.activeMediaCache.Items) >= dsm.maxCacheItemsPerShard {
-		// Save current shard before creating a new one
-		err := dsm.saveMediaCacheShard(&dsm.activeMediaCache)
-		if err != nil {
-			return fmt.Errorf("failed to save full media cache shard: %w", err)
+		// Create a deep copy of the active cache before saving
+		activeCacheCopy := MediaCache{
+			Items:      make(map[string]MediaCacheItem, len(dsm.activeMediaCache.Items)),
+			UpdateTime: dsm.activeMediaCache.UpdateTime,
+			CacheID:    dsm.activeMediaCache.CacheID,
 		}
-
-		// Create a new shard with a fresh UUID
+		
+		// Copy all items to the new map
+		for k, v := range dsm.activeMediaCache.Items {
+			activeCacheCopy.Items[k] = v
+		}
+		
+		// Create a new shard with a fresh UUID for the active cache
 		newShardID := uuid.New().String()
 		dsm.activeMediaCache = MediaCache{
 			Items:      make(map[string]MediaCacheItem),
@@ -1189,10 +1194,25 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 
 		// Add new shard to the index
 		dsm.mediaCacheIndex.Shards = append(dsm.mediaCacheIndex.Shards, newShardID)
+		
+		// Log the shard creation
 		log.Info().
 			Str("newShardID", newShardID).
 			Int("totalShards", len(dsm.mediaCacheIndex.Shards)).
 			Msg("Created new media cache shard after reaching capacity limit")
+			
+		// Unlock before IO operations
+		dsm.mediaCacheIndexMutex.Unlock()
+		
+		// Save the copy outside the lock
+		err := dsm.saveMediaCacheShard(&activeCacheCopy)
+		if err != nil {
+			log.Warn().Err(err).Msg("Failed to save full media cache shard")
+			// Continue despite error - we'll retry later
+		}
+		
+		// Reacquire the lock
+		dsm.mediaCacheIndexMutex.Lock()
 	}
 
 	// Add the item to the active shard
@@ -1208,14 +1228,28 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 
 	// Periodically clean up stale cache entries (every 500 items)
 	shouldCleanup := len(dsm.activeMediaCache.Items)%500 == 0
-
+	
+	// Make a deep copy of active shard if we need to save it
+	var activeCacheCopy MediaCache
+	if shouldSave {
+		activeCacheCopy = MediaCache{
+			Items:      make(map[string]MediaCacheItem, len(dsm.activeMediaCache.Items)),
+			UpdateTime: dsm.activeMediaCache.UpdateTime,
+			CacheID:    dsm.activeMediaCache.CacheID,
+		}
+		
+		// Copy all items to the new map
+		for k, v := range dsm.activeMediaCache.Items {
+			activeCacheCopy.Items[k] = v
+		}
+	}
+	
 	// Release the lock before any IO operations
 	dsm.mediaCacheIndexMutex.Unlock()
 
 	// Execute these operations outside the lock to improve concurrency
 	if shouldSave {
-		// Create a copy of active shard for thread safety
-		activeCacheCopy := dsm.activeMediaCache
+		// Save the copy we created inside the lock
 		err := dsm.saveMediaCacheShard(&activeCacheCopy)
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to save active media cache shard")
@@ -1232,9 +1266,6 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 	if shouldCleanup {
 		go dsm.cleanupStaleMediaCacheEntries(ctx)
 	}
-
-	// Re-acquire the lock since we're using defer Unlock()
-	dsm.mediaCacheIndexMutex.Lock()
 
 	return nil
 }
@@ -2280,11 +2311,27 @@ func (dsm *DaprStateManager) saveMediaCacheIndex() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Update timestamp
-	dsm.mediaCacheIndex.UpdateTime = time.Now()
+	// Create a deep copy of the media cache index to avoid concurrent access issues
+	dsm.mediaCacheIndexMutex.RLock()
+	indexCopy := MediaCacheIndex{
+		Shards:     make([]string, len(dsm.mediaCacheIndex.Shards)),
+		MediaIndex: make(map[string]string, len(dsm.mediaCacheIndex.MediaIndex)),
+		UpdateTime: time.Now(), // Set current time for the update
+	}
+	
+	// Copy the slices and maps
+	copy(indexCopy.Shards, dsm.mediaCacheIndex.Shards)
+	for k, v := range dsm.mediaCacheIndex.MediaIndex {
+		indexCopy.MediaIndex[k] = v
+	}
+	
+	// Get counts for logging
+	indexSize := len(indexCopy.MediaIndex)
+	shardCount := len(indexCopy.Shards)
+	dsm.mediaCacheIndexMutex.RUnlock()
 
-	// Marshal the index
-	indexData, err := json.Marshal(dsm.mediaCacheIndex)
+	// Marshal the index copy (safe since it's our own copy)
+	indexData, err := json.Marshal(indexCopy)
 	if err != nil {
 		return fmt.Errorf("failed to marshal media cache index: %w", err)
 	}
@@ -2304,30 +2351,36 @@ func (dsm *DaprStateManager) saveMediaCacheIndex() error {
 	}
 
 	log.Debug().
-		Int("indexSize", len(dsm.mediaCacheIndex.MediaIndex)).
-		Int("shardCount", len(dsm.mediaCacheIndex.Shards)).
+		Int("indexSize", indexSize).
+		Int("shardCount", shardCount).
 		Msg("Media cache index saved to Dapr")
 
 	return nil
 }
 
 // saveMediaCacheShard saves a specific media cache shard to Dapr
+// Important: This function expects that the MediaCache passed is a copy that won't be modified
+// while this function executes. The caller must ensure proper synchronization.
 func (dsm *DaprStateManager) saveMediaCacheShard(shard *MediaCache) error {
 	// Create a context with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Update timestamp
+	// Update timestamp (safe since we're working with a copy)
 	shard.UpdateTime = time.Now()
+	
+	// Get item count for logging before marshaling
+	itemCount := len(shard.Items)
+	shardID := shard.CacheID
 
-	// Marshal the shard
+	// Marshal the shard - this is safe because we're working with an independent copy
 	shardData, err := json.Marshal(shard)
 	if err != nil {
 		return fmt.Errorf("failed to marshal media cache shard: %w", err)
 	}
 
 	// Save to Dapr
-	shardKey := dsm.getShardKey(shard.CacheID)
+	shardKey := dsm.getShardKey(shardID)
 	err = (*dsm.client).SaveState(
 		ctx,
 		dsm.stateStoreName,
@@ -2341,8 +2394,8 @@ func (dsm *DaprStateManager) saveMediaCacheShard(shard *MediaCache) error {
 	}
 
 	log.Debug().
-		Str("shardID", shard.CacheID).
-		Int("itemCount", len(shard.Items)).
+		Str("shardID", shardID).
+		Int("itemCount", itemCount).
 		Msg("Media cache shard saved to Dapr")
 
 	return nil
