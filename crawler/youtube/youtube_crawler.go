@@ -8,56 +8,15 @@ import (
 
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
+	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 )
 
-// YouTubeClient defines the methods needed for YouTube API operations
-type YouTubeClient interface {
-	// Connect establishes a connection to the YouTube API
-	Connect(ctx context.Context) error
-	
-	// Disconnect closes the connection to the YouTube API
-	Disconnect(ctx context.Context) error
-	
-	// GetChannelInfo retrieves information about a YouTube channel
-	GetChannelInfo(ctx context.Context, channelID string) (*YouTubeChannel, error)
-	
-	// GetVideos retrieves videos from a YouTube channel
-	GetVideos(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)
-}
-
-// YouTubeChannel represents a YouTube channel
-type YouTubeChannel struct {
-	ID           string
-	Title        string
-	Description  string
-	SubscriberCount int64
-	ViewCount    int64
-	VideoCount   int64
-	PublishedAt  time.Time
-	Thumbnails   map[string]string
-}
-
-// YouTubeVideo represents a YouTube video
-type YouTubeVideo struct {
-	ID          string
-	ChannelID   string
-	Title       string
-	Description string
-	PublishedAt time.Time
-	ViewCount   int64
-	LikeCount   int64
-	CommentCount int64
-	Duration    string
-	Thumbnails  map[string]string
-	Tags        []string
-}
-
 // YouTubeCrawler implements the crawler.Crawler interface for YouTube
 type YouTubeCrawler struct {
-	client       YouTubeClient
-	stateManager state.StateManager
+	client       youtubemodel.YouTubeClient
+	stateManager state.StateManagementInterface
 	initialized  bool
 }
 
@@ -80,7 +39,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 		return fmt.Errorf("client not provided in config")
 	}
 	
-	youtubeClient, ok := clientObj.(YouTubeClient)
+	youtubeClient, ok := clientObj.(youtubemodel.YouTubeClient)
 	if !ok {
 		return fmt.Errorf("provided client is not a valid YouTube client")
 	}
@@ -90,9 +49,9 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 		return fmt.Errorf("state_manager not provided in config")
 	}
 	
-	stateManager, ok := stateManagerObj.(state.StateManager)
+	stateManager, ok := stateManagerObj.(state.StateManagementInterface)
 	if !ok {
-		return fmt.Errorf("provided state_manager is not valid")
+		return fmt.Errorf("provided state_manager is not a valid StateManagementInterface")
 	}
 	
 	c.client = youtubeClient
@@ -198,8 +157,8 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 	for _, video := range videos {
 		post := c.convertVideoToPost(video)
 		
-		// Save the post to the state manager
-		if err := c.stateManager.SavePost(ctx, post); err != nil {
+		// Save the post to the state manager's storage
+		if err := c.stateManager.StorePost(video.ChannelID, post); err != nil {
 			log.Error().Err(err).Str("video_id", video.ID).Msg("Failed to save video post")
 			// Continue with next video
 		}
@@ -229,19 +188,43 @@ func (c *YouTubeCrawler) Close() error {
 	return nil
 }
 
+// Private cache of channel names to avoid repeated GetChannelInfo API calls within the same crawler session
+var channelNameCache = make(map[string]string)
+
 // convertVideoToPost converts a YouTubeVideo to model.Post
-func (c *YouTubeCrawler) convertVideoToPost(video *YouTubeVideo) model.Post {
-	// Get channel info for consistent naming
+func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) model.Post {
+	// Get channel info for consistent naming - check cache first
 	var channelName string
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	var ok bool
 	
-	channel, err := c.client.GetChannelInfo(ctx, video.ChannelID)
-	if err != nil {
-		log.Warn().Err(err).Str("channel_id", video.ChannelID).Msg("Failed to get channel info for video conversion")
-		channelName = video.ChannelID
+	// For channel data
+	var channel *youtubemodel.YouTubeChannel
+	
+	// Check if we already have this channel name in our cache
+	if channelName, ok = channelNameCache[video.ChannelID]; ok {
+		log.Debug().
+			Str("channel_id", video.ChannelID).
+			Str("channel_name", channelName).
+			Msg("Using cached channel name for video conversion")
 	} else {
-		channelName = channel.Title
+		// Need to fetch from API
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		
+		var err error
+		channel, err = c.client.GetChannelInfo(ctx, video.ChannelID)
+		if err != nil {
+			log.Warn().Err(err).Str("channel_id", video.ChannelID).Msg("Failed to get channel info for video conversion")
+			channelName = video.ChannelID
+		} else {
+			channelName = channel.Title
+			// Cache the result for future use
+			channelNameCache[video.ChannelID] = channelName
+			log.Debug().
+				Str("channel_id", video.ChannelID).
+				Str("channel_name", channelName).
+				Msg("Cached channel name for future video conversions")
+		}
 	}
 	
 	// Calculate video engagement (likes + comments + views)
@@ -295,15 +278,25 @@ func (c *YouTubeCrawler) convertVideoToPost(video *YouTubeVideo) model.Post {
 		Reactions:     map[string]int{"like": int(video.LikeCount)},
 	}
 	
-	// Get channel data if available
-	if channel != nil {
-		// Construct channel URL based on ID format
-		channelURL := fmt.Sprintf("https://www.youtube.com/channel/%s", video.ChannelID)
-		if len(video.ChannelID) > 0 && video.ChannelID[0] == '@' {
-			// Handle username format (@username)
-			channelURL = fmt.Sprintf("https://www.youtube.com/%s", video.ChannelID)
+	// Construct channel URL based on ID format
+	channelURL := fmt.Sprintf("https://www.youtube.com/channel/%s", video.ChannelID)
+	if len(video.ChannelID) > 0 && video.ChannelID[0] == '@' {
+		// Handle username format (@username)
+		channelURL = fmt.Sprintf("https://www.youtube.com/%s", video.ChannelID)
+	}
+	
+	// Only try to get detailed channel data if we had to make an API call anyway
+	// This avoids unnecessary API calls for repeated video conversions
+	if ok {
+		// We already had the channel name in cache, so don't need detailed channel data
+		// Just use the basic info we have
+		post.ChannelData = model.ChannelData{
+			ChannelName: channelName,
+			ChannelURL:  channelURL,
+			ChannelURLExternal: channelURL,
 		}
-		
+	} else if channel != nil {
+		// We had to make an API call and got channel data, so use all the details
 		post.ChannelData = model.ChannelData{
 			ChannelName: channel.Title,
 			ChannelURL:  channelURL,
