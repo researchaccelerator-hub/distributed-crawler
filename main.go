@@ -124,6 +124,16 @@ var rootCmd = &cobra.Command{
 		}
 		zerolog.SetGlobalLevel(level)
 		log.Info().Str("log_level", level.String()).Msg("Logger initialized")
+		
+		// Check YouTube API key if platform is YouTube
+		if crawlerCfg.Platform == "youtube" {
+			if crawlerCfg.YouTubeAPIKey == "" {
+				fmt.Println("Error: When using --platform youtube, you must provide a valid YouTube API key with --youtube-api-key")
+				log.Error().Msg("YouTube API key is required but was not provided")
+			} else {
+				log.Info().Str("api_key_status", "provided").Str("api_key_length", fmt.Sprintf("%d chars", len(crawlerCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
+			}
+		}
 
 		// Load configuration file if specified
 		if cfgFile != "" {

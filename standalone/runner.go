@@ -3,8 +3,13 @@ package standalone
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
+	crawlercommon "github.com/researchaccelerator-hub/telegram-scraper/crawler/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler/youtube"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
@@ -216,7 +221,7 @@ func readURLsFromFile(filename string) ([]string, error) {
 func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	// Initialize state manager factory
-	log.Info().Msgf("Starting scraper for crawl ID: %s", crawlCfg.CrawlID)
+	log.Info().Str("platform", crawlCfg.Platform).Msgf("Starting %s scraper for crawl ID: %s", crawlCfg.Platform, crawlCfg.CrawlID)
 	smfact := state.DefaultStateManagerFactory{}
 
 	// Create a state manager configuration specifically for checking incomplete crawls
@@ -317,15 +322,108 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 	}
 
-	// Initialize the connection pool
-	crawl.InitConnectionPool(poolSize, crawlCfg.StorageRoot, crawlCfg)
-	defer crawl.CloseConnectionPool()
-
-	// Create a single non-pooled connection for backward compatibility
-	connect, err := crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to create Telegram connection")
-		return
+	// Platform-specific initialization
+	var connect crawler.TDLibClient
+	var ytClient clientpkg.Client
+	var ytCrawler crawler.Crawler
+	
+	// Setup cleanup for YouTube resources if needed
+	defer func() {
+		if ytCrawler != nil {
+			log.Info().Msg("Cleaning up YouTube crawler resources")
+			if err := ytCrawler.Close(); err != nil {
+				log.Warn().Err(err).Msg("Error while closing YouTube crawler")
+			}
+		}
+	}()
+	
+	if crawlCfg.Platform == "youtube" {
+		// YouTube platform initialization
+		log.Info().Msg("Initializing YouTube crawler components")
+		
+		// Validate YouTube API key
+		if crawlCfg.YouTubeAPIKey == "" {
+			log.Error().Msg("YouTube API key is required for YouTube platform. Please provide it with --youtube-api-key flag")
+			return
+		}
+		
+		// Create YouTube client using factory
+		clientCtx := context.Background()
+		clientFactory := clientpkg.NewDefaultClientFactory()
+		
+		// Debug API key passing
+		if crawlCfg.YouTubeAPIKey == "" {
+			log.Error().Msg("YouTube API key is empty - make sure you provided it with --youtube-api-key")
+		} else {
+			log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(crawlCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
+		}
+		
+		config := map[string]interface{}{
+			"api_key": crawlCfg.YouTubeAPIKey,
+		}
+		
+		var err error
+		ytClient, err = clientFactory.CreateClient(clientCtx, "youtube", config)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to create YouTube client")
+			return
+		}
+		
+		// Connect to YouTube API
+		err = ytClient.Connect(clientCtx)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to connect to YouTube API")
+			return
+		}
+		
+		// Create and initialize YouTube crawler factory
+		factory := crawler.NewCrawlerFactory()
+		if err = crawlercommon.RegisterAllCrawlers(factory); err != nil {
+			log.Error().Err(err).Msg("Failed to register crawlers")
+			return
+		}
+		
+		// Create YouTube crawler
+		ytCrawler, err = factory.GetCrawler(crawler.PlatformYouTube)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to create YouTube crawler")
+			return
+		}
+		
+		// Initialize the YouTube crawler
+		// Create YouTubeClient adapter
+		ytAdapter, adapterErr := youtube.NewClientAdapter(ytClient)
+		if adapterErr != nil {
+			err = fmt.Errorf("failed to create YouTube client adapter: %w", adapterErr)
+			log.Error().Err(err).Msg("YouTube client adapter creation failed")
+			return
+		}
+		
+		crawlerConfig := map[string]interface{}{
+			"client": ytAdapter,
+			"state_manager": sm,
+		}
+		
+		err = ytCrawler.Initialize(clientCtx, crawlerConfig)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to initialize YouTube crawler")
+			return
+		}
+		
+		log.Info().Msg("YouTube crawler components initialized successfully")
+	} else {
+		// Telegram platform initialization (default)
+		// Initialize the connection pool
+		crawl.InitConnectionPool(poolSize, crawlCfg.StorageRoot, crawlCfg)
+		defer crawl.CloseConnectionPool()
+	
+		// Create a single non-pooled connection for backward compatibility
+		var connectErr error
+		connect, connectErr = crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
+		if connectErr != nil {
+			log.Error().Err(connectErr).Msg("Failed to create Telegram connection")
+			return
+		}
 	}
 	
 	// Process layers sequentially starting from depth 0
@@ -412,20 +510,74 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 				log.Info().Msgf("Processing page: %s", la.URL)
 
-				// Use the connection pool if it's initialized
+				// Create context for operations
 				ctx := context.Background()
 				
-				// Try to get the connection pool stats
-				poolStats := crawl.GetConnectionPoolStats()
-				log.Info().Interface("poolStats", poolStats).Msg("Connection pool status")
-				
-				// Use the connection pool if it's initialized
-				if crawl.IsConnectionPoolInitialized() {
-					log.Info().Msg("Using connection pool for channel processing")
-					discoveredChannels, runErr = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+				// Process based on selected platform
+				if crawlCfg.Platform == "youtube" {
+					log.Info().Str("url", la.URL).Msg("Processing YouTube channel")
+					
+					// Create a crawl target for the YouTube channel
+					target := crawler.CrawlTarget{
+						Type: crawler.PlatformYouTube,
+						ID:   la.URL, // YouTube channel ID/handle
+					}
+					
+					// Fetch channel information first
+					channelInfo, err := ytCrawler.GetChannelInfo(ctx, target)
+					if err != nil {
+						log.Error().Err(err).Str("channel", la.URL).Msg("Failed to get YouTube channel info")
+						runErr = err
+					} else {
+						log.Info().
+							Str("channel_name", channelInfo.ChannelName).
+							Int("subscribers", channelInfo.ChannelEngagementData.FollowerCount).
+							Msg("Retrieved YouTube channel info")
+							
+						// Construct crawl job with appropriate time filters
+						// Construct crawl job with appropriate time filters
+						job := crawler.CrawlJob{
+							Target:   target,
+							FromTime: crawlCfg.MinPostDate,
+							ToTime:   time.Now(), // Use current time as the upper bound
+							Limit:    crawlCfg.MaxPosts,
+						}
+						
+						log.Debug().
+							Time("from_time", crawlCfg.MinPostDate).
+							Time("to_time", job.ToTime).
+							Int("limit", job.Limit).
+							Msg("YouTube crawl job configured")
+						
+						// Execute the crawl
+						result, err := ytCrawler.FetchMessages(ctx, job)
+						if err != nil {
+							log.Error().Err(err).Str("channel", la.URL).Msg("Failed to fetch YouTube videos")
+							runErr = err
+						} else {
+							log.Info().
+								Int("video_count", len(result.Posts)).
+								Str("channel", la.URL).
+								Msg("Successfully crawled YouTube channel")
+								
+							// For now, we don't handle outlinks from YouTube channels
+							discoveredChannels = []*state.Page{}
+						}
+					}
 				} else {
-					log.Info().Msg("No connection pool available, using single connection")
-					discoveredChannels, runErr = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+					// Telegram platform processing (default)
+					// Try to get the connection pool stats
+					poolStats := crawl.GetConnectionPoolStats()
+					log.Info().Interface("poolStats", poolStats).Msg("Connection pool status")
+					
+					// Use the connection pool if it's initialized
+					if crawl.IsConnectionPoolInitialized() {
+						log.Info().Msg("Using connection pool for channel processing")
+						discoveredChannels, runErr = crawl.RunForChannelWithPool(ctx, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+					} else {
+						log.Info().Msg("No connection pool available, using single connection")
+						discoveredChannels, runErr = crawl.RunForChannel(connect, &la, crawlCfg.StorageRoot, sm, crawlCfg)
+					}
 				}
 
 				if runErr != nil {
