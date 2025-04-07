@@ -203,7 +203,14 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		crawlexecid = common.GenerateCrawlID()
 		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
 	}
-
+	
+	// Track whether we're resuming the same execution ID or starting a new one
+	var isResumingSameCrawlExecution bool
+	if tempSM != nil {
+		existingExecID, exists, _ := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
+		isResumingSameCrawlExecution = exists && existingExecID != "" && crawlexecid == existingExecID
+	}
+	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Crawl execution mode")
 	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
@@ -255,6 +262,25 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			depth++
 			continue
 		}
+		
+		// Print all page statuses before processing
+		log.Info().Int("page_count", len(pages)).Int("depth", depth).Msg("Page status summary before processing")
+		pageStatusCount := make(map[string]int)
+		for _, page := range pages {
+			pageStatusCount[page.Status]++
+			log.Debug().
+				Str("url", page.URL).
+				Str("status", page.Status).
+				Str("id", page.ID).
+				Int("message_count", len(page.Messages)).
+				Time("timestamp", page.Timestamp).
+				Bool("resuming_execution", isResumingSameCrawlExecution).
+				Msg("Page status before processing in Dapr mode")
+		}
+		// Log the counts of pages by status
+		for status, count := range pageStatusCount {
+			log.Info().Str("status", status).Int("count", count).Int("depth", depth).Msg("Page status count")
+		}
 
 		// Skip if there are no pages at this depth
 		if len(pages) == 0 {
@@ -285,6 +311,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		depth++
 	}
 
+	// Explicitly save any pending media cache data before completing the crawl
+	log.Info().Msg("Saving final state before marking crawl as completed")
+	if closeErr := sm.Close(); closeErr != nil {
+		log.Warn().Err(closeErr).Msg("Error during final state save, but will continue with crawl completion")
+	}
+	
 	completionMetadata := map[string]interface{}{
 		"status":          "completed",
 		"endTime":         time.Now(),
@@ -306,6 +338,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 // It uses a semaphore pattern to limit concurrency and ensures all pages are processed before returning.
 // This version uses the connection pool for efficient client management.
 func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+	// In dapr mode it's harder to accurately detect this, so we'll simplify the approach
+	// to prevent reprocessing of fetched pages, always skip them
+	isResumingSameCrawlExecution := true
+	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Dapr always skips fetched pages")
 	// Map to collect all discovered channels
 	allDiscoveredChannels := make([]*state.Page, 0)
 
@@ -325,11 +361,28 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	// Process each page in the current layer
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
 		pageToProcess := layer.Pages[pageIndex]
-
+		
+		// Print debug information about each page discovered during crawl restart
+		log.Debug().
+			Str("url", pageToProcess.URL).
+			Str("status", pageToProcess.Status).
+			Str("id", pageToProcess.ID).
+			Int("message_count", len(pageToProcess.Messages)).
+			Bool("resuming_execution", isResumingSameCrawlExecution).
+			Msg("Page discovered during crawl restart in Dapr mode")
 		// Skip already processed pages
 		if pageToProcess.Status == "fetched" {
-			log.Debug().Msgf("Skipping already processed page: %s", pageToProcess.URL)
-			continue
+			if isResumingSameCrawlExecution {
+				// When resuming with the same crawlexecutionid, skip already fetched pages
+				// regardless of message status - this prevents reprocessing
+				log.Debug().Msgf("Skipping already fetched page during same execution resume: %s", pageToProcess.URL)
+				continue
+			} else {
+				// When starting a new crawlexecutionid, we'll process fetched pages
+				// and rely on the resample flag for message level decisions
+				log.Debug().Msgf("Processing fetched page in new execution, will use resample flag: %s", pageToProcess.URL)
+				// Continue processing this page
+			}
 		}
 
 		// Acquire semaphore slot (block if we're at max workers)

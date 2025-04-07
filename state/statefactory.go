@@ -5,6 +5,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// NewStateManagerFactory is a function that returns a new state manager factory.
+// This is designed to be easily mocked in tests.
+var NewStateManagerFactory = func() StateManagerFactory {
+	return &DefaultStateManagerFactory{}
+}
+
 // DefaultStateManagerFactory is the default implementation of StateManagerFactory
 // It creates state manager instances based on the provided configuration.
 type DefaultStateManagerFactory struct{}

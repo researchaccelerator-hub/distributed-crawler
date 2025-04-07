@@ -88,6 +88,22 @@ type MediaCacheItem struct {
 	Platform  string    `json:"platform,omitempty"` // Added for multi-platform support
 }
 
+// MediaCache represents a sharded cache for processed media items
+// This structure helps to avoid Dapr size limits by partitioning the cache
+type MediaCache struct {
+	Items      map[string]MediaCacheItem `json:"items"`      // Media cache items in this shard
+	UpdateTime time.Time                 `json:"updateTime"` // Last time this shard was updated
+	CacheID    string                    `json:"cacheId"`    // Unique ID for this cache shard
+}
+
+// MediaCacheIndex keeps track of which shard contains which media IDs
+// This is much smaller than the full cache and allows quick lookups
+type MediaCacheIndex struct {
+	Shards     []string          `json:"shards"`     // List of shard IDs
+	MediaIndex map[string]string `json:"mediaIndex"` // Maps media ID to shard ID
+	UpdateTime time.Time         `json:"updateTime"` // Last time the index was updated
+}
+
 // State represents the complete state of a crawl operation
 type State struct {
 	Layers      []*Layer      `json:"layers"`
