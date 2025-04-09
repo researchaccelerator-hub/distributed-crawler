@@ -13,8 +13,8 @@ import (
 
 // FileCleaner manages a scheduled task to clean up old files
 type FileCleaner struct {
-	baseDir           string // Base directory containing conn_* folders
-	targetSubPath     string // Subpath under each conn_* folder to check for files
+	baseDir           string      // Base directory containing conn_* folders
+	targetSubPaths    []string    // List of subpaths under each conn_* folder to check for files
 	cleanupInterval   time.Duration
 	fileAgeThreshold  time.Duration
 	stopChan          chan struct{}
@@ -26,10 +26,17 @@ type FileCleaner struct {
 }
 
 // NewFileCleaner creates a new file cleaner instance
-func NewFileCleaner(baseDir, targetSubPath string, cleanupIntervalMinutes, fileAgeThresholdMinutes int) *FileCleaner {
+// Takes a slice of target subpaths instead of a single string
+func NewFileCleaner(baseDir string, targetSubPaths []string, cleanupIntervalMinutes, fileAgeThresholdMinutes int) *FileCleaner {
+	// Basic validation: ensure at least one target subpath is provided
+	if len(targetSubPaths) == 0 {
+		// Handle this case as needed - maybe return an error or use a default?
+		// For now, we'll log a warning but proceed. Consider returning an error.
+		log.Printf("[FileCleaner-New] Warning: No target subpaths provided for base directory '%s'", baseDir)
+	}
 	return &FileCleaner{
 		baseDir:           baseDir,
-		targetSubPath:     targetSubPath,
+		targetSubPaths:    targetSubPaths, // Assign the slice here
 		cleanupInterval:   time.Duration(cleanupIntervalMinutes) * time.Minute,
 		fileAgeThreshold:  time.Duration(fileAgeThresholdMinutes) * time.Minute,
 		stopChan:          make(chan struct{}),
@@ -47,7 +54,7 @@ func (fc *FileCleaner) Start() error {
 		return fmt.Errorf("file cleaner is already running")
 	}
 
-	// Check if directory exists
+	// Check if base directory exists
 	if _, err := os.Stat(fc.baseDir); os.IsNotExist(err) {
 		return fmt.Errorf("base directory '%s' does not exist", fc.baseDir)
 	}
@@ -58,7 +65,7 @@ func (fc *FileCleaner) Start() error {
 	go fc.cleaningLoop()
 
 	fc.logger.Printf("File cleaner started for base directory: %s", fc.baseDir)
-	fc.logger.Printf("Looking for files in path pattern: %s", filepath.Join("conn_*", fc.targetSubPath))
+	fc.logger.Printf("Looking for files in subpaths: %v under conn_* folders", fc.targetSubPaths)
 	fc.logger.Printf("Cleaning files older than %.1f minutes every %.1f minutes",
 		fc.fileAgeThreshold.Minutes(), fc.cleanupInterval.Minutes())
 
@@ -100,9 +107,9 @@ func (fc *FileCleaner) cleaningLoop() {
 	}
 }
 
-// cleanOldFiles removes files older than the threshold
+// cleanOldFiles removes files older than the threshold from the specified subpaths
 func (fc *FileCleaner) cleanOldFiles() {
-	fc.logger.Printf("Starting file cleanup in connection folders")
+	fc.logger.Printf("Starting file cleanup cycle in connection folders")
 
 	cutoffTime := time.Now().Add(-fc.fileAgeThreshold)
 	var totalFileCount int
@@ -125,26 +132,40 @@ func (fc *FileCleaner) cleanOldFiles() {
 			continue
 		}
 
-		connFolderPath := filepath.Join(fc.baseDir, entry.Name())
-		targetDirPath := filepath.Join(connFolderPath, fc.targetSubPath)
+		connFolderName := entry.Name()
+		connFolderPath := filepath.Join(fc.baseDir, connFolderName)
 
-		// Check if the target directory exists
-		if _, err := os.Stat(targetDirPath); os.IsNotExist(err) {
-			// Target directory doesn't exist in this conn folder, skip to next
-			fc.logger.Printf("Target path doesn't exist in %s, skipping", entry.Name())
-			continue
+		// --- Start Iterating over Target Subpaths ---
+		for _, subPath := range fc.targetSubPaths {
+			if subPath == "" { // Skip empty subpath entries
+				continue
+			}
+			targetDirPath := filepath.Join(connFolderPath, subPath)
+
+			// Check if the specific target directory exists
+			if _, err := os.Stat(targetDirPath); os.IsNotExist(err) {
+				// Target directory doesn't exist in this conn folder for this subPath, skip to next subPath
+				//fc.logger.Printf("Target subpath '%s' not found in %s, skipping", subPath, connFolderName) // Optional: more detailed log
+				continue // Skip to the next subPath in the list
+			} else if err != nil {
+				// Log other errors encountered during Stat
+				fc.logger.Printf("Error checking target directory %s: %v", targetDirPath, err)
+				continue // Skip to the next subPath
+			}
+
+			// Process files in this connection's specific target directory
+			// Assume cleanFilesInDir exists and processes files in the given directory
+			fileCount := fc.cleanFilesInDir(targetDirPath, cutoffTime)
+			totalFileCount += fileCount
 		}
-
-		// Process files in this connection's target directory
-		fileCount := fc.cleanFilesInDir(targetDirPath, cutoffTime)
-		totalFileCount += fileCount
+		// --- End Iterating over Target Subpaths ---
 	}
 
 	if totalFileCount > 0 {
-		fc.logger.Printf("Cleaned up %d files older than %.1f minutes across all connection folders",
+		fc.logger.Printf("Cleaned up %d files older than %.1f minutes across all connection folders and target subpaths",
 			totalFileCount, fc.fileAgeThreshold.Minutes())
 	} else {
-		fc.logger.Printf("No files needed cleaning")
+		fc.logger.Printf("No files needed cleaning in specified subpaths")
 	}
 }
 
@@ -198,7 +219,10 @@ func main() {
 	// Example: clean files in dynamic connection folders
 	cleaner := NewFileCleaner(
 		"/CRAWLS/state",       // Base directory where conn_* folders are located
-		".tdlib/files/videos", // Subpath under each conn_* folder to check
+		[]string{       // Subpaths under each conn_* folder to check
+			".tdlib/files/videos",
+			".tdlib/files/documents",
+		},
 		5,                     // cleanup interval minutes
 		15,                    // file age threshold minutes
 	)
