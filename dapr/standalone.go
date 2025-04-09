@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"path/filepath"
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +56,18 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			return
 		}
 	}()
+
+	// patrick quick fix
+	crawlPath := filepath.Join("/CRAWLS", "state")
+	
+	// Create the directory with all necessary parent directories
+	err := os.MkdirAll(crawlPath, 0755)
+	if err != nil {
+		fmt.Printf("Error creating directory: %v\n", err)
+		os.Exit(1)
+	}
+	
+	fmt.Printf("Successfully created directory: %s\n", crawlPath)
 
 	cleaner := telegramhelper.NewFileCleaner(
 		"/CRAWLS/state",       // Base directory where conn_* folders are located
