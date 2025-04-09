@@ -921,16 +921,16 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 }
 
 // StoreFile stores a file via Dapr
-func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fileName string) (string, error) {
+func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fileName string) (string, string, error) {
 	// Check if the file exists
 	if _, err := os.Stat(sourceFilePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("source file does not exist: %w", err)
+		return "", sourceFilePath, fmt.Errorf("source file does not exist: %w", err)
 	}
 
 	// Read file content
 	fileContent, err := os.ReadFile(sourceFilePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read source file: %w", err)
+		return "", sourceFilePath, fmt.Errorf("failed to read source file: %w", err)
 	}
 
 	if fileName == "" {
@@ -946,14 +946,14 @@ func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fi
 	// Create storage path for media
 	storagePath, err := dsm.generateCrawlLevelStoragePath(fmt.Sprintf("media/%s", fileName))
 	if err != nil {
-		return "", err
+		return storagePath, storagePath, err
 	}
 
 	// Encode data for Dapr binding
 	encodedData := base64.StdEncoding.EncodeToString(fileContent)
 	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
 	if err != nil {
-		return "", err
+		return storagePath, storagePath, err
 	}
 	// Prepare metadata
 	metadata := map[string]string{
@@ -972,7 +972,7 @@ func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fi
 	log.Info().Msgf("Writing file to: %s", storagePath)
 	_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
 	if err != nil {
-		return "", fmt.Errorf("failed to store file via Dapr: %w", err)
+		return storagePath, storagePath, fmt.Errorf("failed to store file via Dapr: %w", err)
 	}
 
 	// Delete original file after successful upload
@@ -981,7 +981,7 @@ func (dsm *DaprStateManager) StoreFile(crawlId string, sourceFilePath string, fi
 		log.Warn().Err(err).Str("path", sourceFilePath).Msg("Failed to delete source file after upload")
 	}
 
-	return storagePath, nil
+	return storagePath, storagePath, nil
 }
 
 // HasProcessedMedia checks if media has been processed before using the sharded cache architecture
@@ -1178,12 +1178,12 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 			UpdateTime: dsm.activeMediaCache.UpdateTime,
 			CacheID:    dsm.activeMediaCache.CacheID,
 		}
-		
+
 		// Copy all items to the new map
 		for k, v := range dsm.activeMediaCache.Items {
 			activeCacheCopy.Items[k] = v
 		}
-		
+
 		// Create a new shard with a fresh UUID for the active cache
 		newShardID := uuid.New().String()
 		dsm.activeMediaCache = MediaCache{
@@ -1194,23 +1194,23 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 
 		// Add new shard to the index
 		dsm.mediaCacheIndex.Shards = append(dsm.mediaCacheIndex.Shards, newShardID)
-		
+
 		// Log the shard creation
 		log.Info().
 			Str("newShardID", newShardID).
 			Int("totalShards", len(dsm.mediaCacheIndex.Shards)).
 			Msg("Created new media cache shard after reaching capacity limit")
-			
+
 		// Unlock before IO operations
 		dsm.mediaCacheIndexMutex.Unlock()
-		
+
 		// Save the copy outside the lock
 		err := dsm.saveMediaCacheShard(&activeCacheCopy)
 		if err != nil {
 			log.Warn().Err(err).Msg("Failed to save full media cache shard")
 			// Continue despite error - we'll retry later
 		}
-		
+
 		// Reacquire the lock
 		dsm.mediaCacheIndexMutex.Lock()
 	}
@@ -1228,7 +1228,7 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 
 	// Periodically clean up stale cache entries (every 500 items)
 	shouldCleanup := len(dsm.activeMediaCache.Items)%500 == 0
-	
+
 	// Make a deep copy of active shard if we need to save it
 	var activeCacheCopy MediaCache
 	if shouldSave {
@@ -1237,13 +1237,13 @@ func (dsm *DaprStateManager) addMediaToCacheWithSharding(ctx context.Context, me
 			UpdateTime: dsm.activeMediaCache.UpdateTime,
 			CacheID:    dsm.activeMediaCache.CacheID,
 		}
-		
+
 		// Copy all items to the new map
 		for k, v := range dsm.activeMediaCache.Items {
 			activeCacheCopy.Items[k] = v
 		}
 	}
-	
+
 	// Release the lock before any IO operations
 	dsm.mediaCacheIndexMutex.Unlock()
 
@@ -1416,20 +1416,20 @@ func (dsm *DaprStateManager) cleanupStaleMediaCacheEntries(ctx context.Context) 
 func (dsm *DaprStateManager) Close() error {
 	// Save the current media cache state before closing
 	// This ensures any unsaved cache data is persisted
-	
+
 	log.Info().Msg("Performing final media cache save during shutdown")
-	
+
 	// Save the active media cache shard
 	activeCacheCopy := dsm.activeMediaCache
 	if err := dsm.saveMediaCacheShard(&activeCacheCopy); err != nil {
 		log.Warn().Err(err).Msg("Failed to save active media cache shard during shutdown")
 	}
-	
+
 	// Save the media cache index
 	if err := dsm.saveMediaCacheIndex(); err != nil {
 		log.Warn().Err(err).Msg("Failed to save media cache index during shutdown")
 	}
-	
+
 	log.Info().Msg("Media cache successfully saved during shutdown")
 	return nil
 }
@@ -2318,13 +2318,13 @@ func (dsm *DaprStateManager) saveMediaCacheIndex() error {
 		MediaIndex: make(map[string]string, len(dsm.mediaCacheIndex.MediaIndex)),
 		UpdateTime: time.Now(), // Set current time for the update
 	}
-	
+
 	// Copy the slices and maps
 	copy(indexCopy.Shards, dsm.mediaCacheIndex.Shards)
 	for k, v := range dsm.mediaCacheIndex.MediaIndex {
 		indexCopy.MediaIndex[k] = v
 	}
-	
+
 	// Get counts for logging
 	indexSize := len(indexCopy.MediaIndex)
 	shardCount := len(indexCopy.Shards)
@@ -2368,7 +2368,7 @@ func (dsm *DaprStateManager) saveMediaCacheShard(shard *MediaCache) error {
 
 	// Update timestamp (safe since we're working with a copy)
 	shard.UpdateTime = time.Now()
-	
+
 	// Get item count for logging before marshaling
 	itemCount := len(shard.Items)
 	shardID := shard.CacheID
@@ -2503,7 +2503,7 @@ func (dsm *DaprStateManager) loadURLsFromPreviousCrawls() (map[string]string, er
 
 func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) error {
 	loadedCount := 0
-	
+
 	// Check if we're resuming the same crawl execution
 	// We consider it the same execution if we're using the exact same executionID
 	isResumingSameCrawlExecution := dsm.config.CrawlExecutionID == crawlID
