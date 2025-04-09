@@ -55,6 +55,17 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			return
 		}
 	}()
+
+	cleaner := telegramhelper.NewFileCleaner(
+		"/CRAWLS/state",       // Base directory where conn_* folders are located
+		".tdlib/files/videos", // Subpath under each conn_* folder to check
+		5,                     // cleanup interval minutes
+		15,                    // file age threshold minutes
+	)
+
+	if err := cleaner.Start(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to start file cleaner")
+	}
 	// Collect URLs from command line arguments or file
 	var urls []string
 
@@ -88,7 +99,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	if poolSize < 1 {
 		poolSize = 1
 	}
-	
+
 	// If we have database URLs, use those to determine pool size
 	if len(crawlerCfg.TDLibDatabaseURLs) > 0 {
 		log.Info().Msgf("Found %d TDLib database URLs for connection pooling", len(crawlerCfg.TDLibDatabaseURLs))
@@ -98,7 +109,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			log.Info().Msgf("Adjusting pool size to %d to match available database URLs", poolSize)
 		}
 	}
-	
+
 	// Initialize the connection pool
 	crawl.InitConnectionPool(poolSize, crawlerCfg.StorageRoot, crawlerCfg)
 	defer crawl.CloseConnectionPool()
@@ -152,18 +163,18 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Initialize state manager factory
 	log.Info().Msgf("Starting scraper for crawl ID: %s", crawlCfg.CrawlID)
 	smfact := state.DefaultStateManagerFactory{}
-	
+
 	// Create a temporary state manager to check for incomplete crawls
 	tempCfg := state.Config{
 		StorageRoot: crawlCfg.StorageRoot,
 		CrawlID:     crawlCfg.CrawlID,
 	}
-	
+
 	tempSM, err := smfact.Create(tempCfg)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create temporary state manager")
 	}
-	
+
 	// Check for an existing incomplete crawl
 	var crawlexecid string
 	if tempSM != nil {
@@ -173,20 +184,20 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		} else if exists {
 			// Use existing execution ID
 			crawlexecid = existingExecID
-			log.Info().Msgf("Resuming existing crawl: %s (execution: %s)", 
+			log.Info().Msgf("Resuming existing crawl: %s (execution: %s)",
 				crawlCfg.CrawlID, crawlexecid)
 		}
-		
+
 		// Close the temporary state manager to free up resources
 		_ = tempSM.Close()
 	}
-	
+
 	// If no existing crawl was found, generate a new execution ID
 	if crawlexecid == "" {
 		crawlexecid = common.GenerateCrawlID()
 		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
 	}
-	
+
 	// Track whether we're resuming the same execution ID or starting a new one
 	var isResumingSameCrawlExecution bool
 	if tempSM != nil {
@@ -194,13 +205,13 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		isResumingSameCrawlExecution = exists && existingExecID != "" && crawlexecid == existingExecID
 	}
 	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Crawl execution mode")
-	
+
 	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
-		
+
 		// Add the MaxPages config
 		MaxPagesConfig: &state.MaxPagesConfig{
 			MaxPages: crawlCfg.MaxPages,
@@ -246,7 +257,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			depth++
 			continue
 		}
-		
+
 		// Print all page statuses before processing
 		log.Info().Int("page_count", len(pages)).Int("depth", depth).Msg("Page status summary before processing")
 		pageStatusCount := make(map[string]int)
@@ -300,7 +311,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if closeErr := sm.Close(); closeErr != nil {
 		log.Warn().Err(closeErr).Msg("Error during final state save, but will continue with crawl completion")
 	}
-	
+
 	completionMetadata := map[string]interface{}{
 		"status":          "completed",
 		"endTime":         time.Now(),
@@ -328,24 +339,24 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Dapr always skips fetched pages")
 	// Map to collect all discovered channels
 	allDiscoveredChannels := make([]*state.Page, 0)
-	
+
 	// Use a mutex to protect the shared allDiscoveredChannels slice
 	var mu sync.Mutex
-	
+
 	// Use a wait group to track when all pages are processed
 	var wg sync.WaitGroup
-	
+
 	// Semaphore to limit concurrent processing
 	semaphore := make(chan struct{}, maxWorkers)
-	
+
 	// Create a context that can be cancelled
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	// Process each page in the current layer
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
 		pageToProcess := layer.Pages[pageIndex]
-		
+
 		// Print debug information about each page discovered during crawl restart
 		log.Debug().
 			Str("url", pageToProcess.URL).
@@ -354,7 +365,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			Int("message_count", len(pageToProcess.Messages)).
 			Bool("resuming_execution", isResumingSameCrawlExecution).
 			Msg("Page discovered during crawl restart in Dapr mode")
-		
+
 		// Skip already processed pages
 		if pageToProcess.Status == "fetched" {
 			if isResumingSameCrawlExecution {
@@ -369,50 +380,50 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				// Continue processing this page
 			}
 		}
-		
+
 		// Acquire semaphore slot (block if we're at max workers)
 		semaphore <- struct{}{}
 		wg.Add(1)
-		
+
 		go func(page state.Page) {
 			defer func() {
 				// Release semaphore slot
 				<-semaphore
 				wg.Done()
-				
+
 				// Recover from panics to ensure we don't hang the wait group
 				if r := recover(); r != nil {
 					log.Error().Msgf("Recovered from panic while processing item: %s, error: %v", page.URL, r)
-					
+
 					// Update the page status to error
 					page.Status = "error"
 					page.Error = fmt.Sprintf("Panic: %v", r)
-					
+
 					// Update the page in the state manager
 					if err := sm.UpdatePage(page); err != nil {
 						log.Error().Err(err).Msg("Failed to update page status after panic")
 					}
-					
+
 					// Save state after recovery
 					if err := sm.SaveState(); err != nil {
 						log.Error().Err(err).Msg("Failed to save state after panic recovery")
 					}
 				}
 			}()
-			
+
 			// Set the timestamp
 			page.Timestamp = time.Now()
-			
+
 			// Use the pooled channel processing
 			log.Info().Msgf("Starting run for channel: %s", page.URL)
 			discoveredChannels, err := crawl.RunForChannelWithPool(ctx, &page, crawlCfg.StorageRoot, sm, crawlCfg)
 			log.Info().Msgf("Page processed for %s", page.URL)
-			
+
 			if err != nil {
 				log.Error().Stack().Err(err).Msgf("Error processing item %s", page.URL)
 				page.Status = "error"
 				page.Error = err.Error()
-				
+
 				// Update the page in the state manager
 				if updateErr := sm.UpdatePage(page); updateErr != nil {
 					log.Error().Err(updateErr).Msg("Failed to update page status after error")
@@ -422,12 +433,12 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				if updateErr := sm.UpdatePage(page); updateErr != nil {
 					log.Error().Err(updateErr).Msg("Failed to update page status after successful processing")
 				}
-				
+
 				// Save the entire state
 				if err := sm.SaveState(); err != nil {
 					log.Error().Err(err).Msgf("Error saving state after processing channel %s", page.URL)
 				}
-				
+
 				// Collect discovered channels with mutex protection
 				if len(discoveredChannels) > 0 {
 					mu.Lock()
@@ -437,10 +448,10 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			}
 		}(pageToProcess)
 	}
-	
+
 	// Wait for all pages to be processed
 	wg.Wait()
-	
+
 	// After all pages in the layer are processed, append the new layer with all discovered channels
 	if len(allDiscoveredChannels) > 0 {
 		currentDepth := layer.Depth
@@ -465,7 +476,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			log.Error().Err(err).Msg("Failed to add discovered channels as new layer")
 		} else {
 			log.Info().Int("count", len(newPages)).Msg("Added new channels to be processed")
-			
+
 			// Save state after adding new pages
 			if err := sm.SaveState(); err != nil {
 				log.Error().Err(err).Msg("Failed to save state after adding new layer")
