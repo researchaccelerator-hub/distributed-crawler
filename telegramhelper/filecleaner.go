@@ -3,12 +3,13 @@ package telegramhelper
 import (
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sync"
 	"time"
+	
+	"github.com/rs/zerolog/log"
 )
 
 // FileCleaner manages a scheduled task to clean up old files
@@ -21,7 +22,6 @@ type FileCleaner struct {
 	wg                sync.WaitGroup
 	isRunning         bool
 	isRunningMutex    sync.Mutex
-	logger            *log.Logger
 	connFolderPattern *regexp.Regexp
 }
 
@@ -33,7 +33,6 @@ func NewFileCleaner(baseDir, targetSubPath string, cleanupIntervalMinutes, fileA
 		cleanupInterval:   time.Duration(cleanupIntervalMinutes) * time.Minute,
 		fileAgeThreshold:  time.Duration(fileAgeThresholdMinutes) * time.Minute,
 		stopChan:          make(chan struct{}),
-		logger:            log.New(os.Stdout, "[FileCleaner] ", log.LstdFlags),
 		connFolderPattern: regexp.MustCompile(`^conn_\d+`),
 	}
 }
@@ -47,20 +46,20 @@ func (fc *FileCleaner) Start() error {
 		return fmt.Errorf("file cleaner is already running")
 	}
 
-	// Check if directory exists
-	if _, err := os.Stat(fc.baseDir); os.IsNotExist(err) {
-		return fmt.Errorf("base directory '%s' does not exist", fc.baseDir)
-	}
+	// Don't require the directory to exist at startup
+	// It will be checked during each cleaning cycle instead
 
 	fc.isRunning = true
 	fc.wg.Add(1)
 
 	go fc.cleaningLoop()
 
-	fc.logger.Printf("File cleaner started for base directory: %s", fc.baseDir)
-	fc.logger.Printf("Looking for files in path pattern: %s", filepath.Join("conn_*", fc.targetSubPath))
-	fc.logger.Printf("Cleaning files older than %.1f minutes every %.1f minutes",
-		fc.fileAgeThreshold.Minutes(), fc.cleanupInterval.Minutes())
+	log.Info().
+		Str("base_dir", fc.baseDir).
+		Str("path_pattern", filepath.Join("conn_*", fc.targetSubPath)).
+		Float64("file_age_threshold_minutes", fc.fileAgeThreshold.Minutes()).
+		Float64("cleanup_interval_minutes", fc.cleanupInterval.Minutes()).
+		Msg("File cleaner started")
 
 	return nil
 }
@@ -77,7 +76,7 @@ func (fc *FileCleaner) Stop() {
 	close(fc.stopChan)
 	fc.wg.Wait()
 	fc.isRunning = false
-	fc.logger.Println("File cleaner stopped")
+	log.Info().Msg("File cleaner stopped")
 }
 
 // cleaningLoop runs the cleanup process at scheduled intervals
@@ -102,15 +101,21 @@ func (fc *FileCleaner) cleaningLoop() {
 
 // cleanOldFiles removes files older than the threshold
 func (fc *FileCleaner) cleanOldFiles() {
-	fc.logger.Printf("Starting file cleanup in connection folders")
+	log.Debug().Msg("Starting file cleanup in connection folders")
 
 	cutoffTime := time.Now().Add(-fc.fileAgeThreshold)
 	var totalFileCount int
 
+	// Check if base directory exists before proceeding
+	if _, err := os.Stat(fc.baseDir); os.IsNotExist(err) {
+		log.Info().Str("base_dir", fc.baseDir).Msg("Base directory does not exist yet, skipping cleanup")
+		return
+	}
+
 	// Read base directory to find all conn_* folders
 	entries, err := os.ReadDir(fc.baseDir)
 	if err != nil {
-		fc.logger.Printf("Error reading base directory %s: %v", fc.baseDir, err)
+		log.Error().Err(err).Str("base_dir", fc.baseDir).Msg("Error reading base directory")
 		return
 	}
 
@@ -131,7 +136,7 @@ func (fc *FileCleaner) cleanOldFiles() {
 		// Check if the target directory exists
 		if _, err := os.Stat(targetDirPath); os.IsNotExist(err) {
 			// Target directory doesn't exist in this conn folder, skip to next
-			fc.logger.Printf("Target path doesn't exist in %s, skipping", entry.Name())
+			log.Debug().Str("folder", entry.Name()).Msg("Target path doesn't exist, skipping")
 			continue
 		}
 
@@ -141,10 +146,12 @@ func (fc *FileCleaner) cleanOldFiles() {
 	}
 
 	if totalFileCount > 0 {
-		fc.logger.Printf("Cleaned up %d files older than %.1f minutes across all connection folders",
-			totalFileCount, fc.fileAgeThreshold.Minutes())
+		log.Info().
+			Int("files_cleaned", totalFileCount).
+			Float64("age_threshold_minutes", fc.fileAgeThreshold.Minutes()).
+			Msg("Completed file cleanup")
 	} else {
-		fc.logger.Printf("No files needed cleaning")
+		log.Debug().Msg("No files needed cleaning")
 	}
 }
 
@@ -152,11 +159,11 @@ func (fc *FileCleaner) cleanOldFiles() {
 func (fc *FileCleaner) cleanFilesInDir(dirPath string, cutoffTime time.Time) int {
 	var fileCount int
 
-	fc.logger.Printf("Checking for old files in: %s", dirPath)
+	log.Debug().Str("path", dirPath).Msg("Checking for old files")
 
 	err := filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			fc.logger.Printf("Error accessing path %s: %v", path, err)
+			log.Error().Err(err).Str("path", path).Msg("Error accessing path")
 			return filepath.SkipDir
 		}
 
@@ -168,17 +175,20 @@ func (fc *FileCleaner) cleanFilesInDir(dirPath string, cutoffTime time.Time) int
 		// Get file info
 		info, err := d.Info()
 		if err != nil {
-			fc.logger.Printf("Error getting file info for %s: %v", path, err)
+			log.Error().Err(err).Str("path", path).Msg("Error getting file info")
 			return nil
 		}
 
 		// Check if file is older than threshold
 		if info.ModTime().Before(cutoffTime) {
 			if err := os.Remove(path); err != nil {
-				fc.logger.Printf("Failed to remove file %s: %v", path, err)
+				log.Error().Err(err).Str("path", path).Msg("Failed to remove file")
 			} else {
 				fileAge := time.Since(info.ModTime()).Minutes()
-				fc.logger.Printf("Removed old file: %s (age: %.1f minutes)", path, fileAge)
+				log.Debug().
+					Str("path", path).
+					Float64("age_minutes", fileAge).
+					Msg("Removed old file")
 				fileCount++
 			}
 		}
@@ -187,7 +197,7 @@ func (fc *FileCleaner) cleanFilesInDir(dirPath string, cutoffTime time.Time) int
 	})
 
 	if err != nil {
-		fc.logger.Printf("Error walking directory %s: %v", dirPath, err)
+		log.Error().Err(err).Str("path", dirPath).Msg("Error walking directory")
 	}
 
 	return fileCount
@@ -204,12 +214,12 @@ func main() {
 	)
 
 	if err := cleaner.Start(); err != nil {
-		log.Fatalf("Failed to start file cleaner: %v", err)
+		log.Fatal().Err(err).Msg("Failed to start file cleaner")
 	}
 
 	// Keep the main function running
 	// In a real crawler, this would be part of your main application
-	fmt.Println("File cleaner is running. Press Ctrl+C to stop.")
+	log.Info().Msg("File cleaner is running. Press Ctrl+C to stop.")
 
 	// Set up channel for interrupt signal
 	sigChan := make(chan os.Signal, 1)
@@ -217,7 +227,7 @@ func main() {
 	// Block until we receive a signal
 	<-sigChan
 
-	fmt.Println("Stopping file cleaner...")
+	log.Info().Msg("Stopping file cleaner...")
 	cleaner.Stop()
-	fmt.Println("Exited cleanly.")
+	log.Info().Msg("Exited cleanly.")
 }
