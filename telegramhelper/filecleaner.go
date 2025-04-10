@@ -135,7 +135,7 @@ func (fc *FileCleaner) cleanOldFiles() {
 
 		// Check if the target directory exists
 		if _, err := os.Stat(targetDirPath); os.IsNotExist(err) {
-			// Target directory doesn't exist in this conn folder, skip to next
+			// Target directory doesn't exist in this conn folder
 			log.Debug().Str("folder", entry.Name()).Msg("Target path doesn't exist, skipping")
 			continue
 		}
@@ -143,6 +143,20 @@ func (fc *FileCleaner) cleanOldFiles() {
 		// Process files in this connection's target directory
 		fileCount := fc.cleanFilesInDir(targetDirPath, cutoffTime)
 		totalFileCount += fileCount
+		
+		// Also check for files in .tdlib/database directory to ensure complete cleanup
+		databasePath := filepath.Join(connFolderPath, ".tdlib", "database")
+		if _, err := os.Stat(databasePath); err == nil {
+			// Look for large files in database directory too
+			dbFileCount := fc.cleanFilesInDir(databasePath, cutoffTime)
+			if dbFileCount > 0 {
+				log.Debug().
+					Str("directory", databasePath).
+					Int("files_cleaned", dbFileCount).
+					Msg("Cleaned database directory files")
+				totalFileCount += dbFileCount
+			}
+		}
 	}
 
 	if totalFileCount > 0 {
