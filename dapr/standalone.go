@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"path/filepath"
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
