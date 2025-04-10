@@ -117,8 +117,8 @@ type Credentials struct {
 // credentials for authenticating with the Telegram API. If the file doesn't exist
 // or contains invalid data, the function will return an error, prompting the
 // application to fall back to environment variables for credentials.
-func readCredentials() (*Credentials, error) {
-	credsPath := filepath.Join(".tdlib", "credentials.json")
+func readCredentials(path string) (*Credentials, error) {
+	credsPath := filepath.Join(path, ".tdlib", "credentials.json")
 
 	// Check if credentials file exists
 	if _, err := os.Stat(credsPath); os.IsNotExist(err) {
@@ -230,14 +230,14 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 
 	// Generate a unique subfolder for this connection if a database URL is provided
 	uniqueSubfolder := ""
-	if cfg.TDLibDatabaseURL != "" {
-		// Create a unique subfolder based on the URL hash
-		h := fnv.New32a()
-		h.Write([]byte(cfg.TDLibDatabaseURL))
-		uniqueSubfolder = fmt.Sprintf("conn_%d", h.Sum32())
+	// Create a unique subfolder based on the URL hash
+	h := fnv.New32a()
+	h.Write([]byte(cfg.TDLibDatabaseURL))
+	uniqueSubfolder = fmt.Sprintf("conn_%d", h.Sum32())
+	// Create the full unique path
+	uniquePath := filepath.Join(storagePrefix, "state", uniqueSubfolder)
 
-		// Create the full unique path
-		uniquePath := filepath.Join(storagePrefix, "state", uniqueSubfolder)
+	if cfg.TDLibDatabaseURL != "" {
 
 		// Ensure the directory exists
 		err := os.MkdirAll(uniquePath, 0755)
@@ -259,7 +259,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	var apiHash string
 	var phoneNumber, phoneCode string
 
-	creds, err := readCredentials()
+	creds, err := readCredentials(uniquePath)
 	if err == nil && creds != nil {
 		log.Info().Msg("Using API credentials from stored file")
 		apiID, err = strconv.Atoi(creds.APIId)
@@ -347,11 +347,11 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		if cfg.TDLibVerbosity > 0 {
 			verbosityLevel = cfg.TDLibVerbosity
 		}
-		
+
 		log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level")
 		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: int32(verbosityLevel)}
 		tdlibClient.SetLogVerbosityLevel(&verb)
-		
+
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
@@ -457,8 +457,8 @@ func downloadAndExtractTarball(url, targetDir string) error {
 // TDLibClientWrapper extends the TDLib client with directory information
 type TDLibClientWrapper struct {
 	*client.Client            // Embed the original client
-	clientDir     string      // Path to the client directory
-	clientDirMu   sync.Mutex  // Mutex to protect clientDir access
+	clientDir      string     // Path to the client directory
+	clientDirMu    sync.Mutex // Mutex to protect clientDir access
 }
 
 // GetClientDirectory returns the directory where this client's files are stored
