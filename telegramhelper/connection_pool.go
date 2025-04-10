@@ -105,6 +105,12 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 		// Calculate the directory hash the same way the client initialization does
 		h := fnv.New32a()
 		h.Write([]byte(connConfig.TDLibDatabaseURL))
+		
+		// Add unique components to ensure different processes get different folders
+		// even if they share the same database URL
+		uniqueComponent := fmt.Sprintf("%d_%d_%d", time.Now().UnixNano(), os.Getpid(), p.connectionCount)
+		h.Write([]byte(uniqueComponent))
+		
 		dirName := fmt.Sprintf("conn_%d", h.Sum32())
 
 		// Use the directory name as the connection ID for perfect matching
@@ -188,6 +194,12 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 		// Calculate the directory hash the same way the client initialization does
 		h := fnv.New32a()
 		h.Write([]byte(connConfig.TDLibDatabaseURL))
+		
+		// Add unique components to ensure different processes get different folders
+		// even if they share the same database URL
+		uniqueComponent := fmt.Sprintf("%d_%d_%d", time.Now().UnixNano(), os.Getpid(), p.connectionCount)
+		h.Write([]byte(uniqueComponent))
+		
 		dirName := fmt.Sprintf("conn_%d", h.Sum32())
 
 		// Use the directory name as the connection ID for perfect matching

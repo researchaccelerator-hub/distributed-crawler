@@ -228,12 +228,16 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	// We'll use the default CLI interactor but prepare environment variables
 	// so we need to track the phoneCode for later
 
-	// Generate a unique subfolder for this connection if a database URL is provided
-	uniqueSubfolder := ""
-	// Create a unique subfolder based on the URL hash
+	// Create a unique subfolder based on URL hash plus unique process identifiers
 	h := fnv.New32a()
 	h.Write([]byte(cfg.TDLibDatabaseURL))
-	uniqueSubfolder = fmt.Sprintf("conn_%d", h.Sum32())
+	
+	// Add unique components to ensure different processes get different folders
+	// even if they share the same database URL
+	uniqueComponent := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
+	h.Write([]byte(uniqueComponent))
+	
+	uniqueSubfolder := fmt.Sprintf("conn_%d", h.Sum32())
 	// Create the full unique path
 	uniquePath := filepath.Join(storagePrefix, "state", uniqueSubfolder)
 
