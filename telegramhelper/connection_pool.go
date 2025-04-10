@@ -6,6 +6,9 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/rs/zerolog/log"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -192,6 +195,9 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 //
 // If the connection ID doesn't exist in the in-use connections map, a warning
 // is logged and no action is taken.
+//
+// The connection is fully disconnected, its directory is removed, and a 
+// fresh connection is created before being returned to the available pool.
 func (p *ConnectionPool) ReleaseConnection(connID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -203,11 +209,58 @@ func (p *ConnectionPool) ReleaseConnection(connID string) {
 		return
 	}
 	
-	// Move it from inUse to available
+	// Remove the connection from inUse map
 	delete(p.inUseConns, connID)
-	p.availableConns[connID] = client
 	
-	log.Debug().Str("connectionID", connID).Msg("Connection returned to pool")
+	// Close the existing connection
+	log.Debug().Str("connectionID", connID).Msg("Closing connection before returning to pool")
+	closeClientSafe(client)
+	
+	// Extract the numeric part from the connection ID to get the directory name
+	// Expected format: "conn-X" where X is a number
+	connDirName := fmt.Sprintf("conn_%s", strings.TrimPrefix(connID, "conn-"))
+	dirPath := filepath.Join(p.storagePrefix, "state", connDirName)
+	
+	// Remove the connection directory
+	log.Debug().Str("connectionID", connID).Str("dirPath", dirPath).Msg("Removing connection directory")
+	if err := os.RemoveAll(dirPath); err != nil {
+		log.Warn().Err(err).Str("connectionID", connID).Str("dirPath", dirPath).Msg("Failed to remove connection directory")
+	}
+	
+	// Create a fresh connection
+	log.Debug().Str("connectionID", connID).Msg("Creating fresh connection to replace the closed one")
+	
+	// Check if we have unused database URLs available
+	var connConfig common.CrawlerConfig
+	
+	if len(p.defaultConfig.TDLibDatabaseURLs) > 0 {
+		// Calculate which database URL to use based on the current connection count
+		// This ensures we cycle through all available URLs before reusing them
+		urlIndex := p.connectionCount % len(p.defaultConfig.TDLibDatabaseURLs)
+		databaseURL := p.defaultConfig.TDLibDatabaseURLs[urlIndex]
+		
+		// Copy the default config and set the specific database URL for this connection
+		connConfig = p.defaultConfig
+		connConfig.TDLibDatabaseURL = databaseURL
+		
+		log.Info().Str("databaseURL", databaseURL).Msg("Creating fresh connection with specified database URL")
+	} else {
+		// If no specific URLs provided, use the default config
+		connConfig = p.defaultConfig
+		log.Info().Msg("Creating fresh connection with default configuration")
+	}
+	
+	// Create a new connection
+	newClient, err := p.service.InitializeClientWithConfig(p.storagePrefix, connConfig)
+	if err != nil {
+		log.Error().Err(err).Str("connectionID", connID).Msg("Failed to create fresh connection, pool capacity reduced")
+		return
+	}
+	
+	// Add the fresh connection to available connections with same ID
+	p.availableConns[connID] = newClient
+	
+	log.Info().Str("connectionID", connID).Msg("Fresh connection created and returned to pool")
 }
 
 // Close shuts down all connections in the pool and resets the pool to an empty state.
@@ -263,6 +316,89 @@ func closeClientSafe(client crawler.TDLibClient) {
 	case <-time.After(5 * time.Second):
 		log.Warn().Msg("Timeout waiting for client connection to close")
 	}
+}
+
+// HandleConnectionError handles a connection that has experienced an error.
+// It closes the faulty connection, cleans up its directory, and creates
+// a fresh connection if possible. This ensures that connections are always
+// clean and reliable.
+//
+// Parameters:
+//   - connID: The connection identifier that encountered the error
+//
+// Returns:
+//   - A new TDLib client connection or nil if creation failed
+//   - A string identifier for the connection (same as input connID if successful)
+//   - An error if the refresh operation fails
+//
+// This method should be called when a connection exhibits errors in normal operation
+// to ensure the next use gets a clean state.
+func (p *ConnectionPool) HandleConnectionError(ctx context.Context, connID string) (crawler.TDLibClient, string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	
+	log.Warn().Str("connectionID", connID).Msg("Handling connection error by recreating connection")
+	
+	// First, check if the connection is in-use
+	client, exists := p.inUseConns[connID]
+	if !exists {
+		// If it's not in use, check if it's in available connections
+		client, exists = p.availableConns[connID]
+		if !exists {
+			return nil, "", fmt.Errorf("connection ID %s not found in pool", connID)
+		}
+		
+		// Remove from available connections
+		delete(p.availableConns, connID)
+	} else {
+		// Remove from in-use connections
+		delete(p.inUseConns, connID)
+	}
+	
+	// Close the faulty connection
+	log.Debug().Str("connectionID", connID).Msg("Closing faulty connection")
+	closeClientSafe(client)
+	
+	// Extract the numeric part from the connection ID to get the directory name
+	// Expected format: "conn-X" where X is a number
+	connDirName := fmt.Sprintf("conn_%s", strings.TrimPrefix(connID, "conn-"))
+	dirPath := filepath.Join(p.storagePrefix, "state", connDirName)
+	
+	// Remove the connection directory
+	log.Debug().Str("connectionID", connID).Str("dirPath", dirPath).Msg("Removing connection directory due to error")
+	if err := os.RemoveAll(dirPath); err != nil {
+		log.Warn().Err(err).Str("connectionID", connID).Str("dirPath", dirPath).Msg("Failed to remove faulty connection directory")
+	}
+	
+	// Create a fresh connection with the same ID
+	var connConfig common.CrawlerConfig
+	
+	if len(p.defaultConfig.TDLibDatabaseURLs) > 0 {
+		// Calculate which database URL to use
+		urlIndex := p.connectionCount % len(p.defaultConfig.TDLibDatabaseURLs)
+		databaseURL := p.defaultConfig.TDLibDatabaseURLs[urlIndex]
+		
+		connConfig = p.defaultConfig
+		connConfig.TDLibDatabaseURL = databaseURL
+		
+		log.Info().Str("databaseURL", databaseURL).Msg("Creating fresh connection after error")
+	} else {
+		connConfig = p.defaultConfig
+		log.Info().Msg("Creating fresh connection with default configuration after error")
+	}
+	
+	// Create a new connection
+	newClient, err := p.service.InitializeClientWithConfig(p.storagePrefix, connConfig)
+	if err != nil {
+		log.Error().Err(err).Str("connectionID", connID).Msg("Failed to create fresh connection after error")
+		return nil, "", fmt.Errorf("failed to create fresh connection after error: %w", err)
+	}
+	
+	// Put the new connection directly back into in-use
+	p.inUseConns[connID] = newClient
+	
+	log.Info().Str("connectionID", connID).Msg("Successfully created fresh connection after error")
+	return newClient, connID, nil
 }
 
 // Stats returns statistics about the current state of the connection pool,

@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -56,8 +57,11 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		}
 	}()
 
+	// Create a file cleaner that targets the same location as where connections are unzipped
+	// to ensure proper cleanup of temporary files
+	baseDir := filepath.Join(crawlCfg.StorageRoot, "state") // Same base path where connection folders are created
 	cleaner := telegramhelper.NewFileCleaner(
-		"/CRAWLS/state",       // Base directory where conn_* folders are located
+		baseDir,               // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
 		".tdlib/files/videos", // Subpath under each conn_* folder to check
 		5,                     // cleanup interval minutes
 		15,                    // file age threshold minutes
