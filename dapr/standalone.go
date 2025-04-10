@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -57,26 +58,18 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		}
 	}()
 
-	// patrick quick fix
-	crawlPath := filepath.Join("/CRAWLS", "state")
-	
-	// Create the directory with all necessary parent directories
-	err := os.MkdirAll(crawlPath, 0755)
-	if err != nil {
-		fmt.Printf("Error creating directory: %v\n", err)
-		os.Exit(1)
-	}
-	
-	fmt.Printf("Successfully created directory: %s\n", crawlPath)
-
+	// Create a file cleaner that targets the same location as where connections are unzipped
+	// to ensure proper cleanup of temporary files
+	baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
 	cleaner := telegramhelper.NewFileCleaner(
-		"/CRAWLS/state",       // Base directory where conn_* folders are located
-		[]string{       // Subpaths under each conn_* folder to check
-			".tdlib/files/videos",
-			".tdlib/files/documents",
+		baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
+		[]string{
+			".tdlib/files/videos",    // Videos directory to clean up
+			".tdlib/files/photos",    // Database directory to clean up
+			".tdlib/files/documents", // General files directory
 		},
-		5,                     // cleanup interval minutes
-		15,                    // file age threshold minutes
+		5,  // cleanup interval minutes
+		15, // file age threshold minutes
 	)
 
 	if err := cleaner.Start(); err != nil {

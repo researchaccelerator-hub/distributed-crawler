@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -453,6 +454,27 @@ func downloadAndExtractTarball(url, targetDir string) error {
 // It handles directories and regular files, creating necessary directories
 // and files as needed. Unknown file types are ignored. Returns an error if
 // any operation fails.
+// TDLibClientWrapper extends the TDLib client with directory information
+type TDLibClientWrapper struct {
+	*client.Client            // Embed the original client
+	clientDir     string      // Path to the client directory
+	clientDirMu   sync.Mutex  // Mutex to protect clientDir access
+}
+
+// GetClientDirectory returns the directory where this client's files are stored
+func (w *TDLibClientWrapper) GetClientDirectory() string {
+	w.clientDirMu.Lock()
+	defer w.clientDirMu.Unlock()
+	return w.clientDir
+}
+
+// SetClientDirectory sets the directory path for this client
+func (w *TDLibClientWrapper) SetClientDirectory(path string) {
+	w.clientDirMu.Lock()
+	defer w.clientDirMu.Unlock()
+	w.clientDir = path
+}
+
 func downloadAndExtractTarballFromReader(reader io.Reader, targetDir string) error {
 	// Step 1: Decompress the gzip file
 	gzReader, err := gzip.NewReader(reader)
