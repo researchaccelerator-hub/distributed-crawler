@@ -14,8 +14,8 @@ import (
 
 // FileCleaner manages a scheduled task to clean up old files
 type FileCleaner struct {
-	baseDir           string // Base directory containing conn_* folders
-	targetSubPath     string // Subpath under each conn_* folder to check for files
+	baseDir           string   // Base directory containing conn_* folders
+	targetSubPaths    []string // Subpaths under each conn_* folder to check for files
 	cleanupInterval   time.Duration
 	fileAgeThreshold  time.Duration
 	stopChan          chan struct{}
@@ -25,11 +25,17 @@ type FileCleaner struct {
 	connFolderPattern *regexp.Regexp
 }
 
-// NewFileCleaner creates a new file cleaner instance
-func NewFileCleaner(baseDir, targetSubPath string, cleanupIntervalMinutes, fileAgeThresholdMinutes int) *FileCleaner {
+// NewFileCleaner creates a new file cleaner instance with multiple directories to clean
+// If no targetSubPaths are provided, defaults to checking only ".tdlib/files/videos"
+func NewFileCleaner(baseDir string, targetSubPaths []string, cleanupIntervalMinutes, fileAgeThresholdMinutes int) *FileCleaner {
+	// Default to ".tdlib/files/videos" if no paths provided
+	if len(targetSubPaths) == 0 {
+		targetSubPaths = []string{".tdlib/files/videos"}
+	}
+	
 	return &FileCleaner{
 		baseDir:           baseDir,
-		targetSubPath:     targetSubPath,
+		targetSubPaths:    targetSubPaths,
 		cleanupInterval:   time.Duration(cleanupIntervalMinutes) * time.Minute,
 		fileAgeThreshold:  time.Duration(fileAgeThresholdMinutes) * time.Minute,
 		stopChan:          make(chan struct{}),
@@ -54,12 +60,17 @@ func (fc *FileCleaner) Start() error {
 
 	go fc.cleaningLoop()
 
-	log.Info().
+	pathsLogger := log.Info().
 		Str("base_dir", fc.baseDir).
-		Str("path_pattern", filepath.Join("conn_*", fc.targetSubPath)).
 		Float64("file_age_threshold_minutes", fc.fileAgeThreshold.Minutes()).
-		Float64("cleanup_interval_minutes", fc.cleanupInterval.Minutes()).
-		Msg("File cleaner started")
+		Float64("cleanup_interval_minutes", fc.cleanupInterval.Minutes())
+		
+	// Add all target paths to the log message
+	paths := make([]string, len(fc.targetSubPaths))
+	for i, path := range fc.targetSubPaths {
+		paths[i] = filepath.Join("conn_*", path)
+	}
+	pathsLogger.Strs("path_patterns", paths).Msg("File cleaner started")
 
 	return nil
 }
@@ -131,32 +142,43 @@ func (fc *FileCleaner) cleanOldFiles() {
 		}
 
 		connFolderPath := filepath.Join(fc.baseDir, entry.Name())
-		targetDirPath := filepath.Join(connFolderPath, fc.targetSubPath)
-
-		// Check if the target directory exists
-		if _, err := os.Stat(targetDirPath); os.IsNotExist(err) {
-			// Target directory doesn't exist in this conn folder
-			log.Debug().Str("folder", entry.Name()).Msg("Target path doesn't exist, skipping")
-			continue
-		}
-
-		// Process files in this connection's target directory
-		fileCount := fc.cleanFilesInDir(targetDirPath, cutoffTime)
-		totalFileCount += fileCount
+		folderFileCount := 0
 		
-		// Also check for files in .tdlib/database directory to ensure complete cleanup
-		databasePath := filepath.Join(connFolderPath, ".tdlib", "database")
-		if _, err := os.Stat(databasePath); err == nil {
-			// Look for large files in database directory too
-			dbFileCount := fc.cleanFilesInDir(databasePath, cutoffTime)
-			if dbFileCount > 0 {
+		// Process each target subpath for this connection
+		for _, subPath := range fc.targetSubPaths {
+			targetDirPath := filepath.Join(connFolderPath, subPath)
+			
+			// Check if this target directory exists
+			if _, err := os.Stat(targetDirPath); os.IsNotExist(err) {
+				// This specific target path doesn't exist in this connection folder
 				log.Debug().
-					Str("directory", databasePath).
-					Int("files_cleaned", dbFileCount).
-					Msg("Cleaned database directory files")
-				totalFileCount += dbFileCount
+					Str("folder", entry.Name()).
+					Str("subpath", subPath).
+					Msg("Target path doesn't exist in connection folder, skipping")
+				continue
 			}
+			
+			// Process files in this target directory
+			fileCount := fc.cleanFilesInDir(targetDirPath, cutoffTime)
+			if fileCount > 0 {
+				log.Debug().
+					Str("folder", entry.Name()).
+					Str("subpath", subPath).
+					Int("files_cleaned", fileCount).
+					Msg("Cleaned files in directory")
+			}
+			
+			folderFileCount += fileCount
 		}
+		
+		// Add this connection folder's count to the total
+		if folderFileCount > 0 {
+			log.Info().
+				Str("folder", entry.Name()).
+				Int("files_cleaned", folderFileCount).
+				Msg("Cleaned files in connection folder")
+		}
+		totalFileCount += folderFileCount
 	}
 
 	if totalFileCount > 0 {
@@ -221,10 +243,10 @@ func (fc *FileCleaner) cleanFilesInDir(dirPath string, cutoffTime time.Time) int
 func main() {
 	// Example: clean files in dynamic connection folders
 	cleaner := NewFileCleaner(
-		"/CRAWLS/state",       // Base directory where conn_* folders are located
-		".tdlib/files/videos", // Subpath under each conn_* folder to check
-		5,                     // cleanup interval minutes
-		15,                    // file age threshold minutes
+		"/CRAWLS/state",                                 // Base directory where conn_* folders are located
+		[]string{".tdlib/files/videos", ".tdlib/database"}, // Subpaths under each conn_* folder to check
+		5,                                               // cleanup interval minutes
+		15,                                              // file age threshold minutes
 	)
 
 	if err := cleaner.Start(); err != nil {
