@@ -63,9 +63,9 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	cleaner := telegramhelper.NewFileCleaner(
 		baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
 		[]string{
-			".tdlib/files/videos", // Videos directory to clean up
-			".tdlib/files/photos", // Database directory to clean up
-			".tdlib/files",        // General files directory
+			".tdlib/files/videos",    // Videos directory to clean up
+			".tdlib/files/photos",    // Database directory to clean up
+			".tdlib/files/documents", // General files directory
 		},
 		5,  // cleanup interval minutes
 		15, // file age threshold minutes

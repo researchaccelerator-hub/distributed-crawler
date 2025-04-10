@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"sync"
 	"time"
-	
+
 	"github.com/rs/zerolog/log"
 )
 
@@ -32,7 +32,7 @@ func NewFileCleaner(baseDir string, targetSubPaths []string, cleanupIntervalMinu
 	if len(targetSubPaths) == 0 {
 		targetSubPaths = []string{".tdlib/files/videos"}
 	}
-	
+
 	return &FileCleaner{
 		baseDir:           baseDir,
 		targetSubPaths:    targetSubPaths,
@@ -54,6 +54,10 @@ func (fc *FileCleaner) Start() error {
 
 	// Don't require the directory to exist at startup
 	// It will be checked during each cleaning cycle instead
+	// Check if base directory exists
+	if _, err := os.Stat(fc.baseDir); os.IsNotExist(err) {
+		return fmt.Errorf("base directory '%s' does not exist", fc.baseDir)
+	}
 
 	fc.isRunning = true
 	fc.wg.Add(1)
@@ -64,7 +68,7 @@ func (fc *FileCleaner) Start() error {
 		Str("base_dir", fc.baseDir).
 		Float64("file_age_threshold_minutes", fc.fileAgeThreshold.Minutes()).
 		Float64("cleanup_interval_minutes", fc.cleanupInterval.Minutes())
-		
+
 	// Add all target paths to the log message
 	paths := make([]string, len(fc.targetSubPaths))
 	for i, path := range fc.targetSubPaths {
@@ -110,7 +114,7 @@ func (fc *FileCleaner) cleaningLoop() {
 	}
 }
 
-// cleanOldFiles removes files older than the threshold
+// cleanOldFiles removes files older than the threshold from the specified subpaths
 func (fc *FileCleaner) cleanOldFiles() {
 	log.Debug().Msg("Starting file cleanup in connection folders")
 
@@ -143,11 +147,11 @@ func (fc *FileCleaner) cleanOldFiles() {
 
 		connFolderPath := filepath.Join(fc.baseDir, entry.Name())
 		folderFileCount := 0
-		
+
 		// Process each target subpath for this connection
 		for _, subPath := range fc.targetSubPaths {
 			targetDirPath := filepath.Join(connFolderPath, subPath)
-			
+
 			// Check if this target directory exists
 			if _, err := os.Stat(targetDirPath); os.IsNotExist(err) {
 				// This specific target path doesn't exist in this connection folder
@@ -157,7 +161,7 @@ func (fc *FileCleaner) cleanOldFiles() {
 					Msg("Target path doesn't exist in connection folder, skipping")
 				continue
 			}
-			
+
 			// Process files in this target directory
 			fileCount := fc.cleanFilesInDir(targetDirPath, cutoffTime)
 			if fileCount > 0 {
@@ -167,10 +171,10 @@ func (fc *FileCleaner) cleanOldFiles() {
 					Int("files_cleaned", fileCount).
 					Msg("Cleaned files in directory")
 			}
-			
+
 			folderFileCount += fileCount
 		}
-		
+
 		// Add this connection folder's count to the total
 		if folderFileCount > 0 {
 			log.Info().
@@ -237,33 +241,4 @@ func (fc *FileCleaner) cleanFilesInDir(dirPath string, cutoffTime time.Time) int
 	}
 
 	return fileCount
-}
-
-// Example usage in a real crawler
-func main() {
-	// Example: clean files in dynamic connection folders
-	cleaner := NewFileCleaner(
-		"/CRAWLS/state",                                 // Base directory where conn_* folders are located
-		[]string{".tdlib/files/videos", ".tdlib/database"}, // Subpaths under each conn_* folder to check
-		5,                                               // cleanup interval minutes
-		15,                                              // file age threshold minutes
-	)
-
-	if err := cleaner.Start(); err != nil {
-		log.Fatal().Err(err).Msg("Failed to start file cleaner")
-	}
-
-	// Keep the main function running
-	// In a real crawler, this would be part of your main application
-	log.Info().Msg("File cleaner is running. Press Ctrl+C to stop.")
-
-	// Set up channel for interrupt signal
-	sigChan := make(chan os.Signal, 1)
-
-	// Block until we receive a signal
-	<-sigChan
-
-	log.Info().Msg("Stopping file cleaner...")
-	cleaner.Stop()
-	log.Info().Msg("Exited cleanly.")
 }
