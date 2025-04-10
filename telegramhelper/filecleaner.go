@@ -54,6 +54,7 @@ func (fc *FileCleaner) Start() error {
 
 	// Don't require the directory to exist at startup
 	// It will be checked during each cleaning cycle instead
+
 	// Check if base directory exists
 	if _, err := os.Stat(fc.baseDir); os.IsNotExist(err) {
 		return fmt.Errorf("base directory '%s' does not exist", fc.baseDir)
@@ -192,6 +193,7 @@ func (fc *FileCleaner) cleanOldFiles() {
 			Msg("Completed file cleanup")
 	} else {
 		log.Debug().Msg("No files needed cleaning")
+
 	}
 }
 
