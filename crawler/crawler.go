@@ -19,6 +19,7 @@ type TDLibClient interface {
 	GetMe() (*client.User, error)
 	GetBasicGroupFullInfo(req *client.GetBasicGroupFullInfoRequest) (*client.BasicGroupFullInfo, error)
 	GetUser(*client.GetUserRequest) (*client.User, error)
+	DeleteFile(req *client.DeleteFileRequest) (*client.Ok, error)
 }
 
 // CrawlerOptions holds configuration options for a crawler
