@@ -231,12 +231,12 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	// Create a unique subfolder based on URL hash plus unique process identifiers
 	h := fnv.New32a()
 	h.Write([]byte(cfg.TDLibDatabaseURL))
-	
+
 	// Add unique components to ensure different processes get different folders
 	// even if they share the same database URL
 	uniqueComponent := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
 	h.Write([]byte(uniqueComponent))
-	
+
 	uniqueSubfolder := fmt.Sprintf("conn_%d", h.Sum32())
 	// Create the full unique path
 	uniquePath := filepath.Join(storagePrefix, "state", uniqueSubfolder)
@@ -345,7 +345,6 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
-
 		// Set verbosity level from config (default is 1, lower values increase verbosity)
 		verbosityLevel := 1 // Default value if not configured
 		if cfg.TDLibVerbosity > 0 {
