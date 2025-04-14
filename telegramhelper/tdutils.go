@@ -243,10 +243,11 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 		log.Warn().Err(err).Str("path", storageLocation).Msg("Failed to delete source file after upload")
 	}
 	deleteFileReq := client.DeleteFileRequest{FileId: cfid}
-	_, err = tdlibClient.DeleteFile(&deleteFileReq)
+	ok, err := tdlibClient.DeleteFile(&deleteFileReq)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to delete file from Telegram")
 	}
+	log.Debug().Msgf("Response from TD for file deletion: %v", ok)
 	// Mark as processed to avoid future downloads
 	if err := sm.MarkMediaAsProcessed(remoteid); err != nil {
 		log.Error().
