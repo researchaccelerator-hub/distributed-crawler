@@ -118,6 +118,7 @@ Options:
 
 ### Running the Scraper
 
+
 #### Basic Usage
 
 Run the scraper with a seed list of channel usernames:
