@@ -346,7 +346,7 @@ var ParseMessage = func(
 	description := ""
 	thumbnailPath := ""
 	videoPath := ""
-	videofileid := int32(0)
+	//videofileid := int32(0)
 	thumbnailfileid := int32(0)
 	// Safely fetch comments if available
 	if message.InteractionInfo != nil &&
@@ -371,7 +371,7 @@ var ParseMessage = func(
 		case *client.MessageVideo:
 			// Safe processing with nil checks
 			if content != nil {
-				thumbnailPath, videoPath, description, videofileid, thumbnailfileid, err = processMessageSafely(content)
+				thumbnailPath, videoPath, description, _, thumbnailfileid, err = processMessageSafely(content)
 
 				if thumbnailPath != "" {
 					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
