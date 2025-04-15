@@ -16,6 +16,8 @@ on:
 env:
   dispatch_workflow: build-and-deploy-trigger.yaml
   dispatch_repo: irieaccelerator/common-workflows
+  # dispatch_ref: main
+  dispatch_ref: feature/INFRA-214/addMultiAppDeploy
 jobs:
   trigger-build:
     runs-on: ubuntu-latest
@@ -42,7 +44,7 @@ jobs:
 
       - name: Trigger Build and Deploy
         run: |
-          gh workflow run ${dispatch_workflow} -f repository="${org_repo}" -f config-file=".github/build-config.jsonc" -f ref="${ref}" -f sha="${sha}" --ref "main" --repo "${dispatch_repo}"
+          gh workflow run ${dispatch_workflow} -f repository="${org_repo}" -f config-file=".github/build-config.jsonc" -f ref="${ref}" -f sha="${sha}" --ref "${dispatch_ref}" --repo "${dispatch_repo}"
         env:
           org_repo: ${{github.repository}}
           ref: ${{github.ref_name}}
