@@ -9,89 +9,88 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
 	"os"
-	"path/filepath"
 	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
 )
 
-// removeMultimedia removes all files and subdirectories in the specified directory.
-// If the directory does not exist, it does nothing.
+//// removeMultimedia removes all files and subdirectories in the specified directory.
+//// If the directory does not exist, it does nothing.
+////
+//// Parameters:
+////   - filedir: The path to the directory whose contents are to be removed.
+////
+//// Returns:
+////   - An error if there is a failure during removal; otherwise, nil.
+//func removeMultimedia(filedir string) error {
+//	log.Debug().Str("directory", filedir).Msg("Attempting to remove multimedia directory contents")
 //
-// Parameters:
-//   - filedir: The path to the directory whose contents are to be removed.
+//	// Check if the directory exists
+//	info, err := os.Stat(filedir)
+//	if os.IsNotExist(err) {
+//		// Directory does not exist, nothing to do
+//		log.Debug().Str("directory", filedir).Msg("Directory does not exist, nothing to remove")
+//		return nil
+//	}
+//	if err != nil {
+//		log.Error().Err(err).Str("directory", filedir).Msg("Failed to check directory status")
+//		return err
+//	}
 //
-// Returns:
-//   - An error if there is a failure during removal; otherwise, nil.
-func removeMultimedia(filedir string) error {
-	log.Debug().Str("directory", filedir).Msg("Attempting to remove multimedia directory contents")
-
-	// Check if the directory exists
-	info, err := os.Stat(filedir)
-	if os.IsNotExist(err) {
-		// Directory does not exist, nothing to do
-		log.Debug().Str("directory", filedir).Msg("Directory does not exist, nothing to remove")
-		return nil
-	}
-	if err != nil {
-		log.Error().Err(err).Str("directory", filedir).Msg("Failed to check directory status")
-		return err
-	}
-
-	// Ensure it is a directory
-	if !info.IsDir() {
-		log.Error().Str("path", filedir).Msg("Path is not a directory")
-		return fmt.Errorf("path %s is not a directory", filedir)
-	}
-
-	// Get file count before removal for logging
-	var fileCount int
-	filepath.Walk(filedir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && path != filedir {
-			fileCount++
-		}
-		return nil
-	})
-
-	log.Debug().
-		Str("directory", filedir).
-		Int("file_count", fileCount).
-		Msg("Removing files and subdirectories")
-
-	// Remove contents of the directory
-	err = filepath.Walk(filedir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			log.Warn().Err(err).Str("path", path).Msg("Error accessing path during cleanup")
-			return err
-		}
-
-		// Skip the root directory itself
-		if path == filedir {
-			return nil
-		}
-
-		// Remove files and subdirectories
-		if err := os.RemoveAll(path); err != nil {
-			log.Error().Err(err).Str("path", path).Msg("Failed to remove path")
-			return err
-		}
-
-		log.Debug().Str("path", path).Msg("Removed path successfully")
-		return nil
-	})
-
-	if err != nil {
-		log.Error().Err(err).Str("directory", filedir).Msg("Error removing directory contents")
-		return err
-	}
-
-	log.Debug().
-		Str("directory", filedir).
-		Int("files_removed", fileCount).
-		Msg("Directory contents removed successfully")
-	return nil
-}
+//	// Ensure it is a directory
+//	if !info.IsDir() {
+//		log.Error().Str("path", filedir).Msg("Path is not a directory")
+//		return fmt.Errorf("path %s is not a directory", filedir)
+//	}
+//
+//	// Get file count before removal for logging
+//	var fileCount int
+//	filepath.Walk(filedir, func(path string, info os.FileInfo, err error) error {
+//		if err == nil && path != filedir {
+//			fileCount++
+//		}
+//		return nil
+//	})
+//
+//	log.Debug().
+//		Str("directory", filedir).
+//		Int("file_count", fileCount).
+//		Msg("Removing files and subdirectories")
+//
+//	// Remove contents of the directory
+//	err = filepath.Walk(filedir, func(path string, info os.FileInfo, err error) error {
+//		if err != nil {
+//			log.Warn().Err(err).Str("path", path).Msg("Error accessing path during cleanup")
+//			return err
+//		}
+//
+//		// Skip the root directory itself
+//		if path == filedir {
+//			return nil
+//		}
+//
+//		// Remove files and subdirectories
+//		if err := os.RemoveAll(path); err != nil {
+//			log.Error().Err(err).Str("path", path).Msg("Failed to remove path")
+//			return err
+//		}
+//
+//		log.Debug().Str("path", path).Msg("Removed path successfully")
+//		return nil
+//	})
+//
+//	if err != nil {
+//		log.Error().Err(err).Str("directory", filedir).Msg("Error removing directory contents")
+//		return err
+//	}
+//
+//	log.Debug().
+//		Str("directory", filedir).
+//		Int("files_removed", fileCount).
+//		Msg("Directory contents removed successfully")
+//	return nil
+//}
 
 // processMessageSafely extracts and returns the thumbnail path, video path, and description
 // from a given Telegram video message. It ensures the message structure is valid and not corrupt.
@@ -105,17 +104,17 @@ func removeMultimedia(filedir string) error {
 // - videoPath: The remote ID of the video.
 // - description: The text caption of the video.
 // - err: An error if the message structure is invalid or corrupt.
-func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath, description string, err error) {
+func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath, description string, videofileid int32, thumbnailfileid int32, err error) {
 	if mymsg == nil || mymsg.Video == nil || mymsg.Video.Thumbnail == nil {
-		return "", "", "", fmt.Errorf("invalid or corrupt message structure")
+		return "", "", "", 0, 0, fmt.Errorf("invalid or corrupt message structure")
 	}
 
 	thumbnailPath = mymsg.Video.Thumbnail.File.Remote.Id
+	thumbnailfileid = mymsg.Video.Thumbnail.File.Id
 	videoPath = mymsg.Video.Video.Remote.Id
+	videofileid = mymsg.Video.Video.Id
 	description = mymsg.Caption.Text
-	//thumbnailPath = fetch(tdlibClient, thumbnailPath)
-	//videoPath = fetch(tdlibClient, videoPath)
-	return thumbnailPath, videoPath, description, nil
+	return thumbnailPath, videoPath, description, videofileid, thumbnailfileid, nil
 }
 
 // fetchAndUploadMedia fetches a media file from Telegram using the provided TDLibClient
@@ -141,7 +140,7 @@ func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath,
 // 4. Store the file via the state manager
 // 5. Clean up the local file
 // 6. Mark the media as processed to prevent redundant downloads
-func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManagementInterface, crawlid, channelName, fileID, postLink string) (string, error) {
+func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManagementInterface, crawlid, channelName, fileID, postLink string, cfid int32) (string, error) {
 	if fileID == "" {
 		log.Debug().Msg("Empty file ID provided, nothing to fetch")
 		return "", nil
@@ -213,11 +212,16 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 			log.Warn().Err(e).Str("path", path).Msg("Failed to remove oversized file")
 		}
 
+		deleteFileReq := client.DeleteFileRequest{FileId: cfid}
+		_, err := tdlibClient.DeleteFile(&deleteFileReq)
+		if err != nil {
+			return "", err
+		}
 		return "", fmt.Errorf("file size is too large (%.2f MB)", sizeInMB)
 	}
 
 	// Store the file
-	storageLocation, err := sm.StoreFile(channelName, path, remoteid)
+	storageLocation, filep, err := sm.StoreFile(channelName, path, remoteid)
 	if err != nil {
 		log.Error().
 			Err(err).
@@ -233,6 +237,17 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 			Msg("File stored successfully")
 	}
 
+	// Delete original file after successful upload
+	err = os.Remove(filep)
+	if err != nil {
+		log.Warn().Err(err).Str("path", storageLocation).Msg("Failed to delete source file after upload")
+	}
+	deleteFileReq := client.DeleteFileRequest{FileId: cfid}
+	ok, err := tdlibClient.DeleteFile(&deleteFileReq)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to delete file from Telegram")
+	}
+	log.Debug().Msgf("Response from TD for file deletion: %v", ok)
 	// Mark as processed to avoid future downloads
 	if err := sm.MarkMediaAsProcessed(remoteid); err != nil {
 		log.Error().
@@ -331,7 +346,8 @@ var ParseMessage = func(
 	description := ""
 	thumbnailPath := ""
 	videoPath := ""
-
+	//videofileid := int32(0)
+	thumbnailfileid := int32(0)
 	// Safely fetch comments if available
 	if message.InteractionInfo != nil &&
 		message.InteractionInfo.ReplyInfo != nil &&
@@ -355,15 +371,15 @@ var ParseMessage = func(
 		case *client.MessageVideo:
 			// Safe processing with nil checks
 			if content != nil {
-				thumbnailPath, videoPath, description, _ = processMessageSafely(content)
+				thumbnailPath, videoPath, description, _, thumbnailfileid, err = processMessageSafely(content)
 
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
 				}
 
-				if videoPath != "" {
-					videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
-				}
+				//if videoPath != "" {
+				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
+				//}
 
 				if content.Caption != nil {
 					description = content.Caption.Text
@@ -382,7 +398,7 @@ var ParseMessage = func(
 					content.Photo.Sizes[0].Photo.Remote != nil {
 					thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
 					}
 				}
 			}
@@ -399,7 +415,7 @@ var ParseMessage = func(
 					content.Animation.Thumbnail.File.Remote != nil {
 					thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
 					}
 				}
 			}
@@ -431,7 +447,7 @@ var ParseMessage = func(
 				content.Sticker.Sticker.Remote != nil {
 				thumbnailPath = content.Sticker.Sticker.Remote.Id
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
 				}
 			}
 
@@ -449,16 +465,16 @@ var ParseMessage = func(
 						content.VideoNote.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
 						}
 					}
 
 					if content.VideoNote.Video != nil &&
 						content.VideoNote.Video.Remote != nil {
 						videoPath = content.VideoNote.Video.Remote.Id
-						if videoPath != "" {
-							videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
-						}
+						//if videoPath != "" {
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, thumbnailfileid)
+						//}
 					}
 				}
 			}
@@ -473,16 +489,16 @@ var ParseMessage = func(
 						content.Document.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.Document.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
 						}
 					}
 
 					if content.Document.Document != nil &&
 						content.Document.Document.Remote != nil {
 						videoPath = content.Document.Document.Remote.Id
-						if videoPath != "" {
-							videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link)
-						}
+						//if videoPath != "" {
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
+						//}
 					}
 				}
 			}

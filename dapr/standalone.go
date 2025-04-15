@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,24 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			return
 		}
 	}()
+
+	// Create a file cleaner that targets the same location as where connections are unzipped
+	// to ensure proper cleanup of temporary files
+	baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
+	cleaner := telegramhelper.NewFileCleaner(
+		baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
+		[]string{
+			".tdlib/files/videos",    // Videos directory to clean up
+			".tdlib/files/photos",    // Database directory to clean up
+			".tdlib/files/documents", // General files directory
+		},
+		5,  // cleanup interval minutes
+		15, // file age threshold minutes
+	)
+
+	if err := cleaner.Start(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to start file cleaner")
+	}
 	// Collect URLs from command line arguments or file
 	var urls []string
 
@@ -95,7 +114,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			log.Error().Msg("YouTube API key is required for YouTube platform. Please provide it with --youtube-api-key flag")
 			return
 		}
-		
+
 		log.Info().Msg("Using YouTube platform with the provided API key")
 	} else {
 		// Default Telegram platform initialization
@@ -203,7 +222,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		crawlexecid = common.GenerateCrawlID()
 		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
 	}
-	
+
 	// Track whether we're resuming the same execution ID or starting a new one
 	var isResumingSameCrawlExecution bool
 	if tempSM != nil {
@@ -211,6 +230,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		isResumingSameCrawlExecution = exists && existingExecID != "" && crawlexecid == existingExecID
 	}
 	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Crawl execution mode")
+
 	// Create the actual state manager with the determined execution ID
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
@@ -262,7 +282,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			depth++
 			continue
 		}
-		
+
 		// Print all page statuses before processing
 		log.Info().Int("page_count", len(pages)).Int("depth", depth).Msg("Page status summary before processing")
 		pageStatusCount := make(map[string]int)
@@ -316,7 +336,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if closeErr := sm.Close(); closeErr != nil {
 		log.Warn().Err(closeErr).Msg("Error during final state save, but will continue with crawl completion")
 	}
-	
+
 	completionMetadata := map[string]interface{}{
 		"status":          "completed",
 		"endTime":         time.Now(),
@@ -361,7 +381,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	// Process each page in the current layer
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
 		pageToProcess := layer.Pages[pageIndex]
-		
+
 		// Print debug information about each page discovered during crawl restart
 		log.Debug().
 			Str("url", pageToProcess.URL).
@@ -370,6 +390,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			Int("message_count", len(pageToProcess.Messages)).
 			Bool("resuming_execution", isResumingSameCrawlExecution).
 			Msg("Page discovered during crawl restart in Dapr mode")
+
 		// Skip already processed pages
 		if pageToProcess.Status == "fetched" {
 			if isResumingSameCrawlExecution {
@@ -421,26 +442,26 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			// Platform-specific processing
 			var discoveredChannels []*state.Page
 			var err error
-			
+
 			if crawlCfg.Platform == "youtube" {
 				// YouTube platform processing
 				log.Info().Msgf("Processing YouTube channel: %s", page.URL)
-				
+
 				// Initialize YouTube components
 				clientCtx := context.Background()
 				clientFactory := clientpkg.NewDefaultClientFactory()
-				
+
 				// Debug API key passing
 				if crawlCfg.YouTubeAPIKey == "" {
 					log.Error().Msg("YouTube API key is empty - make sure you provided it with --youtube-api-key")
 				} else {
 					log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(crawlCfg.YouTubeAPIKey))).Msg("Using YouTube API key in DAPR mode")
 				}
-				
+
 				config := map[string]interface{}{
 					"api_key": crawlCfg.YouTubeAPIKey,
 				}
-				
+
 				// Create YouTube client
 				ytClient, ytErr := clientFactory.CreateClient(clientCtx, "youtube", config)
 				if ytErr != nil {
@@ -475,7 +496,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 										"client":        ytAdapter,
 										"state_manager": sm,
 									}
-									
+
 									if ytErr = ytCrawler.Initialize(clientCtx, crawlerConfig); ytErr != nil {
 										err = fmt.Errorf("failed to initialize YouTube crawler: %w", ytErr)
 										log.Error().Err(err).Msg("Failed to initialize YouTube crawler")
@@ -485,7 +506,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 											Type: crawler.PlatformYouTube,
 											ID:   page.URL, // YouTube channel ID/handle
 										}
-										
+
 										// Fetch channel info and videos
 										_, ytErr := ytCrawler.GetChannelInfo(ctx, target)
 										if ytErr != nil {
@@ -499,14 +520,14 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 												ToTime:   time.Now(), // Use current time as the upper bound
 												Limit:    crawlCfg.MaxPosts,
 											}
-											
+
 											// Log job details
 											log.Debug().
 												Time("from_time", job.FromTime).
 												Time("to_time", job.ToTime).
 												Int("limit", job.Limit).
 												Msg("YouTube crawl job configured in DAPR mode")
-											
+
 											result, ytErr := ytCrawler.FetchMessages(ctx, job)
 											if ytErr != nil {
 												err = fmt.Errorf("failed to fetch YouTube videos: %w", ytErr)
@@ -516,12 +537,12 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 													Int("video_count", len(result.Posts)).
 													Str("channel", page.URL).
 													Msg("Successfully crawled YouTube channel")
-													
+
 												// For now, we don't discover channels from YouTube
 												discoveredChannels = []*state.Page{}
 											}
 										}
-										
+
 										// Cleanup YouTube crawler resources
 										if closeErr := ytCrawler.Close(); closeErr != nil {
 											log.Warn().Err(closeErr).Msg("Error closing YouTube crawler")
@@ -531,7 +552,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 							}
 						}
 					}
-					
+
 					// Disconnect YouTube client
 					if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
 						log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
@@ -543,7 +564,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				log.Info().Msgf("Starting run for Telegram channel: %s", page.URL)
 				discoveredChannels, err = crawl.RunForChannelWithPool(ctx, &page, crawlCfg.StorageRoot, sm, crawlCfg)
 			}
-			
+
 			log.Info().Msgf("Page processed for %s", page.URL)
 
 			if err != nil {

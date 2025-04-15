@@ -1,7 +1,7 @@
 // Package state provides interfaces and implementations for managing crawler state,
 // including pages, layers, and metadata across different storage backends.
-// 
-// It supports multiple storage providers such as local filesystem, Azure Blob Storage, 
+//
+// It supports multiple storage providers such as local filesystem, Azure Blob Storage,
 // and DAPR state management, allowing for flexible deployment configurations.
 package state
 
@@ -19,10 +19,10 @@ type StateManagementInterface interface {
 	// Core page and message operations
 	// GetPage retrieves a page by its ID from the state store
 	GetPage(id string) (Page, error)
-	
+
 	// UpdatePage updates or creates a page in the state store
 	UpdatePage(page Page) error
-	
+
 	// UpdateMessage sets the status of a specific message within a page
 	// This is used to track processing status of individual messages
 	UpdateMessage(pageID string, chatID int64, messageID int64, status string) error
@@ -31,17 +31,17 @@ type StateManagementInterface interface {
 	// AddLayer adds a new layer of pages at a specific depth level
 	// Used when discovering new pages during crawling
 	AddLayer(pages []Page) error
-	
+
 	// GetLayerByDepth retrieves all pages at a specified depth
 	GetLayerByDepth(depth int) ([]Page, error)
-	
+
 	// GetMaxDepth returns the highest depth value present in the state
 	GetMaxDepth() (int, error)
 
 	// State persistence
 	// SaveState persists the current state to the storage backend
 	SaveState() error
-	
+
 	// ExportPagesToBinding exports pages to an external storage binding
 	// Useful for transferring data to other systems
 	ExportPagesToBinding(crawlID string) error
@@ -49,18 +49,18 @@ type StateManagementInterface interface {
 	// Data storage
 	// StorePost saves a parsed Telegram post to persistent storage
 	StorePost(channelID string, post model.Post) error
-	
+
 	// StoreFile saves a media file to persistent storage and returns its new path
-	StoreFile(channelID string, sourceFilePath string, fileName string) (string, error)
+	StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error)
 
 	// Crawl management
-	// GetPreviousCrawls returns a list of previous crawl IDs 
+	// GetPreviousCrawls returns a list of previous crawl IDs
 	GetPreviousCrawls() ([]string, error)
-	
+
 	// UpdateCrawlMetadata updates metadata for a specific crawl
 	// Used to track crawl progress, status, and statistics
 	UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error
-	
+
 	// FindIncompleteCrawl checks if there's an incomplete crawl with the given ID
 	// Returns executionID, exists flag, and any error
 	FindIncompleteCrawl(crawlID string) (string, bool, error)
@@ -69,7 +69,7 @@ type StateManagementInterface interface {
 	// HasProcessedMedia checks if a media item has already been processed
 	// Used to avoid duplicate downloads and storage
 	HasProcessedMedia(mediaID string) (bool, error)
-	
+
 	// MarkMediaAsProcessed marks a media item as processed in the cache
 	MarkMediaAsProcessed(mediaID string) error
 
@@ -78,7 +78,7 @@ type StateManagementInterface interface {
 	Close() error
 }
 
-// StateManagerFactory defines a factory interface for creating appropriate 
+// StateManagerFactory defines a factory interface for creating appropriate
 // state manager implementations based on configuration.
 type StateManagerFactory interface {
 	// Create instantiates and configures a state manager implementation
@@ -111,7 +111,7 @@ type Config struct {
 	// Crawl identifiers
 	// CrawlID identifies a logical crawl operation across runs
 	CrawlID string
-	
+
 	// CrawlExecutionID identifies a specific execution instance
 	// This allows for multiple executions of the same logical crawl
 	CrawlExecutionID string
@@ -130,10 +130,10 @@ type Config struct {
 type AzureConfig struct {
 	// ContainerName is the name of the Azure Blob Storage container to use
 	ContainerName string
-	
+
 	// BlobNameRoot is the base path prefix for all blobs in the container
 	BlobNameRoot string
-	
+
 	// AccountURL is the full URL to the Azure Storage account
 	// Format: https://<account-name>.blob.core.windows.net
 	AccountURL string
@@ -145,7 +145,7 @@ type DaprConfig struct {
 	// StateStoreName is the name of the DAPR state store component to use
 	// This refers to a configured state store in the DAPR runtime
 	StateStoreName string
-	
+
 	// ComponentName is the name of the DAPR binding component for file storage
 	// This refers to a configured binding component in the DAPR runtime
 	ComponentName string

@@ -118,6 +118,7 @@ type TDLibClient interface {
 	GetMe() (*tdlibclient.User, error)
 	GetBasicGroupFullInfo(req *tdlibclient.GetBasicGroupFullInfoRequest) (*tdlibclient.BasicGroupFullInfo, error)
 	GetUser(*tdlibclient.GetUserRequest) (*tdlibclient.User, error)
+	DeleteFile(req *tdlibclient.DeleteFileRequest) (*tdlibclient.Ok, error)
 }
 
 // CrawlerOptions holds configuration options for a crawler

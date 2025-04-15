@@ -196,16 +196,16 @@ func (lsm *LocalStateManager) StorePost(channelID string, post model.Post) error
 }
 
 // StoreFile stores a file in the filesystem
-func (lsm *LocalStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, error) {
+func (lsm *LocalStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) {
 	// Check if source file exists
 	if _, err := os.Stat(sourceFilePath); os.IsNotExist(err) {
-		return "", fmt.Errorf("source file does not exist: %w", err)
+		return "", "", fmt.Errorf("source file does not exist: %w", err)
 	}
 
 	// Read file data
 	fileData, err := os.ReadFile(sourceFilePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read source file: %w", err)
+		return "", "", fmt.Errorf("failed to read source file: %w", err)
 	}
 
 	// Generate filename if not provided
@@ -222,13 +222,13 @@ func (lsm *LocalStateManager) StoreFile(channelID string, sourceFilePath string,
 	// Create media directory
 	mediaDir := filepath.Join(lsm.basePath, lsm.config.CrawlID, "media", channelID)
 	if err := lsm.storageProvider.CreateDir(mediaDir); err != nil {
-		return "", fmt.Errorf("failed to create media directory: %w", err)
+		return "", "", fmt.Errorf("failed to create media directory: %w", err)
 	}
 
 	// Write file
 	destPath := filepath.Join(mediaDir, fileName)
 	if err := lsm.storageProvider.WriteFile(destPath, fileData); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
+		return "", "", fmt.Errorf("failed to write file: %w", err)
 	}
 
 	// Delete original file after copying
@@ -236,9 +236,9 @@ func (lsm *LocalStateManager) StoreFile(channelID string, sourceFilePath string,
 		log.Warn().Err(err).Str("path", sourceFilePath).Msg("Failed to delete source file")
 	}
 
-	// Return the relative path
+	// Return the relative path and the filename
 	relPath := filepath.Join(lsm.config.CrawlID, "media", channelID, fileName)
-	return relPath, nil
+	return relPath, fileName, nil
 }
 
 // HasProcessedMedia checks if media has been processed before

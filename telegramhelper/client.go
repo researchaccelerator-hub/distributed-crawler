@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -116,8 +117,8 @@ type Credentials struct {
 // credentials for authenticating with the Telegram API. If the file doesn't exist
 // or contains invalid data, the function will return an error, prompting the
 // application to fall back to environment variables for credentials.
-func readCredentials() (*Credentials, error) {
-	credsPath := filepath.Join(".tdlib", "credentials.json")
+func readCredentials(path string) (*Credentials, error) {
+	credsPath := filepath.Join(path, ".tdlib", "credentials.json")
 
 	// Check if credentials file exists
 	if _, err := os.Stat(credsPath); os.IsNotExist(err) {
@@ -227,16 +228,20 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	// We'll use the default CLI interactor but prepare environment variables
 	// so we need to track the phoneCode for later
 
-	// Generate a unique subfolder for this connection if a database URL is provided
-	uniqueSubfolder := ""
-	if cfg.TDLibDatabaseURL != "" {
-		// Create a unique subfolder based on the URL hash
-		h := fnv.New32a()
-		h.Write([]byte(cfg.TDLibDatabaseURL))
-		uniqueSubfolder = fmt.Sprintf("conn_%d", h.Sum32())
+	// Create a unique subfolder based on URL hash plus unique process identifiers
+	h := fnv.New32a()
+	h.Write([]byte(cfg.TDLibDatabaseURL))
 
-		// Create the full unique path
-		uniquePath := filepath.Join(storagePrefix, "state", uniqueSubfolder)
+	// Add unique components to ensure different processes get different folders
+	// even if they share the same database URL
+	uniqueComponent := fmt.Sprintf("%d_%d", time.Now().UnixNano(), os.Getpid())
+	h.Write([]byte(uniqueComponent))
+
+	uniqueSubfolder := fmt.Sprintf("conn_%d", h.Sum32())
+	// Create the full unique path
+	uniquePath := filepath.Join(storagePrefix, "state", uniqueSubfolder)
+
+	if cfg.TDLibDatabaseURL != "" {
 
 		// Ensure the directory exists
 		err := os.MkdirAll(uniquePath, 0755)
@@ -258,7 +263,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	var apiHash string
 	var phoneNumber, phoneCode string
 
-	creds, err := readCredentials()
+	creds, err := readCredentials(uniquePath)
 	if err == nil && creds != nil {
 		log.Info().Msg("Using API credentials from stored file")
 		apiID, err = strconv.Atoi(creds.APIId)
@@ -340,17 +345,16 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 
 	go func() {
 		tdlibClient, err := client.NewClient(authorizer)
-
 		// Set verbosity level from config (default is 1, lower values increase verbosity)
 		verbosityLevel := 1 // Default value if not configured
 		if cfg.TDLibVerbosity > 0 {
 			verbosityLevel = cfg.TDLibVerbosity
 		}
-		
+
 		log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level")
 		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: int32(verbosityLevel)}
 		tdlibClient.SetLogVerbosityLevel(&verb)
-		
+
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
@@ -453,6 +457,27 @@ func downloadAndExtractTarball(url, targetDir string) error {
 // It handles directories and regular files, creating necessary directories
 // and files as needed. Unknown file types are ignored. Returns an error if
 // any operation fails.
+// TDLibClientWrapper extends the TDLib client with directory information
+type TDLibClientWrapper struct {
+	*client.Client            // Embed the original client
+	clientDir      string     // Path to the client directory
+	clientDirMu    sync.Mutex // Mutex to protect clientDir access
+}
+
+// GetClientDirectory returns the directory where this client's files are stored
+func (w *TDLibClientWrapper) GetClientDirectory() string {
+	w.clientDirMu.Lock()
+	defer w.clientDirMu.Unlock()
+	return w.clientDir
+}
+
+// SetClientDirectory sets the directory path for this client
+func (w *TDLibClientWrapper) SetClientDirectory(path string) {
+	w.clientDirMu.Lock()
+	defer w.clientDirMu.Unlock()
+	w.clientDir = path
+}
+
 func downloadAndExtractTarballFromReader(reader io.Reader, targetDir string) error {
 	// Step 1: Decompress the gzip file
 	gzReader, err := gzip.NewReader(reader)
