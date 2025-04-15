@@ -377,9 +377,9 @@ var ParseMessage = func(
 					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
 				}
 
-				if videoPath != "" {
-					videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
-				}
+				//if videoPath != "" {
+				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
+				//}
 
 				if content.Caption != nil {
 					description = content.Caption.Text
@@ -472,9 +472,9 @@ var ParseMessage = func(
 					if content.VideoNote.Video != nil &&
 						content.VideoNote.Video.Remote != nil {
 						videoPath = content.VideoNote.Video.Remote.Id
-						if videoPath != "" {
-							videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, thumbnailfileid)
-						}
+						//if videoPath != "" {
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, thumbnailfileid)
+						//}
 					}
 				}
 			}
@@ -496,9 +496,9 @@ var ParseMessage = func(
 					if content.Document.Document != nil &&
 						content.Document.Document.Remote != nil {
 						videoPath = content.Document.Document.Remote.Id
-						if videoPath != "" {
-							videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
-						}
+						//if videoPath != "" {
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
+						//}
 					}
 				}
 			}
