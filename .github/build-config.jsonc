@@ -1,5 +1,5 @@
 {
-    "app_name": "distributed-crawler",
+    "app_names": ["distributed-crawler", "youtube-crawler"],
     "deploy_type": "K8S",
     "sequential_build": true,
     "builds": [
