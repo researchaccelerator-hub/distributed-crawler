@@ -124,6 +124,16 @@ var rootCmd = &cobra.Command{
 		}
 		zerolog.SetGlobalLevel(level)
 		log.Info().Str("log_level", level.String()).Msg("Logger initialized")
+		
+		// Check YouTube API key if platform is YouTube
+		if crawlerCfg.Platform == "youtube" {
+			if crawlerCfg.YouTubeAPIKey == "" {
+				fmt.Println("Error: When using --platform youtube, you must provide a valid YouTube API key with --youtube-api-key")
+				log.Error().Msg("YouTube API key is required but was not provided")
+			} else {
+				log.Info().Str("api_key_status", "provided").Str("api_key_length", fmt.Sprintf("%d chars", len(crawlerCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
+			}
+		}
 
 		// Load configuration file if specified
 		if cfgFile != "" {
@@ -352,6 +362,8 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPosts, "max-posts", -1, "The maximum posts to collect")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPages, "max-pages", 108000, "The maximum number of pages/channels to crawl")
 	rootCmd.PersistentFlags().IntVar(&tdlibVerbosity, "tdlib-verbosity", 1, "TDLib verbosity level (0-10, where 10 is most verbose)")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
@@ -380,6 +392,8 @@ func init() {
 	viper.BindPFlag("crawler.maxposts", rootCmd.PersistentFlags().Lookup("max-posts"))
 	viper.BindPFlag("crawler.maxdepth", rootCmd.PersistentFlags().Lookup("max-depth"))
 	viper.BindPFlag("crawler.maxpages", rootCmd.PersistentFlags().Lookup("max-pages"))
+	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
+	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
