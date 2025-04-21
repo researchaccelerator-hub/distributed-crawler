@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
@@ -15,9 +16,9 @@ import (
 type YouTubeDataClient struct {
 	service *ytapi.Service
 	apiKey  string
-	
+
 	// Caches to minimize API calls
-	channelCache      map[string]*youtubemodel.YouTubeChannel
+	channelCache         map[string]*youtubemodel.YouTubeChannel
 	uploadsPlaylistCache map[string]string // Maps channelID to uploadsPlaylistID
 }
 
@@ -28,8 +29,8 @@ func NewYouTubeDataClient(apiKey string) (*YouTubeDataClient, error) {
 	}
 
 	return &YouTubeDataClient{
-		apiKey:              apiKey,
-		channelCache:        make(map[string]*youtubemodel.YouTubeChannel),
+		apiKey:               apiKey,
+		channelCache:         make(map[string]*youtubemodel.YouTubeChannel),
 		uploadsPlaylistCache: make(map[string]string),
 	}, nil
 }
@@ -72,7 +73,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
 	}
-	
+
 	// Check cache first
 	if cachedChannel, exists := c.channelCache[channelID]; exists {
 		log.Debug().
@@ -157,10 +158,10 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		PublishedAt:     publishedAt,
 		Thumbnails:      thumbnails,
 	}
-	
+
 	// Store in cache
 	c.channelCache[channelID] = channel
-	
+
 	// If the actual channelID from the API is different from the input channelID,
 	// cache it under both keys to ensure future lookups hit the cache
 	if item.Id != channelID {
@@ -197,7 +198,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 			Time("effective_to_time", effectiveToTime).
 			Msg("Using current time as default toTime value")
 	}
-	
+
 	// Handle negative or zero limit as "no limit"
 	effectiveLimit := limit
 	if effectiveLimit <= 0 {
@@ -207,7 +208,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 			Int("effective_limit", effectiveLimit).
 			Msg("Negative or zero limit detected - treating as unlimited")
 	}
-	
+
 	log.Info().
 		Str("channel_id", channelID).
 		Time("from_time", fromTime).
@@ -219,7 +220,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 	// First, check cache for the uploads playlist ID
 	var uploadsPlaylistID string
 	var exists bool
-	
+
 	if uploadsPlaylistID, exists = c.uploadsPlaylistCache[channelID]; exists {
 		log.Debug().
 			Str("channel_id", channelID).
@@ -229,14 +230,14 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 		// Need to make an API call to get the uploads playlist ID
 		var part = []string{"contentDetails"}
 		var call *ytapi.ChannelsListCall
-	
+
 		// Detailed debug logging for channel ID format detection
 		log.Debug().
 			Str("raw_channel_id", channelID).
 			Bool("starts_with_@", len(channelID) > 0 && channelID[0] == '@').
 			Bool("appears_to_be_channel_id", len(channelID) > 2 && channelID[0:2] == "UC").
 			Msg("Determining channel ID format for uploads playlist retrieval")
-	
+
 		if len(channelID) > 0 && channelID[0] == '@' {
 			// Handle username format (@username)
 			username := channelID[1:]
@@ -251,29 +252,29 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 			log.Debug().Str("possible_username", channelID).Msg("Trying as username without @ symbol")
 			call = c.service.Channels.List(part).ForUsername(channelID)
 		}
-	
+
 		response, err := call.MaxResults(1).Context(ctx).Do()
 		if err != nil {
 			log.Error().Err(err).Str("channel_id", channelID).Msg("Failed to get channel from YouTube API")
 			return nil, fmt.Errorf("failed to get channel from YouTube API: %w", err)
 		}
-	
+
 		if len(response.Items) == 0 {
 			log.Error().Str("channel_id", channelID).Msg("Channel not found on YouTube")
 			return nil, fmt.Errorf("channel not found on YouTube: %s", channelID)
 		}
-	
+
 		// Get the uploads playlist ID and log it
 		uploadsPlaylistID = response.Items[0].ContentDetails.RelatedPlaylists.Uploads
-		
+
 		if uploadsPlaylistID == "" {
 			log.Error().Str("channel_id", channelID).Msg("Channel found but no uploads playlist available")
 			return nil, fmt.Errorf("no uploads playlist available for channel: %s", channelID)
 		}
-		
+
 		// Store in cache
 		c.uploadsPlaylistCache[channelID] = uploadsPlaylistID
-		
+
 		// If the API returned a channel ID different from what was requested, cache it under both
 		if response.Items[0].Id != channelID {
 			c.uploadsPlaylistCache[response.Items[0].Id] = uploadsPlaylistID
@@ -283,7 +284,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				Str("uploads_playlist_id", uploadsPlaylistID).
 				Msg("Cached uploads playlist ID under both input ID and actual ID")
 		}
-		
+
 		log.Debug().
 			Str("channel_id", channelID).
 			Str("uploads_playlist_id", uploadsPlaylistID).
@@ -294,25 +295,25 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 	videos := make([]*youtubemodel.YouTubeVideo, 0)
 	var nextPageToken string
 	pageCounter := 0
-	
+
 	log.Debug().
 		Str("channel_id", channelID).
 		Str("uploads_playlist_id", uploadsPlaylistID).
 		Int("original_limit", limit).
 		Int("effective_limit", effectiveLimit).
 		Msg("Starting video retrieval from uploads playlist")
-	
+
 	for len(videos) < effectiveLimit {
 		pageCounter++
 		maxResultsPerPage := min(50, effectiveLimit-len(videos))
-		
+
 		log.Debug().
 			Str("playlist_id", uploadsPlaylistID).
 			Int("page_number", pageCounter).
 			Int("max_results_per_page", maxResultsPerPage).
 			Str("page_token", nextPageToken).
 			Msg("Fetching playlist items page")
-			
+
 		// Fetch playlist items (videos)
 		playlistCall := c.service.PlaylistItems.List([]string{"snippet", "contentDetails"}).
 			PlaylistId(uploadsPlaylistID).
@@ -337,7 +338,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				Msg("No items returned for this page of results")
 			break
 		}
-		
+
 		log.Debug().
 			Str("playlist_id", uploadsPlaylistID).
 			Int("items_count", len(playlistResponse.Items)).
@@ -347,12 +348,12 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 		// Process each video in the playlist
 		videoIDs := make([]string, 0, len(playlistResponse.Items))
 		videoMap := make(map[string]*youtubemodel.YouTubeVideo)
-		
+
 		log.Debug().
 			Int("processing_items_count", len(playlistResponse.Items)).
 			Str("playlist_id", uploadsPlaylistID).
 			Msg("Processing playlist items")
-		
+
 		itemsSkippedBeforeFromTime := 0
 		itemsSkippedAfterToTime := 0
 		itemsSkippedParseError := 0
@@ -367,7 +368,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				Str("published_at_raw", item.Snippet.PublishedAt).
 				Str("title", item.Snippet.Title).
 				Msg("Processing playlist item")
-				
+
 			// Parse published date
 			publishedAt, err := time.Parse(time.RFC3339, item.Snippet.PublishedAt)
 			if err != nil {
@@ -396,7 +397,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				itemsSkippedAfterToTime++
 				continue
 			}
-			
+
 			log.Debug().
 				Time("published_at", publishedAt).
 				Time("from_time", fromTime).
@@ -427,12 +428,34 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				}
 			}
 
+			// Log snippet data for debugging
+			log.Debug().
+				Str("video_id", videoID).
+				Str("raw_title", item.Snippet.Title).
+				Str("raw_description", item.Snippet.Description).
+				Int("title_length", len(item.Snippet.Title)).
+				Int("description_length", len(item.Snippet.Description)).
+				Msg("Raw video data from YouTube API")
+
+			description := item.Snippet.Description
+
+			// Ensure title is actually the title, not a description
+			title := item.Snippet.Title
+			// If title contains newlines or is very long, it might be misplaced description
+			if strings.Contains(title, "\n") || len(title) > 500 {
+				log.Warn().
+					Str("video_id", videoID).
+					Int("title_length", len(title)).
+					Bool("contains_newlines", strings.Contains(title, "\n")).
+					Msg("Found unusually long or formatted title, might be description")
+			}
+
 			// Create basic video object (without statistics yet)
 			video := &youtubemodel.YouTubeVideo{
 				ID:          videoID,
 				ChannelID:   channelID,
-				Title:       item.Snippet.Title,
-				Description: item.Snippet.Description,
+				Title:       title,
+				Description: description,
 				PublishedAt: publishedAt,
 				Thumbnails:  thumbnails,
 			}
@@ -440,7 +463,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 			videoMap[videoID] = video
 			itemsAccepted++
 		}
-		
+
 		log.Info().
 			Int("total_items", len(playlistResponse.Items)).
 			Int("items_accepted", itemsAccepted).
@@ -455,7 +478,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				Int("video_ids_count", len(videoIDs)).
 				Strs("video_ids", videoIDs).
 				Msg("Fetching statistics for videos")
-				
+
 			// Get statistics for these videos in a single call
 			videosCall := c.service.Videos.List([]string{"statistics", "contentDetails"}).
 				Id(videoIDs...).
@@ -465,12 +488,12 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 			if err != nil {
 				log.Error().Err(err).Strs("video_ids", videoIDs).Msg("Failed to get video statistics")
 				// Continue with basic information only
-				
+
 				// Even without statistics, add the videos to the results to avoid losing them
 				for _, video := range videoMap {
 					videos = append(videos, video)
 				}
-				
+
 				log.Warn().
 					Int("videos_added_without_stats", len(videoMap)).
 					Msg("Added videos without statistics due to API error")
@@ -479,10 +502,10 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 					Int("stats_response_items", len(videosResponse.Items)).
 					Int("expected_items", len(videoIDs)).
 					Msg("Retrieved video statistics")
-					
+
 				// Track stats retrieval success rate
 				statsFound := 0
-				
+
 				// Update videos with statistics
 				for _, videoItem := range videosResponse.Items {
 					if video, ok := videoMap[videoItem.Id]; ok {
@@ -499,13 +522,15 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 						// Add to results
 						videos = append(videos, video)
 						statsFound++
-						
+
 						log.Debug().
 							Str("video_id", video.ID).
 							Str("title", video.Title).
 							Int64("view_count", viewCount).
 							Int64("like_count", likeCount).
 							Int64("comment_count", commentCount).
+							Bool("comments_disabled", videoItem.Statistics.CommentCount == 0 && viewCount > 1000). // Heuristic for detecting disabled comments
+							Bool("api_reports_comment_count", videoItem.Statistics.CommentCount > 0).
 							Str("duration", video.Duration).
 							Msg("Added video with statistics")
 					} else {
@@ -514,13 +539,23 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 							Msg("Received statistics for video not in our map")
 					}
 				}
-				
+
+				// Count videos with zero comments for debugging purposes
+				videosWithZeroComments := 0
+				for _, videoItem := range videosResponse.Items {
+					if videoItem.Statistics.CommentCount == 0 {
+						videosWithZeroComments++
+					}
+				}
+
 				log.Info().
 					Int("total_videos_processed", len(videoMap)).
 					Int("stats_found", statsFound).
-					Int("stats_missing", len(videoMap) - statsFound).
+					Int("stats_missing", len(videoMap)-statsFound).
+					Int("videos_with_zero_comments", videosWithZeroComments).
+					Float64("zero_comments_percentage", float64(videosWithZeroComments)/float64(len(videosResponse.Items))*100).
 					Msg("Processed video statistics")
-				
+
 				// Check for videos that didn't get statistics
 				if statsFound < len(videoMap) {
 					missingStats := []string{}
@@ -533,19 +568,19 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 								break
 							}
 						}
-						
+
 						if !found {
 							// This video didn't get stats, add it anyway
 							videos = append(videos, video)
 							missingStats = append(missingStats, videoID)
-							
+
 							log.Debug().
 								Str("video_id", video.ID).
 								Str("title", video.Title).
 								Msg("Added video without statistics")
 						}
 					}
-					
+
 					if len(missingStats) > 0 {
 						log.Warn().
 							Strs("video_ids_missing_stats", missingStats).
@@ -565,7 +600,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				Int("effective_limit", effectiveLimit).
 				Bool("has_next_page", playlistResponse.NextPageToken != "").
 				Msg("Evaluating whether to fetch next page")
-				
+
 			if len(videos) >= effectiveLimit {
 				log.Debug().Msg("Reached effective video limit, stopping pagination")
 			}
@@ -592,7 +627,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 		Int("effective_limit", effectiveLimit).
 		Bool("limit_reached", len(videos) >= effectiveLimit).
 		Msg("Retrieved videos from YouTube channel")
-		
+
 	if len(videos) == 0 {
 		log.Warn().
 			Str("channel_id", channelID).
@@ -683,14 +718,18 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 		}
 
 		message := &YouTubeMessage{
-			ID:         video.ID,
-			ChannelID:  video.ChannelID,
-			SenderID:   video.ChannelID,
-			SenderName: "YouTube Channel", // This would ideally be populated with the actual channel name
-			Text:       video.Title + "\n\n" + video.Description,
-			Timestamp:  video.PublishedAt,
-			Views:      video.ViewCount,
-			Reactions:  reactions,
+			ID:           video.ID,
+			ChannelID:    video.ChannelID,
+			SenderID:     video.ChannelID,
+			SenderName:   "YouTube Channel", // This would ideally be populated with the actual channel name
+			Text:         video.Title + "\n\n" + video.Description, // Keep for backward compatibility
+			Title:        video.Title,
+			Description:  video.Description,
+			Timestamp:    video.PublishedAt,
+			Views:        video.ViewCount,
+			Reactions:    reactions,
+			Thumbnails:   video.Thumbnails,
+			CommentCount: video.CommentCount,
 		}
 
 		messages = append(messages, message)

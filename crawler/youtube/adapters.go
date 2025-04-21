@@ -74,16 +74,17 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 	// Convert messages to YouTube videos
 	videos := make([]*youtubemodel.YouTubeVideo, 0, len(messages))
 	for _, msg := range messages {
+		// Use the new GetTitle() and GetDescription() methods directly
 		video := &youtubemodel.YouTubeVideo{
 			ID:           msg.GetID(),
 			ChannelID:    channelID,
-			Title:        msg.GetText(), // First line is usually the title
-			Description:  msg.GetText(), // Full text includes description
+			Title:        msg.GetTitle(),
+			Description:  msg.GetDescription(),
 			PublishedAt:  msg.GetTimestamp(),
 			ViewCount:    msg.GetViews(),
-			LikeCount:    0, // Get from reactions if available
-			CommentCount: 0, // Get from comments if available
-			Thumbnails:   make(map[string]string),
+			LikeCount:    0,
+			CommentCount: msg.GetCommentCount(),
+			Thumbnails:   msg.GetThumbnails(),
 		}
 		
 		// Extract like count from reactions if available
