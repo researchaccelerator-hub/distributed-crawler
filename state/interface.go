@@ -115,6 +115,11 @@ type Config struct {
 	// CrawlExecutionID identifies a specific execution instance
 	// This allows for multiple executions of the same logical crawl
 	CrawlExecutionID string
+	
+	// Platform identifies which platform we're crawling
+	// This affects storage binding selection
+	// Values can be "telegram", "youtube", etc.
+	Platform string
 
 	// Specific configuration options for different backends
 	// Only one of these should typically be set, based on the

@@ -193,6 +193,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	tempCfg := state.Config{
 		StorageRoot: crawlCfg.StorageRoot,
 		CrawlID:     crawlCfg.CrawlID,
+		Platform:    crawlCfg.Platform, // Pass the platform information
 	}
 
 	tempSM, err := smfact.Create(tempCfg)
@@ -236,6 +237,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
+		Platform:         crawlCfg.Platform, // Pass the platform information
 
 		// Add the MaxPages config
 		MaxPagesConfig: &state.MaxPagesConfig{

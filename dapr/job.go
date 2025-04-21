@@ -241,6 +241,7 @@ type JobData struct {
 	CrawlID     string   `json:"crawlId,omitempty"`
 	MaxDepth    int      `json:"maxDepth,omitempty"`
 	Concurrency int      `json:"concurrency,omitempty"`
+	Platform    string   `json:"platform,omitempty"` // Platform to crawl: "telegram", "youtube", etc.
 }
 
 // handleJob processes a job event by unmarshaling the job data and payload,
@@ -336,6 +337,7 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
+		Platform:         crawlCfg.Platform, // Pass the platform information
 	}
 
 	smfact := state.DefaultStateManagerFactory{}
