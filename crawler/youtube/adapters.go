@@ -74,7 +74,7 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 	// Convert messages to YouTube videos
 	videos := make([]*youtubemodel.YouTubeVideo, 0, len(messages))
 	for _, msg := range messages {
-		// Use the new GetTitle() and GetDescription() methods directly
+		// Use the new getter methods directly
 		video := &youtubemodel.YouTubeVideo{
 			ID:           msg.GetID(),
 			ChannelID:    channelID,
@@ -85,6 +85,7 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 			LikeCount:    0,
 			CommentCount: msg.GetCommentCount(),
 			Thumbnails:   msg.GetThumbnails(),
+			Language:     msg.GetLanguage(),
 		}
 		
 		// Extract like count from reactions if available

@@ -157,6 +157,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		VideoCount:      videoCount,
 		PublishedAt:     publishedAt,
 		Thumbnails:      thumbnails,
+		Country:         item.Snippet.Country, // Add country information
 	}
 
 	// Store in cache
@@ -178,6 +179,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		Int64("subscribers", channel.SubscriberCount).
 		Int64("view_count", channel.ViewCount).
 		Int64("video_count", channel.VideoCount).
+		Str("country", channel.Country).
 		Msg("YouTube channel info retrieved")
 
 	return channel, nil
@@ -458,6 +460,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				Description: description,
 				PublishedAt: publishedAt,
 				Thumbnails:  thumbnails,
+				Language:    "", // Will be populated later from videos API
 			}
 
 			videoMap[videoID] = video
@@ -480,7 +483,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 				Msg("Fetching statistics for videos")
 
 			// Get statistics for these videos in a single call
-			videosCall := c.service.Videos.List([]string{"statistics", "contentDetails"}).
+			videosCall := c.service.Videos.List([]string{"snippet", "statistics", "contentDetails"}).
 				Id(videoIDs...).
 				Context(ctx)
 
@@ -518,6 +521,16 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 						video.LikeCount = likeCount
 						video.CommentCount = commentCount
 						video.Duration = videoItem.ContentDetails.Duration
+						
+						// Get language from snippet if available
+						if videoItem.Snippet != nil {
+							if videoItem.Snippet.DefaultLanguage != "" {
+								video.Language = videoItem.Snippet.DefaultLanguage
+							} else if videoItem.Snippet.DefaultAudioLanguage != "" {
+								// Fall back to default audio language if default language is not set
+								video.Language = videoItem.Snippet.DefaultAudioLanguage
+							}
+						}
 
 						// Add to results
 						videos = append(videos, video)
@@ -532,6 +545,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 							Bool("comments_disabled", videoItem.Statistics.CommentCount == 0 && viewCount > 1000). // Heuristic for detecting disabled comments
 							Bool("api_reports_comment_count", videoItem.Statistics.CommentCount > 0).
 							Str("duration", video.Duration).
+							Str("language", video.Language).
 							Msg("Added video with statistics")
 					} else {
 						log.Warn().
@@ -699,6 +713,7 @@ func (a *YouTubeClientAdapter) GetChannelInfo(ctx context.Context, channelID str
 		Name:        channelInfo.Title,
 		Description: channelInfo.Description,
 		MemberCount: channelInfo.SubscriberCount,
+		Country:     channelInfo.Country,
 	}, nil
 }
 
@@ -730,6 +745,7 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 			Reactions:    reactions,
 			Thumbnails:   video.Thumbnails,
 			CommentCount: video.CommentCount,
+			Language:     video.Language,
 		}
 
 		messages = append(messages, message)

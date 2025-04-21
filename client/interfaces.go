@@ -37,6 +37,9 @@ type Channel interface {
 	// GetMemberCount returns the number of members/subscribers
 	GetMemberCount() int64
 	
+	// GetCountry returns the country code of the channel (if available)
+	GetCountry() string
+	
 	// GetType returns the platform type ("telegram", "youtube")
 	GetType() string
 }
@@ -78,6 +81,9 @@ type Message interface {
 	
 	// GetThumbnails returns the thumbnails map
 	GetThumbnails() map[string]string
+	
+	// GetLanguage returns the content language
+	GetLanguage() string
 	
 	// GetType returns the platform type ("telegram", "youtube")
 	GetType() string
