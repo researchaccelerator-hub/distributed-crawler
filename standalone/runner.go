@@ -19,7 +19,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -43,7 +42,7 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 	}
 
 	if urlFile != "" {
-		fileURLs, err := readURLsFromFile(urlFile)
+		fileURLs, err := common.ReadURLsFromFile(urlFile)
 		if err != nil {
 			log.Fatal().Err(err).Msg("Failed to read URLs from file")
 		}
@@ -186,27 +185,7 @@ func generatePCode() {
 	os.Exit(1)
 }
 
-// readURLsFromFile reads a file specified by the filename and returns a slice of URLs.
-// It ignores empty lines and lines starting with a '#' character, which are considered comments.
-// Returns an error if the file cannot be read.
-func readURLsFromFile(filename string) ([]string, error) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	var urls []string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" && !strings.HasPrefix(line, "#") {
-			urls = append(urls, line)
-		}
-	}
-
-	return urls, nil
-}
+// Note: readURLsFromFile function removed as we're now using the common implementation
 
 // launch initializes and runs the scraping process for a given list of strings using the specified crawler configuration.
 //

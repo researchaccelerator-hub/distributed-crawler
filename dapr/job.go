@@ -1,3 +1,4 @@
+// Package dapr provides Dapr-related functionality
 package dapr
 
 import (
@@ -274,6 +275,7 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 			MaxDepth:    jobData.MaxDepth,
 			Concurrency: jobData.Concurrency,
 			CrawlID:     jobData.CrawlID,
+			Platform:    jobData.Platform, // Set platform from job data
 		}
 
 		// If CrawlID not provided, generate one
@@ -289,7 +291,7 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 		}
 
 		if jobData.URLFile != "" {
-			fileURLs, err := readURLsFromFile(jobData.URLFile)
+			fileURLs, err := common2.ReadURLsFromFile(jobData.URLFile)
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to read URLs from file")
 				return err
@@ -472,23 +474,4 @@ func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.C
 	return out, err
 }
 
-//
-//// Helper function to read URLs from a file
-//func readURLsFromFile(filename string) ([]string, error) {
-//	data, err := os.ReadFile(filename)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	lines := strings.Split(string(data), "\n")
-//	var urls []string
-//
-//	for _, line := range lines {
-//		line = strings.TrimSpace(line)
-//		if line != "" && !strings.HasPrefix(line, "#") {
-//			urls = append(urls, line)
-//		}
-//	}
-//
-//	return urls, nil
-//}
+// Note: readURLsFromFile function removed as we're now using the common implementation

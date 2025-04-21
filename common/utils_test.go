@@ -2,6 +2,9 @@ package common
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"regexp"
 	"testing"
 	"time"
@@ -38,9 +41,6 @@ func TestGenerateCrawlID(t *testing.T) {
 	now := time.Now()
 	dayAgo := now.Add(-24 * time.Hour)
 	dayLater := now.Add(24 * time.Hour)
-	
-	// Parse the crawlID back to a time
-	parsedTime, _ := time.Parse("20060102150405", crawlID)
 	
 	if parsedTime.Before(dayAgo) || parsedTime.After(dayLater) {
 		t.Errorf("Parsed time %v is not within a reasonable time range of now", parsedTime)
@@ -86,4 +86,85 @@ func ExampleGenerateCrawlID_usage() {
 	// Output:
 	// Initiating web crawl with ID: 20230515103045
 	// Saving results to: crawl_20230515103045.json
+}
+
+func TestDownloadURLFile(t *testing.T) {
+	// Create a test server
+	testContent := `# Seed URLs for crawling
+https://example.com/page1
+https://example.com/page2
+# Another comment
+https://example.com/page3`
+
+	// Start test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(testContent))
+	}))
+	defer server.Close()
+
+	// Call the function with the test server URL
+	filePath, err := DownloadURLFile(server.URL)
+	if err != nil {
+		t.Fatalf("DownloadURLFile failed with error: %v", err)
+	}
+
+	// Make sure we clean up the file
+	defer os.Remove(filePath)
+
+	// Verify the file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		t.Fatalf("Downloaded file not found at path: %s", filePath)
+	}
+
+	// Verify the content of the file
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded file: %v", err)
+	}
+
+	if string(content) != testContent {
+		t.Errorf("Downloaded content doesn't match expected. Got: %s, Want: %s", content, testContent)
+	}
+
+	// Test reading URLs from the file
+	urls, err := ReadURLsFromFile(filePath)
+	if err != nil {
+		t.Fatalf("Failed to read URLs from file: %v", err)
+	}
+
+	expectedURLs := []string{
+		"https://example.com/page1",
+		"https://example.com/page2",
+		"https://example.com/page3",
+	}
+
+	if len(urls) != len(expectedURLs) {
+		t.Fatalf("Incorrect number of URLs. Got: %d, Want: %d", len(urls), len(expectedURLs))
+	}
+
+	for i, url := range urls {
+		if url != expectedURLs[i] {
+			t.Errorf("URL at index %d doesn't match. Got: %s, Want: %s", i, url, expectedURLs[i])
+		}
+	}
+}
+
+func TestDownloadURLFile_ErrorHandling(t *testing.T) {
+	// Test with a server that returns a 404
+	notFoundServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer notFoundServer.Close()
+
+	_, err := DownloadURLFile(notFoundServer.URL)
+	if err == nil {
+		t.Error("Expected error for 404 response, got nil")
+	}
+
+	// Test with an invalid URL
+	_, err = DownloadURLFile("invalid-url")
+	if err == nil {
+		t.Error("Expected error for invalid URL, got nil")
+	}
 }
