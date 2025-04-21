@@ -4,6 +4,9 @@ package youtube
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
@@ -32,32 +35,32 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 	if c.initialized {
 		return nil
 	}
-	
+
 	// Extract client and state manager from config
 	clientObj, ok := config["client"]
 	if !ok {
 		return fmt.Errorf("client not provided in config")
 	}
-	
+
 	youtubeClient, ok := clientObj.(youtubemodel.YouTubeClient)
 	if !ok {
 		return fmt.Errorf("provided client is not a valid YouTube client")
 	}
-	
+
 	stateManagerObj, ok := config["state_manager"]
 	if !ok {
 		return fmt.Errorf("state_manager not provided in config")
 	}
-	
+
 	stateManager, ok := stateManagerObj.(state.StateManagementInterface)
 	if !ok {
 		return fmt.Errorf("provided state_manager is not a valid StateManagementInterface")
 	}
-	
+
 	c.client = youtubeClient
 	c.stateManager = stateManager
 	c.initialized = true
-	
+
 	return nil
 }
 
@@ -66,11 +69,11 @@ func (c *YouTubeCrawler) ValidateTarget(target crawler.CrawlTarget) error {
 	if target.Type != crawler.PlatformYouTube {
 		return fmt.Errorf("invalid target type: %s, expected: youtube", target.Type)
 	}
-	
+
 	if target.ID == "" {
 		return fmt.Errorf("target ID cannot be empty")
 	}
-	
+
 	return nil
 }
 
@@ -79,33 +82,33 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 	if err := c.ValidateTarget(target); err != nil {
 		return nil, err
 	}
-	
+
 	if !c.initialized {
 		return nil, fmt.Errorf("crawler not initialized")
 	}
-	
+
 	log.Info().Str("channel_id", target.ID).Msg("Fetching YouTube channel info")
-	
+
 	// Fetch channel info from the YouTube API
 	channel, err := c.client.GetChannelInfo(ctx, target.ID)
 	if err != nil {
 		log.Error().Err(err).Str("channel_id", target.ID).Msg("Failed to get YouTube channel info")
 		return nil, fmt.Errorf("failed to get YouTube channel info: %w", err)
 	}
-	
+
 	// Construct channel URL based on ID format
 	channelURL := fmt.Sprintf("https://www.youtube.com/channel/%s", target.ID)
 	if len(target.ID) > 0 && target.ID[0] == '@' {
 		// Handle username format (@username)
 		channelURL = fmt.Sprintf("https://www.youtube.com/%s", target.ID)
 	}
-	
+
 	// Convert YouTube-specific channel data to common model
 	channelData := &model.ChannelData{
-		ChannelID:   0, // YouTube doesn't use numeric IDs like Telegram
-		ChannelName: channel.Title,
-		ChannelURL:  channelURL,
-		ChannelURLExternal: channelURL,
+		ChannelID:           0, // YouTube doesn't use numeric IDs like Telegram
+		ChannelName:         channel.Title,
+		ChannelURL:          channelURL,
+		ChannelURLExternal:  channelURL,
 		ChannelProfileImage: channel.Thumbnails["default"],
 		ChannelEngagementData: model.EngagementData{
 			FollowerCount: int(channel.SubscriberCount),
@@ -113,13 +116,13 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 			PostCount:     int(channel.VideoCount),
 		},
 	}
-	
+
 	log.Info().
 		Str("channel_id", target.ID).
 		Str("channel_name", channel.Title).
 		Int64("subscriber_count", channel.SubscriberCount).
 		Msg("Successfully retrieved YouTube channel info")
-	
+
 	return channelData, nil
 }
 
@@ -128,44 +131,44 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 	if err := c.ValidateTarget(job.Target); err != nil {
 		return crawler.CrawlResult{}, err
 	}
-	
+
 	if !c.initialized {
 		return crawler.CrawlResult{}, fmt.Errorf("crawler not initialized")
 	}
-	
+
 	log.Info().
 		Str("channel_id", job.Target.ID).
 		Time("from_time", job.FromTime).
 		Time("to_time", job.ToTime).
 		Int("limit", job.Limit).
 		Msg("Starting YouTube crawl")
-	
+
 	// Fetch videos from the YouTube client
 	videos, err := c.client.GetVideos(ctx, job.Target.ID, job.FromTime, job.ToTime, job.Limit)
 	if err != nil {
 		log.Error().Err(err).Str("channel_id", job.Target.ID).Msg("Failed to get videos from YouTube")
 		return crawler.CrawlResult{}, err
 	}
-	
+
 	log.Info().
 		Str("channel_id", job.Target.ID).
 		Int("video_count", len(videos)).
 		Msg("Retrieved videos from YouTube")
-	
+
 	// Convert videos to posts
 	posts := make([]model.Post, 0, len(videos))
 	for _, video := range videos {
 		post := c.convertVideoToPost(video)
-		
+
 		// Save the post to the state manager's storage
 		if err := c.stateManager.StorePost(video.ChannelID, post); err != nil {
 			log.Error().Err(err).Str("video_id", video.ID).Msg("Failed to save video post")
 			// Continue with next video
 		}
-		
+
 		posts = append(posts, post)
 	}
-	
+
 	return crawler.CrawlResult{
 		Posts:  posts,
 		Errors: nil,
@@ -191,15 +194,108 @@ func (c *YouTubeCrawler) Close() error {
 // Private cache of channel names to avoid repeated GetChannelInfo API calls within the same crawler session
 var channelNameCache = make(map[string]string)
 
+// parseISO8601Duration parses YouTube's ISO 8601 duration format to seconds
+// Example: PT1H2M3S = 1 hour, 2 minutes, 3 seconds = 3723 seconds
+func parseISO8601Duration(duration string) (int, error) {
+	if duration == "" {
+		return 0, fmt.Errorf("empty duration string")
+	}
+
+	// Remove PT prefix
+	if len(duration) < 2 || duration[:2] != "PT" {
+		return 0, fmt.Errorf("invalid duration format: %s, expected 'PT' prefix", duration)
+	}
+	duration = duration[2:]
+
+	var hours, minutes, seconds int
+	var currentValue string
+
+	// Parse each component
+	for _, c := range duration {
+		if c >= '0' && c <= '9' {
+			currentValue += string(c)
+		} else {
+			value := 0
+			if currentValue != "" {
+				var err error
+				value, err = strconv.Atoi(currentValue)
+				if err != nil {
+					return 0, fmt.Errorf("invalid duration value: %s", currentValue)
+				}
+				currentValue = ""
+			}
+
+			switch c {
+			case 'H':
+				hours = value
+			case 'M':
+				minutes = value
+			case 'S':
+				seconds = value
+			default:
+				return 0, fmt.Errorf("invalid duration component: %c", c)
+			}
+		}
+	}
+
+	// Calculate total seconds
+	totalSeconds := hours*3600 + minutes*60 + seconds
+	return totalSeconds, nil
+}
+
+// extractURLs extracts URLs from a string using a simple regex
+func extractURLs(text string) []string {
+	// Define a regex pattern to find URLs
+	// This is a simplified pattern - for production, consider a more robust solution
+	pattern := regexp.MustCompile(`(https?://\S+)`)
+
+	// Find all matches
+	matches := pattern.FindAllString(text, -1)
+
+	// Remove trailing punctuation that may have been captured
+	for i, url := range matches {
+		// Remove trailing punctuation characters
+		matches[i] = strings.TrimRight(url, ",.;:!?()'\"")
+	}
+
+	// Deduplicate URLs
+	uniqueURLs := make(map[string]bool)
+	for _, url := range matches {
+		uniqueURLs[url] = true
+	}
+
+	// Convert map to slice
+	result := make([]string, 0, len(uniqueURLs))
+	for url := range uniqueURLs {
+		result = append(result, url)
+	}
+
+	return result
+}
+
+// sanitizeFilename removes special characters from a filename
+func sanitizeFilename(filename string) string {
+	// Replace any non-alphanumeric characters (except underscore and hyphen) with underscore
+	reg := regexp.MustCompile(`[^\w\-.]`)
+	sanitized := reg.ReplaceAllString(filename, "_")
+
+	// Limit length
+	if len(sanitized) > 50 {
+		sanitized = sanitized[:50]
+	}
+
+	return sanitized
+}
+
 // convertVideoToPost converts a YouTubeVideo to model.Post
 func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) model.Post {
 	// Get channel info for consistent naming - check cache first
 	var channelName string
 	var ok bool
-	
+
 	// For channel data
 	var channel *youtubemodel.YouTubeChannel
-	
+
 	// Check if we already have this channel name in our cache
 	if channelName, ok = channelNameCache[video.ChannelID]; ok {
 		log.Debug().
@@ -210,7 +306,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		// Need to fetch from API
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		var err error
 		channel, err = c.client.GetChannelInfo(ctx, video.ChannelID)
 		if err != nil {
@@ -226,13 +322,13 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 				Msg("Cached channel name for future video conversions")
 		}
 	}
-	
+
 	// Calculate video engagement (likes + comments + views)
 	engagement := int(video.LikeCount + video.CommentCount + (video.ViewCount / 100))
-	
+
 	// Prepare title pointer
 	title := video.Title
-	
+
 	// Convert thumbnail URL map to best available thumbnail
 	thumbURL := ""
 	if url, ok := video.Thumbnails["maxres"]; ok && url != "" {
@@ -244,70 +340,111 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	} else if url, ok := video.Thumbnails["default"]; ok && url != "" {
 		thumbURL = url
 	}
-	
+
 	// Create video URL
 	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", video.ID)
+
+	// Parse duration string to seconds
+	var videoLengthSeconds int
+	if durationStr := video.Duration; durationStr != "" {
+		duration, err := parseISO8601Duration(durationStr)
+		if err == nil {
+			videoLengthSeconds = duration
+			log.Debug().Int("video_length_seconds", videoLengthSeconds).Msg("Parsed video duration")
+		} else {
+			log.Warn().Err(err).Str("duration", durationStr).Msg("Failed to parse video duration")
+		}
+	}
+
+	// Set HasEmbedMedia flag
+	hasEmbedMedia := true
+
+	// Setup performance scores
+	likesCount := int(video.LikeCount)
+	commentsCount := int(video.CommentCount)
+	viewsCount := float64(video.ViewCount)
 	
+	// Extract URLs from description for outlinks
+	outlinks := extractURLs(video.Description)
+
 	// Create the post object
 	post := model.Post{
-		PostUID:       video.ID,
-		ChannelName:   channelName,
-		ChannelID:     0, // YouTube uses string IDs, not numeric
-		URL:           videoURL,
-		PublishedAt:   video.PublishedAt,
-		CreatedAt:     time.Now(),
-		Engagement:    engagement,
-		PostTitle:     &title,
-		Description:   video.Description,
-		ViewsCount:    int(video.ViewCount),
-		LikesCount:    int(video.LikeCount),
-		CommentsCount: int(video.CommentCount),
-		ViewCount:     int(video.ViewCount),
-		LikeCount:     int(video.LikeCount),
-		CommentCount:  int(video.CommentCount),
-		PlatformName:  "youtube",
+		PostUID:        video.ID,
+		ChannelName:    channelName,
+		ChannelID:      0, // YouTube uses string IDs, not numeric
+		URL:            videoURL,
+		PublishedAt:    video.PublishedAt,
+		CreatedAt:      time.Now(),
+		Engagement:     engagement,
+		PostTitle:      &title,
+		Description:    video.Description,
+		ViewsCount:     int(video.ViewCount),
+		LikesCount:     int(video.LikeCount),
+		CommentsCount:  int(video.CommentCount),
+		ViewCount:      int(video.ViewCount),
+		LikeCount:      int(video.LikeCount),
+		CommentCount:   int(video.CommentCount),
+		PlatformName:   "youtube",
 		SearchableText: video.Title + " " + video.Description,
-		AllText:       video.Title + " " + video.Description,
-		PostType:      []string{"video"},
-		CaptureTime:   time.Now(),
-		ThumbURL:      thumbURL,
-		MediaURL:      videoURL,
-		Handle:        video.ChannelID,
-		PostLink:      videoURL,
+		AllText:        video.Title + " " + video.Description,
+		PostType:       []string{"video"},
+		CaptureTime:    time.Now(),
+		ThumbURL:       thumbURL,
+		MediaURL:       videoURL,
+		Handle:         video.ChannelID,
+		PostLink:       videoURL,
+		// Additional fields
+		VideoLength:   &videoLengthSeconds,
+		HasEmbedMedia: &hasEmbedMedia,
+		PerformanceScores: model.PerformanceScores{
+			Likes:    &likesCount,
+			Comments: &commentsCount,
+			Views:    viewsCount,
+		},
+		// Add the outlinks
+		Outlinks: outlinks,
+		// Create media data
+		MediaData: model.MediaData{
+			DocumentName: fmt.Sprintf("%s-%s.mp4", video.ID, sanitizeFilename(video.Title)),
+		},
 		// Add reactions as a map
-		Reactions:     map[string]int{"like": int(video.LikeCount)},
+		Reactions: map[string]int{"like": int(video.LikeCount)},
 	}
-	
+
 	// Construct channel URL based on ID format
 	channelURL := fmt.Sprintf("https://www.youtube.com/channel/%s", video.ChannelID)
 	if len(video.ChannelID) > 0 && video.ChannelID[0] == '@' {
 		// Handle username format (@username)
 		channelURL = fmt.Sprintf("https://www.youtube.com/%s", video.ChannelID)
 	}
-	
+
 	// Only try to get detailed channel data if we had to make an API call anyway
 	// This avoids unnecessary API calls for repeated video conversions
 	if ok {
 		// We already had the channel name in cache, so don't need detailed channel data
 		// Just use the basic info we have
 		post.ChannelData = model.ChannelData{
-			ChannelName: channelName,
-			ChannelURL:  channelURL,
+			ChannelName:        channelName,
+			ChannelURL:         channelURL,
 			ChannelURLExternal: channelURL,
 		}
 	} else if channel != nil {
 		// We had to make an API call and got channel data, so use all the details
 		post.ChannelData = model.ChannelData{
-			ChannelName: channel.Title,
-			ChannelURL:  channelURL,
-			ChannelURLExternal: channelURL,
+			ChannelName:         channel.Title,
+			ChannelURL:          channelURL,
+			ChannelURLExternal:  channelURL,
 			ChannelProfileImage: channel.Thumbnails["default"],
 			ChannelEngagementData: model.EngagementData{
 				FollowerCount: int(channel.SubscriberCount),
 				ViewsCount:    int(channel.ViewCount),
+				PostCount:     int(channel.VideoCount),
 			},
 		}
+
+		// Add video count from channel data
+		post.ChannelData.ChannelEngagementData.PostCount = int(channel.VideoCount)
 	}
-	
+
 	return post
 }

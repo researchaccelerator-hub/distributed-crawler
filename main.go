@@ -20,6 +20,7 @@ var (
 	crawlerCfg        common.CrawlerConfig
 	urlList           []string
 	urlFile           string
+	urlFileURL        string
 	generateCode      bool
 	crawlType         string
 	minPostDate       string
@@ -295,10 +296,34 @@ var rootCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// If no specific subcommand is invoked, show help
-		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" {
+		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" && urlFileURL == "" {
 			log.Info().Msg("No arguments provided, showing help")
 			cmd.Help()
 			return
+		}
+
+		// Handle URL file from URL if provided
+		var downloadedFile string
+		if urlFileURL != "" {
+			log.Info().Str("url_file_url", urlFileURL).Msg("URL file URL provided")
+			
+			var err error
+			downloadedFile, err = common.DownloadURLFile(urlFileURL)
+			if err != nil {
+				log.Fatal().Err(err).Str("url", urlFileURL).Msg("Failed to download URL file")
+				return
+			}
+			
+			// Set urlFile to the downloaded file path if no local urlFile was specified
+			if urlFile == "" {
+				urlFile = downloadedFile
+				log.Info().Str("downloaded_file", urlFile).Msg("Using downloaded URL file")
+			} else {
+				log.Warn().
+					Str("url_file", urlFile).
+					Str("downloaded_file", downloadedFile).
+					Msg("Both local file and URL provided, using local file")
+			}
 		}
 
 		// Log url information if available
@@ -335,6 +360,15 @@ var rootCmd = &cobra.Command{
 				Msg("Starting in regular standalone mode")
 			standalone.StartStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
 		}
+		
+		// Clean up downloaded file if needed
+		if downloadedFile != "" && downloadedFile == urlFile {
+			// Only delete if we're using the downloaded file and not a user-provided one
+			log.Debug().Str("file", downloadedFile).Msg("Cleaning up downloaded URL file")
+			if err := os.Remove(downloadedFile); err != nil {
+				log.Warn().Err(err).Str("file", downloadedFile).Msg("Failed to clean up downloaded URL file")
+			}
+		}
 	},
 }
 
@@ -368,6 +402,7 @@ func init() {
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
 	rootCmd.Flags().StringVar(&urlFile, "url-file", "", "file containing URLs to crawl (one per line)")
+	rootCmd.Flags().StringVar(&urlFileURL, "url-file-url", "", "URL to a file containing URLs to crawl (one per line)")
 	rootCmd.Flags().BoolVar(&generateCode, "generate-code", false, "run code generation after crawling")
 	rootCmd.Flags().StringVar(&crawlType, "crawl-type", "focused", "Select between focused(default) and snowball")
 
