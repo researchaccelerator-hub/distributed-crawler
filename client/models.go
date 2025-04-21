@@ -35,6 +35,11 @@ func (c *TelegramChannel) GetMemberCount() int64 {
 	return c.MemberCount
 }
 
+// GetCountry implements Channel
+func (c *TelegramChannel) GetCountry() string {
+	return "" // Not typically available for Telegram
+}
+
 // GetType implements Channel
 func (c *TelegramChannel) GetType() string {
 	return "telegram"
@@ -46,6 +51,7 @@ type YouTubeChannel struct {
 	Name        string
 	Description string
 	MemberCount int64
+	Country     string // Country code of the channel
 }
 
 // GetID implements Channel
@@ -66,6 +72,11 @@ func (c *YouTubeChannel) GetDescription() string {
 // GetMemberCount implements Channel
 func (c *YouTubeChannel) GetMemberCount() int64 {
 	return c.MemberCount
+}
+
+// GetCountry implements Channel
+func (c *YouTubeChannel) GetCountry() string {
+	return c.Country
 }
 
 // GetType implements Channel
@@ -90,6 +101,7 @@ type TelegramMessage struct {
 	Reactions   map[string]int64
 	Thumbnails  map[string]string // Usually empty for Telegram
 	Comments    int64             // Usually not available for Telegram
+	Language    string            // Usually not available for Telegram
 }
 
 // GetID implements Message
@@ -152,6 +164,11 @@ func (m *TelegramMessage) GetThumbnails() map[string]string {
 	return m.Thumbnails
 }
 
+// GetLanguage implements Message
+func (m *TelegramMessage) GetLanguage() string {
+	return m.Language
+}
+
 // GetType implements Message
 func (m *TelegramMessage) GetType() string {
 	return "telegram"
@@ -171,6 +188,7 @@ type YouTubeMessage struct {
 	Reactions    map[string]int64
 	Thumbnails   map[string]string  // Video thumbnails
 	CommentCount int64              // Video comment count
+	Language     string             // Video language
 }
 
 // GetID implements Message
@@ -231,6 +249,11 @@ func (m *YouTubeMessage) GetCommentCount() int64 {
 // GetThumbnails implements Message
 func (m *YouTubeMessage) GetThumbnails() map[string]string {
 	return m.Thumbnails
+}
+
+// GetLanguage implements Message
+func (m *YouTubeMessage) GetLanguage() string {
+	return m.Language
 }
 
 // GetType implements Message

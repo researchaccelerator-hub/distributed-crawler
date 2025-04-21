@@ -16,6 +16,7 @@ type YouTubeChannel struct {
 	VideoCount      int64
 	PublishedAt     time.Time
 	Thumbnails      map[string]string
+	Country         string            // Country code of the channel
 }
 
 // YouTubeVideo represents a YouTube video
@@ -31,6 +32,7 @@ type YouTubeVideo struct {
 	Duration     string
 	Thumbnails   map[string]string
 	Tags         []string
+	Language     string           // Default language of the video
 }
 
 // YouTubeClient defines the methods needed for YouTube API operations
