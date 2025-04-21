@@ -326,8 +326,56 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	// Calculate video engagement (likes + comments + views)
 	engagement := int(video.LikeCount + video.CommentCount + (video.ViewCount / 100))
 
-	// Prepare title pointer
+	// Make sure title is appropriate length for a title
+	// If it's too long, it might be a mismapped description
 	title := video.Title
+	//if len(title) > 300 {
+	//	// Try to find a shorter version by taking the first sentence or line
+	//	shorterTitle := title
+	//
+	//	// First try to find the first sentence
+	//	if idx := strings.Index(shorterTitle, "."); idx > 0 && idx < 100 {
+	//		shorterTitle = shorterTitle[:idx+1]
+	//	} else if idx := strings.Index(shorterTitle, "\n"); idx > 0 && idx < 100 {
+	//		// If no sentence, try to find the first line
+	//		shorterTitle = shorterTitle[:idx]
+	//	} else if len(shorterTitle) > 100 {
+	//		// If all else fails, truncate to a reasonable length
+	//		shorterTitle = shorterTitle[:97] + "..."
+	//	}
+	//
+	//	log.Info().
+	//		Str("video_id", video.ID).
+	//		Str("original_title", title).
+	//		Str("shortened_title", shorterTitle).
+	//		Int("original_length", len(title)).
+	//		Int("shortened_length", len(shorterTitle)).
+	//		Msg("Shortened unusually long title")
+	//
+	//	title = shorterTitle
+	//}
+
+	// Log title and description for debugging
+	log.Debug().
+		Str("video_id", video.ID).
+		Str("title", video.Title).
+		Str("first_50_chars_of_title", func() string {
+			if len(video.Title) > 50 {
+				return video.Title[:50] + "..."
+			}
+			return video.Title
+		}()).
+		Str("first_50_chars_of_description", func() string {
+			if len(video.Description) > 50 {
+				return video.Description[:50] + "..."
+			}
+			return video.Description
+		}()).
+		Bool("title_contains_description", strings.Contains(video.Title, video.Description) && len(video.Description) > 50).
+		Bool("description_contains_title", strings.Contains(video.Description, video.Title) && len(video.Title) > 0).
+		Int("title_length", len(video.Title)).
+		Int("description_length", len(video.Description)).
+		Msg("Video title and description analysis")
 
 	// Convert thumbnail URL map to best available thumbnail
 	thumbURL := ""
@@ -363,9 +411,47 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	likesCount := int(video.LikeCount)
 	commentsCount := int(video.CommentCount)
 	viewsCount := float64(video.ViewCount)
-	
+
+	// Note: YouTube API may report zero comments even when comments exist
+	// This can happen for several reasons:
+	// 1. Comments are disabled for the video
+	// 2. Comments are hidden by the channel owner
+	// 3. API delay in updating comment counts
+	// 4. API quota limits preventing full comment data retrieval
+
 	// Extract URLs from description for outlinks
 	outlinks := extractURLs(video.Description)
+
+	// Create OCR data with thumbnail information
+	// YouTube doesn't provide OCR text, but we can include thumbnails as image metadata
+	var ocrData []model.OCRData
+	// Add all available thumbnails to OCR data for completeness
+	for quality, url := range video.Thumbnails {
+		if url != "" {
+			ocrData = append(ocrData, model.OCRData{
+				ThumbURL: url,
+				OCRText:  fmt.Sprintf("YouTube thumbnail: %s quality", quality),
+			})
+		}
+	}
+
+	// Extra debug log specifically for post title
+	log.Info().
+		Str("video_id", video.ID).
+		Str("title_from_api", video.Title).
+		Str("first_50_chars_title", func() string {
+			if len(video.Title) > 50 {
+				return video.Title[:50] + "..."
+			}
+			return video.Title
+		}()).
+		Str("first_50_chars_description", func() string {
+			if len(video.Description) > 50 {
+				return video.Description[:50] + "..."
+			}
+			return video.Description
+		}()).
+		Msg("Title right before post creation")
 
 	// Create the post object
 	post := model.Post{
@@ -403,6 +489,8 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		},
 		// Add the outlinks
 		Outlinks: outlinks,
+		// Add the OCR data with thumbnail information
+		OCRData: ocrData,
 		// Create media data
 		MediaData: model.MediaData{
 			DocumentName: fmt.Sprintf("%s-%s.mp4", video.ID, sanitizeFilename(video.Title)),
@@ -418,18 +506,28 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		channelURL = fmt.Sprintf("https://www.youtube.com/%s", video.ChannelID)
 	}
 
-	// Only try to get detailed channel data if we had to make an API call anyway
-	// This avoids unnecessary API calls for repeated video conversions
-	if ok {
-		// We already had the channel name in cache, so don't need detailed channel data
-		// Just use the basic info we have
-		post.ChannelData = model.ChannelData{
-			ChannelName:        channelName,
-			ChannelURL:         channelURL,
-			ChannelURLExternal: channelURL,
+	// Always fetch channel data to get engagement metrics if not already fetched
+	if ok && channel == nil {
+		// We have the channel name in cache, but need to fetch engagement data
+		// Make an API call to get the full channel data
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var err error
+		log.Debug().
+			Str("channel_id", video.ChannelID).
+			Msg("Fetching channel data to get engagement metrics")
+
+		channel, err = c.client.GetChannelInfo(ctx, video.ChannelID)
+		if err != nil {
+			log.Warn().Err(err).Str("channel_id", video.ChannelID).Msg("Failed to get channel engagement data")
+			// Continue with limited data
 		}
-	} else if channel != nil {
-		// We had to make an API call and got channel data, so use all the details
+	}
+
+	// Use full channel data if available
+	if channel != nil {
+		// We have channel data, so use all the details
 		post.ChannelData = model.ChannelData{
 			ChannelName:         channel.Title,
 			ChannelURL:          channelURL,
@@ -441,9 +539,18 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 				PostCount:     int(channel.VideoCount),
 			},
 		}
+	} else {
+		// Fallback to basic data if channel info isn't available
+		post.ChannelData = model.ChannelData{
+			ChannelName:        channelName,
+			ChannelURL:         channelURL,
+			ChannelURLExternal: channelURL,
+		}
 
-		// Add video count from channel data
-		post.ChannelData.ChannelEngagementData.PostCount = int(channel.VideoCount)
+		log.Warn().
+			Str("channel_id", video.ChannelID).
+			Str("channel_name", channelName).
+			Msg("Using limited channel data without engagement metrics")
 	}
 
 	return post

@@ -58,6 +58,12 @@ type Message interface {
 	// GetText returns the message text
 	GetText() string
 	
+	// GetTitle returns the message title (if applicable, otherwise empty)
+	GetTitle() string
+	
+	// GetDescription returns the message description (if applicable, otherwise empty)
+	GetDescription() string
+	
 	// GetTimestamp returns the message timestamp
 	GetTimestamp() time.Time
 	
@@ -66,6 +72,12 @@ type Message interface {
 	
 	// GetReactions returns the reaction count
 	GetReactions() map[string]int64
+	
+	// GetCommentCount returns the comment count
+	GetCommentCount() int64
+	
+	// GetThumbnails returns the thumbnails map
+	GetThumbnails() map[string]string
 	
 	// GetType returns the platform type ("telegram", "youtube")
 	GetType() string
