@@ -22,7 +22,8 @@ import (
 const (
 	// Default component names
 	defaultStateStoreName = "statestore"
-	defaultStorageBinding = "telegramcrawlstorage"
+	telegramStorageBinding = "telegramcrawlstorage"
+	youtubeStorageBinding = "youtubecrawlstorage"
 )
 
 // DaprStateManager implements StateManagementInterface using Dapr
@@ -80,15 +81,29 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 	}
 
 	stateStoreName := defaultStateStoreName
-	storageBinding := defaultStorageBinding
-
-	if config.DaprConfig != nil {
-		if config.DaprConfig.StateStoreName != "" {
-			stateStoreName = config.DaprConfig.StateStoreName
+	
+	// Determine storage binding based on platform
+	var storageBinding string
+	
+	// If component name is explicitly set in config, use that
+	if config.DaprConfig != nil && config.DaprConfig.ComponentName != "" {
+		storageBinding = config.DaprConfig.ComponentName
+	} else {
+		// Otherwise select based on platform
+		switch config.Platform {
+		case "youtube":
+			storageBinding = youtubeStorageBinding
+			log.Info().Str("platform", config.Platform).Str("storage_binding", storageBinding).Msg("Using YouTube storage binding")
+		default:
+			// Default to telegram storage binding for telegram platform or any unknown platform
+			storageBinding = telegramStorageBinding
+			log.Info().Str("platform", config.Platform).Str("storage_binding", storageBinding).Msg("Using Telegram storage binding")
 		}
-		if config.DaprConfig.ComponentName != "" {
-			storageBinding = config.DaprConfig.ComponentName
-		}
+	}
+	
+	// Set state store name if configured
+	if config.DaprConfig != nil && config.DaprConfig.StateStoreName != "" {
+		stateStoreName = config.DaprConfig.StateStoreName
 	}
 
 	// Generate a new cache ID for the active cache
