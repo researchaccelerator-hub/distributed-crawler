@@ -161,6 +161,7 @@ func readURLsFromFile(filename string) ([]string, error) {
 //   - stringList: A slice of strings representing the items to be processed.
 //   - crawlCfg: A CrawlerConfig struct containing configuration settings for the crawler.
 func launch(stringList []string, crawlCfg common.CrawlerConfig) {
+	// Create a global map to track all URLs we've seen across all layers
 	seenURLs := make(map[string]bool)
 
 	// Initialize seenURLs with the seed URLs
@@ -361,9 +362,25 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Process each page in the current layer
+	// Create a map to track unique pages by URL to avoid processing duplicates
+	uniquePages := make(map[string]bool)
+	
+	// Log the original count of pages
+	originalCount := len(layer.Pages)
+	
+	// Process each page in the current layer, ensuring each URL is processed only once
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
 		pageToProcess := layer.Pages[pageIndex]
+		
+		// Skip if this URL has already been seen in this layer
+		if uniquePages[pageToProcess.URL] {
+			log.Debug().Str("url", pageToProcess.URL).Msg("Skipping duplicate page URL in current layer")
+			continue
+		}
+		uniquePages[pageToProcess.URL] = true
+		
+		// Add debug log for unique pages
+		log.Debug().Str("url", pageToProcess.URL).Msg("Processing unique URL from current layer")
 
 		// Print debug information about each page discovered during crawl restart
 		log.Debug().
@@ -374,17 +391,25 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			Bool("resuming_execution", isResumingSameCrawlExecution).
 			Msg("Page discovered during crawl restart in Dapr mode")
 
-		// Skip already processed pages
-		if pageToProcess.Status == "fetched" {
+		// Skip already processed or errored pages
+		if pageToProcess.Status == "fetched" || pageToProcess.Status == "error" {
 			if isResumingSameCrawlExecution {
-				// When resuming with the same crawlexecutionid, skip already fetched pages
+				// When resuming with the same crawlexecutionid, skip already fetched/errored pages
 				// regardless of message status - this prevents reprocessing
-				log.Debug().Msgf("Skipping already fetched page during same execution resume: %s", pageToProcess.URL)
+				if pageToProcess.Status == "error" {
+					log.Debug().Msgf("Skipping previously errored page during same execution resume: %s", pageToProcess.URL)
+				} else {
+					log.Debug().Msgf("Skipping already fetched page during same execution resume: %s", pageToProcess.URL)
+				}
 				continue
 			} else {
 				// When starting a new crawlexecutionid, we'll process fetched pages
-				// and rely on the resample flag for message level decisions
-				log.Debug().Msgf("Processing fetched page in new execution, will use resample flag: %s", pageToProcess.URL)
+				// and retry errored pages
+				if pageToProcess.Status == "error" {
+					log.Debug().Msgf("Retrying previously errored page in new execution: %s", pageToProcess.URL)
+				} else {
+					log.Debug().Msgf("Processing fetched page in new execution, will use resample flag: %s", pageToProcess.URL)
+				}
 				// Continue processing this page
 			}
 		}
@@ -436,6 +461,11 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				if updateErr := sm.UpdatePage(page); updateErr != nil {
 					log.Error().Err(updateErr).Msg("Failed to update page status after error")
 				}
+				
+				// Save the state to ensure error status is persisted
+				if err := sm.SaveState(); err != nil {
+					log.Error().Err(err).Msgf("Error saving state after marking channel %s as error", page.URL)
+				}
 			} else {
 				page.Status = "fetched"
 				if updateErr := sm.UpdatePage(page); updateErr != nil {
@@ -459,12 +489,38 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Wait for all pages to be processed
 	wg.Wait()
+	
+	// Log summary of unique pages processed
+	uniqueCount := len(uniquePages)
+	duplicateCount := originalCount - uniqueCount
+	log.Info().
+		Int("original_page_count", originalCount).
+		Int("unique_page_count", uniqueCount).
+		Int("duplicate_page_count", duplicateCount).
+		Msgf("Processed %d unique pages (skipped %d duplicates) in layer at depth %d", 
+			uniqueCount, duplicateCount, layer.Depth)
 
 	// After all pages in the layer are processed, append the new layer with all discovered channels
 	if len(allDiscoveredChannels) > 0 {
 		currentDepth := layer.Depth
 		newPages := make([]state.Page, 0, len(allDiscoveredChannels))
+		
+		// Track unique URLs in the new layer
+		newLayerUniqueURLs := make(map[string]bool)
+		
+		// Count of total and unique pages for logging
+		totalDiscovered := len(allDiscoveredChannels)
+		uniqueDiscovered := 0
+		
 		for _, channel := range allDiscoveredChannels {
+			// Skip if this URL has already been seen in the new layer
+			if newLayerUniqueURLs[channel.URL] {
+				log.Debug().Str("url", channel.URL).Msg("Skipping duplicate discovered URL for next layer")
+				continue
+			}
+			newLayerUniqueURLs[channel.URL] = true
+			uniqueDiscovered++
+			
 			parentID := ""
 			if channel.ParentID != "" {
 				parentID = channel.ParentID
@@ -480,6 +536,14 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			}
 			newPages = append(newPages, page)
 		}
+		
+		// Log the deduplication results for the new layer
+		log.Info().
+			Int("total_discovered", totalDiscovered).
+			Int("unique_discovered", uniqueDiscovered).
+			Int("duplicate_discovered", totalDiscovered - uniqueDiscovered).
+			Msgf("Deduplicated discovered channels for next layer at depth %d", currentDepth + 1)
+			
 		if err := sm.AddLayer(newPages); err != nil {
 			log.Error().Err(err).Msg("Failed to add discovered channels as new layer")
 		} else {
