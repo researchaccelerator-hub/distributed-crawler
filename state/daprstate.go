@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +53,13 @@ type DaprStateManager struct {
 	cacheExpirationDays   int // Number of days after which cache entries are considered stale
 }
 
+func GetEnvValue(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
 // NewDaprStateManager creates a new Dapr-backed state manager for storing and retrieving crawler state.
 //
 // This function initializes a state manager that uses Dapr's state store and binding components
@@ -73,11 +82,40 @@ type DaprStateManager struct {
 //   - An error if initialization fails (e.g., Dapr client creation fails)
 func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 	base := NewBaseStateManager(config)
+	maxMessageSize := 200 // 30 MB, matching your .NET example
 
-	client, err := daprc.NewClient()
+	// Create gRPC dial options
+	var opts []grpc.DialOption
+
+	// Add message size options
+	// Include a small buffer for headers
+	headerBuffer := 1 // 1 MB buffer for headers
+	maxSizeInBytes := (maxMessageSize + headerBuffer) * 1024 * 1024
+
+	// Set both send and receive message size limits
+	opts = append(opts,
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxSizeInBytes),
+			grpc.MaxCallSendMsgSize(maxSizeInBytes),
+		),
+		// For insecure connections (remove for production with TLS)
+		grpc.WithInsecure(),
+	)
+
+	conn, err := grpc.Dial(
+		net.JoinHostPort("127.0.0.1", GetEnvValue("DAPR_GRPC_PORT", "50001")),
+		opts...,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Dapr client: %w", err)
+		panic(err)
 	}
+
+	// Create Dapr client with custom connection
+	client := daprc.NewClientWithConnection(conn)
+	defer client.Close()
+	//if err != nil {
+	//	return nil, fmt.Errorf("failed to create Dapr client: %w", err)
+	//}
 
 	stateStoreName := defaultStateStoreName
 	storageBinding := defaultStorageBinding
