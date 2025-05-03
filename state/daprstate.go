@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"net"
 	"os"
 	"path/filepath"
@@ -82,41 +83,36 @@ func GetEnvValue(key, fallback string) string {
 //   - An error if initialization fails (e.g., Dapr client creation fails)
 func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 	base := NewBaseStateManager(config)
-	maxMessageSize := 200 // 30 MB, matching your .NET example
 
-	// Create gRPC dial options
-	var opts []grpc.DialOption
-
-	// Add message size options
-	// Include a small buffer for headers
-	headerBuffer := 1 // 1 MB buffer for headers
+	// Create Dapr client with custom message size
+	maxMessageSize := 200 // 200 MB as configured
+	headerBuffer := 1     // 1 MB buffer for headers
 	maxSizeInBytes := (maxMessageSize + headerBuffer) * 1024 * 1024
 
-	// Set both send and receive message size limits
-	opts = append(opts,
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(maxSizeInBytes),
-			grpc.MaxCallSendMsgSize(maxSizeInBytes),
-		),
-		// For insecure connections (remove for production with TLS)
-		grpc.WithInsecure(),
+	// Create gRPC call options for both send and receive
+	var callOpts []grpc.CallOption
+	callOpts = append(callOpts,
+		grpc.MaxCallRecvMsgSize(maxSizeInBytes),
+		grpc.MaxCallSendMsgSize(maxSizeInBytes),
 	)
 
+	// Get Dapr gRPC port from environment
+	daprPort := GetEnvValue("DAPR_GRPC_PORT", "50001")
+
+	// Create connection with custom options
 	conn, err := grpc.Dial(
-		net.JoinHostPort("127.0.0.1", GetEnvValue("DAPR_GRPC_PORT", "50001")),
-		opts...,
+		net.JoinHostPort("127.0.0.1", daprPort),
+		grpc.WithDefaultCallOptions(callOpts...),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("failed to create gRPC connection: %w", err)
 	}
 
 	// Create Dapr client with custom connection
 	client := daprc.NewClientWithConnection(conn)
-	defer client.Close()
-	//if err != nil {
-	//	return nil, fmt.Errorf("failed to create Dapr client: %w", err)
-	//}
 
+	// Get configuration values
 	stateStoreName := defaultStateStoreName
 	storageBinding := defaultStorageBinding
 
@@ -171,7 +167,6 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 
 	return dsm, nil
 }
-
 func (dsm *DaprStateManager) GetPage(id string) (Page, error) {
 	// First try memory
 	page, err := dsm.BaseStateManager.GetPage(id)
