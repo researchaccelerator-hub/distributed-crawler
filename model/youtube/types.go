@@ -48,4 +48,13 @@ type YouTubeClient interface {
 	
 	// GetVideos retrieves videos from a YouTube channel
 	GetVideos(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)
+	
+	// GetVideosFromChannel retrieves videos from a specific YouTube channel
+	GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)
+	
+	// GetRandomVideos retrieves videos using random sampling with the prefix generator
+	GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)
+	
+	// GetSnowballVideos retrieves videos using snowball sampling from channels with > 10 videos
+	GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)
 }

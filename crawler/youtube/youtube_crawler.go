@@ -16,17 +16,53 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// SamplingMethod defines the method used for sampling YouTube videos
+type SamplingMethod string
+
+const (
+	// SamplingMethodChannel retrieves videos directly from a specific channel
+	SamplingMethodChannel SamplingMethod = "channel"
+	
+	// SamplingMethodRandom uses random sampling with prefix generator
+	SamplingMethodRandom SamplingMethod = "random"
+	
+	// SamplingMethodSnowball uses snowball sampling starting from seed channels
+	SamplingMethodSnowball SamplingMethod = "snowball"
+)
+
+// YouTubeCrawlerConfig holds the configuration for the YouTube crawler
+type YouTubeCrawlerConfig struct {
+	// SamplingMethod specifies how to sample videos (channel, random, snowball)
+	SamplingMethod SamplingMethod `json:"sampling_method"`
+	
+	// SeedChannels provides starting points for snowball sampling
+	SeedChannels []string `json:"seed_channels,omitempty"`
+	
+	// MinChannelVideos specifies the minimum number of videos a channel must have
+	MinChannelVideos int64 `json:"min_channel_videos"`
+}
+
 // YouTubeCrawler implements the crawler.Crawler interface for YouTube
 type YouTubeCrawler struct {
-	client       youtubemodel.YouTubeClient
-	stateManager state.StateManagementInterface
-	initialized  bool
+	client          youtubemodel.YouTubeClient
+	stateManager    state.StateManagementInterface
+	initialized     bool
+	config          YouTubeCrawlerConfig
+	defaultConfig   YouTubeCrawlerConfig
 }
 
 // NewYouTubeCrawler creates a new YouTube crawler
 func NewYouTubeCrawler() crawler.Crawler {
+	// Set default configuration
+	defaultConfig := YouTubeCrawlerConfig{
+		SamplingMethod:   SamplingMethodChannel, // Default to channel-based sampling
+		MinChannelVideos: 10,                   // Default to 10 minimum videos
+	}
+	
 	return &YouTubeCrawler{
-		initialized: false,
+		initialized:   false,
+		defaultConfig: defaultConfig,
+		config:        defaultConfig, // Start with default config
 	}
 }
 
@@ -57,9 +93,66 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 		return fmt.Errorf("provided state_manager is not a valid StateManagementInterface")
 	}
 
+	// Start with default configuration
+	crawlerConfig := c.defaultConfig
+	
+	// Process crawler-specific configuration if provided
+	if crawlerConfigObj, ok := config["crawler_config"]; ok {
+		if crawlerConfigMap, ok := crawlerConfigObj.(map[string]interface{}); ok {
+			// Extract sampling method
+			if methodObj, ok := crawlerConfigMap["sampling_method"]; ok {
+				if methodStr, ok := methodObj.(string); ok {
+					crawlerConfig.SamplingMethod = SamplingMethod(methodStr)
+					log.Info().Str("sampling_method", methodStr).Msg("Using configured sampling method")
+				}
+			}
+			
+			// Extract seed channels for snowball sampling
+			if seedChannelsObj, ok := crawlerConfigMap["seed_channels"]; ok {
+				if seedChannelsSlice, ok := seedChannelsObj.([]interface{}); ok {
+					seedChannels := make([]string, 0, len(seedChannelsSlice))
+					for _, item := range seedChannelsSlice {
+						if channelID, ok := item.(string); ok {
+							seedChannels = append(seedChannels, channelID)
+						}
+					}
+					crawlerConfig.SeedChannels = seedChannels
+					log.Info().Strs("seed_channels", seedChannels).Msg("Using configured seed channels")
+				}
+			}
+			
+			// Extract minimum channel videos threshold
+			if minVideosObj, ok := crawlerConfigMap["min_channel_videos"]; ok {
+				switch v := minVideosObj.(type) {
+				case int:
+					crawlerConfig.MinChannelVideos = int64(v)
+				case int64:
+					crawlerConfig.MinChannelVideos = v
+				case float64:
+					crawlerConfig.MinChannelVideos = int64(v)
+				}
+				log.Info().Int64("min_channel_videos", crawlerConfig.MinChannelVideos).Msg("Using configured minimum channel videos")
+			}
+		}
+	}
+	
+	// Validate configuration
+	if crawlerConfig.SamplingMethod == SamplingMethodSnowball && len(crawlerConfig.SeedChannels) == 0 {
+		log.Warn().Msg("Snowball sampling method selected but no seed channels provided, using default channel sampling")
+		crawlerConfig.SamplingMethod = SamplingMethodChannel
+	}
+	
+	// Set the client, state manager, and configuration
 	c.client = youtubeClient
 	c.stateManager = stateManager
+	c.config = crawlerConfig
 	c.initialized = true
+	
+	log.Info().
+		Str("sampling_method", string(c.config.SamplingMethod)).
+		Int64("min_channel_videos", c.config.MinChannelVideos).
+		Int("seed_channels_count", len(c.config.SeedChannels)).
+		Msg("YouTube crawler initialized")
 
 	return nil
 }
@@ -141,19 +234,78 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 		Time("from_time", job.FromTime).
 		Time("to_time", job.ToTime).
 		Int("limit", job.Limit).
+		Str("sampling_method", string(c.config.SamplingMethod)).
 		Msg("Starting YouTube crawl")
 
-	// Fetch videos from the YouTube client
-	videos, err := c.client.GetVideos(ctx, job.Target.ID, job.FromTime, job.ToTime, job.Limit)
-	if err != nil {
-		log.Error().Err(err).Str("channel_id", job.Target.ID).Msg("Failed to get videos from YouTube")
-		return crawler.CrawlResult{}, err
+	// Fetch videos using the configured sampling method
+	var videos []*youtubemodel.YouTubeVideo
+	var err error
+	
+	switch c.config.SamplingMethod {
+	case SamplingMethodChannel:
+		// Traditional channel-based sampling
+		videos, err = c.client.GetVideosFromChannel(ctx, job.Target.ID, job.FromTime, job.ToTime, job.Limit)
+		if err != nil {
+			log.Error().Err(err).Str("channel_id", job.Target.ID).Msg("Failed to get videos from YouTube channel")
+			return crawler.CrawlResult{}, err
+		}
+		
+		log.Info().
+			Str("channel_id", job.Target.ID).
+			Int("video_count", len(videos)).
+			Msg("Retrieved videos from specific YouTube channel")
+			
+	case SamplingMethodRandom:
+		// Random sampling using prefix generator
+		videos, err = c.client.GetRandomVideos(ctx, job.FromTime, job.ToTime, job.Limit)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get videos using random sampling")
+			return crawler.CrawlResult{}, err
+		}
+		
+		log.Info().
+			Int("video_count", len(videos)).
+			Msg("Retrieved videos using random sampling")
+			
+	case SamplingMethodSnowball:
+		// Snowball sampling based on seed channels
+		// If target ID is provided and not in seed channels, add it
+		seedChannels := c.config.SeedChannels
+		if job.Target.ID != "" {
+			// Check if the target ID is already in seed channels
+			found := false
+			for _, id := range seedChannels {
+				if id == job.Target.ID {
+					found = true
+					break
+				}
+			}
+			
+			// If not found, add it to the beginning of seed channels
+			if !found {
+				seedChannels = append([]string{job.Target.ID}, seedChannels...)
+				log.Info().Str("target_id", job.Target.ID).Msg("Added target ID to seed channels for snowball sampling")
+			}
+		}
+		
+		if len(seedChannels) == 0 {
+			return crawler.CrawlResult{}, fmt.Errorf("no seed channels available for snowball sampling")
+		}
+		
+		videos, err = c.client.GetSnowballVideos(ctx, seedChannels, job.FromTime, job.ToTime, job.Limit)
+		if err != nil {
+			log.Error().Err(err).Strs("seed_channels", seedChannels).Msg("Failed to get videos using snowball sampling")
+			return crawler.CrawlResult{}, err
+		}
+		
+		log.Info().
+			Int("video_count", len(videos)).
+			Int("seed_channels_count", len(seedChannels)).
+			Msg("Retrieved videos using snowball sampling")
+			
+	default:
+		return crawler.CrawlResult{}, fmt.Errorf("unknown sampling method: %s", c.config.SamplingMethod)
 	}
-
-	log.Info().
-		Str("channel_id", job.Target.ID).
-		Int("video_count", len(videos)).
-		Msg("Retrieved videos from YouTube")
 
 	// Convert videos to posts
 	posts := make([]model.Post, 0, len(videos))
@@ -168,6 +320,11 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 
 		posts = append(posts, post)
 	}
+
+	log.Info().
+		Int("post_count", len(posts)).
+		Str("sampling_method", string(c.config.SamplingMethod)).
+		Msg("YouTube crawl completed successfully")
 
 	return crawler.CrawlResult{
 		Posts:  posts,

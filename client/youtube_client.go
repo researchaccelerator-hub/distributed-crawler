@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
@@ -20,6 +22,10 @@ type YouTubeDataClient struct {
 	// Caches to minimize API calls
 	channelCache         map[string]*youtubemodel.YouTubeChannel
 	uploadsPlaylistCache map[string]string // Maps channelID to uploadsPlaylistID
+	
+	// RNG instance for generating random values
+	rng *rand.Rand
+	rngMu sync.Mutex
 }
 
 // NewYouTubeDataClient creates a new YouTube data client
@@ -28,10 +34,15 @@ func NewYouTubeDataClient(apiKey string) (*YouTubeDataClient, error) {
 		return nil, fmt.Errorf("YouTube API key is required")
 	}
 
+	// Create a new random number generator seeded with current time
+	source := rand.NewSource(time.Now().UnixNano())
+	rng := rand.New(source)
+
 	return &YouTubeDataClient{
 		apiKey:               apiKey,
 		channelCache:         make(map[string]*youtubemodel.YouTubeChannel),
 		uploadsPlaylistCache: make(map[string]string),
+		rng:                  rng,
 	}, nil
 }
 
@@ -185,8 +196,13 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 	return channel, nil
 }
 
-// GetVideos retrieves videos from a YouTube channel
+// GetVideos retrieves videos from a YouTube channel using the default method
 func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	return c.GetVideosFromChannel(ctx, channelID, fromTime, toTime, limit)
+}
+
+// GetVideosFromChannel retrieves videos from a specific YouTube channel
+func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
 	}
@@ -673,6 +689,23 @@ func min(a, b int) int {
 	return b
 }
 
+// generateRandomPrefix generates a random prefix for YouTube search queries
+// Similar to the Python example: watch?v=<random_chars>-
+func (c *YouTubeDataClient) generateRandomPrefix(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	watchPrefix := "watch?v="
+	
+	c.rngMu.Lock()
+	defer c.rngMu.Unlock()
+	
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[c.rng.Intn(len(charset))]
+	}
+	
+	return watchPrefix + string(b) + "-"
+}
+
 // YouTubeClientAdapter adapts YouTubeDataClient to the Client interface
 type YouTubeClientAdapter struct {
 	client *YouTubeDataClient
@@ -752,6 +785,295 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 	}
 
 	return messages, nil
+}
+
+// GetRandomVideos retrieves videos using random sampling with the prefix generator
+func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	if c.service == nil {
+		return nil, fmt.Errorf("YouTube client not connected")
+	}
+
+	log.Info().
+		Time("from_time", fromTime).
+		Time("to_time", toTime).
+		Int("limit", limit).
+		Msg("Starting random YouTube video sampling")
+
+	// Use current time as default if toTime is zero
+	effectiveToTime := toTime
+	if effectiveToTime.IsZero() {
+		effectiveToTime = time.Now()
+	}
+
+	// Handle negative or zero limit as "no limit"
+	effectiveLimit := limit
+	if effectiveLimit <= 0 {
+		effectiveLimit = 1000
+	}
+
+	videos := make([]*youtubemodel.YouTubeVideo, 0, effectiveLimit)
+	processedChannels := make(map[string]bool)
+	channelsWithMinVideos := make(map[string]bool)
+
+	// Continue searching until we reach the limit
+	maxAttempts := 50 // Limit the number of search attempts
+	for attempt := 0; len(videos) < effectiveLimit && attempt < maxAttempts; attempt++ {
+		// Generate a random prefix
+		prefix := c.generateRandomPrefix(5)
+		
+		log.Info().
+			Str("prefix", prefix).
+			Int("attempt", attempt+1).
+			Int("current_videos", len(videos)).
+			Int("target_videos", effectiveLimit).
+			Msg("Searching with random prefix")
+
+		// Search for videos with this prefix
+		searchCall := c.service.Search.List([]string{"id", "snippet"}).
+			Q(prefix).
+			MaxResults(50). // Max allowed by API
+			Context(ctx).
+			Type("video").
+			Order("date") // Sort by date
+
+		// Add time restrictions if provided
+		if !fromTime.IsZero() {
+			searchCall = searchCall.PublishedAfter(fromTime.Format(time.RFC3339))
+		}
+		if !effectiveToTime.IsZero() {
+			searchCall = searchCall.PublishedBefore(effectiveToTime.Format(time.RFC3339))
+		}
+
+		searchResponse, err := searchCall.Do()
+		if err != nil {
+			log.Error().Err(err).Str("prefix", prefix).Msg("Failed to search videos with prefix")
+			continue // Try another prefix
+		}
+
+		log.Info().
+			Str("prefix", prefix).
+			Int("results", len(searchResponse.Items)).
+			Msg("Search results received")
+
+		// Process search results
+		channelVideoCount := make(map[string]int)
+		for _, item := range searchResponse.Items {
+			channelID := item.Snippet.ChannelId
+			
+			// Count videos per channel
+			channelVideoCount[channelID]++
+			
+			// Process channel if not already processed
+			if !processedChannels[channelID] {
+				processedChannels[channelID] = true
+				
+				// Check if this channel has more than 10 videos
+				channel, err := c.GetChannelInfo(ctx, channelID)
+				if err != nil {
+					log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get channel info")
+					continue
+				}
+				
+				// Only include channels with > 10 videos
+				if channel.VideoCount > 10 {
+					channelsWithMinVideos[channelID] = true
+					
+					// Get videos from this channel
+					channelVideos, err := c.GetVideosFromChannel(ctx, channelID, fromTime, effectiveToTime, 50)
+					if err != nil {
+						log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get videos from channel")
+						continue
+					}
+					
+					// Add videos to result, up to the limit
+					remaining := effectiveLimit - len(videos)
+					if remaining <= 0 {
+						break
+					}
+					
+					// Take up to remaining videos
+					toAdd := min(remaining, len(channelVideos))
+					videos = append(videos, channelVideos[:toAdd]...)
+					
+					log.Debug().
+						Str("channel_id", channelID).
+						Str("channel_title", channel.Title).
+						Int("videos_added", toAdd).
+						Int("total_videos", len(videos)).
+						Msg("Added videos from channel")
+				}
+			}
+			
+			// Break if we've reached the limit
+			if len(videos) >= effectiveLimit {
+				break
+			}
+		}
+		
+		log.Info().
+			Str("prefix", prefix).
+			Int("total_videos", len(videos)).
+			Int("channels_processed", len(processedChannels)).
+			Int("qualified_channels", len(channelsWithMinVideos)).
+			Msg("Processed search results")
+	}
+
+	log.Info().
+		Int("final_video_count", len(videos)).
+		Int("channels_processed", len(processedChannels)).
+		Int("qualified_channels", len(channelsWithMinVideos)).
+		Msg("Completed random YouTube video sampling")
+
+	return videos, nil
+}
+
+// GetSnowballVideos retrieves videos using snowball sampling from channels with > 10 videos
+func (c *YouTubeDataClient) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	if c.service == nil {
+		return nil, fmt.Errorf("YouTube client not connected")
+	}
+
+	if len(seedChannelIDs) == 0 {
+		return nil, fmt.Errorf("at least one seed channel ID is required for snowball sampling")
+	}
+
+	log.Info().
+		Strs("seed_channels", seedChannelIDs).
+		Time("from_time", fromTime).
+		Time("to_time", toTime).
+		Int("limit", limit).
+		Msg("Starting snowball YouTube sampling")
+
+	// Use current time as default if toTime is zero
+	effectiveToTime := toTime
+	if effectiveToTime.IsZero() {
+		effectiveToTime = time.Now()
+	}
+
+	// Handle negative or zero limit as "no limit"
+	effectiveLimit := limit
+	if effectiveLimit <= 0 {
+		effectiveLimit = 1000
+	}
+
+	videos := make([]*youtubemodel.YouTubeVideo, 0, effectiveLimit)
+	processedChannels := make(map[string]bool)
+	channelsQueue := make([]string, 0, 100)
+	channelsWithMinVideos := make(map[string]bool)
+
+	// Start with seed channels
+	for _, channelID := range seedChannelIDs {
+		if !processedChannels[channelID] {
+			channelsQueue = append(channelsQueue, channelID)
+		}
+	}
+
+	// Process channels in the queue until we reach the limit or exhaust the queue
+	for len(channelsQueue) > 0 && len(videos) < effectiveLimit {
+		// Get the next channel ID from the queue
+		channelID := channelsQueue[0]
+		channelsQueue = channelsQueue[1:] // Remove the processed channel
+
+		if processedChannels[channelID] {
+			continue // Skip if already processed
+		}
+		processedChannels[channelID] = true
+
+		// Check if this channel has more than 10 videos
+		channel, err := c.GetChannelInfo(ctx, channelID)
+		if err != nil {
+			log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get channel info")
+			continue
+		}
+
+		// Only include channels with > 10 videos
+		if channel.VideoCount > 10 {
+			channelsWithMinVideos[channelID] = true
+			
+			log.Info().
+				Str("channel_id", channelID).
+				Str("channel_title", channel.Title).
+				Int64("video_count", channel.VideoCount).
+				Msg("Processing channel with sufficient videos")
+
+			// Get videos from this channel
+			channelVideos, err := c.GetVideosFromChannel(ctx, channelID, fromTime, effectiveToTime, 50)
+			if err != nil {
+				log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get videos from channel")
+				continue
+			}
+
+			// Add videos to result, up to the limit
+			remaining := effectiveLimit - len(videos)
+			if remaining <= 0 {
+				break
+			}
+
+			// Take up to remaining videos
+			toAdd := min(remaining, len(channelVideos))
+			videos = append(videos, channelVideos[:toAdd]...)
+
+			log.Debug().
+				Str("channel_id", channelID).
+				Str("channel_title", channel.Title).
+				Int("videos_added", toAdd).
+				Int("total_videos", len(videos)).
+				Msg("Added videos from channel")
+
+			// Find related channels from video descriptions and add them to the queue
+			for _, video := range channelVideos {
+				// Extract mentioned channel IDs from the description
+				mentionedChannels := extractChannelIDsFromText(video.Description)
+				
+				for _, mentionedChannelID := range mentionedChannels {
+					if !processedChannels[mentionedChannelID] {
+						channelsQueue = append(channelsQueue, mentionedChannelID)
+						log.Debug().
+							Str("source_channel", channelID).
+							Str("mentioned_channel", mentionedChannelID).
+							Msg("Added mentioned channel to queue")
+					}
+				}
+			}
+		}
+	}
+
+	log.Info().
+		Int("final_video_count", len(videos)).
+		Int("channels_processed", len(processedChannels)).
+		Int("qualified_channels", len(channelsWithMinVideos)).
+		Msg("Completed snowball YouTube sampling")
+
+	return videos, nil
+}
+
+// extractChannelIDsFromText extracts potential YouTube channel IDs from text
+// This is a simplified implementation that looks for patterns like:
+// - "youtube.com/channel/UC..."
+// - "youtube.com/@..."
+func extractChannelIDsFromText(text string) []string {
+	channelIDs := make([]string, 0)
+	
+	// Look for standard channel IDs (UCxxxx)
+	ucPattern := regexp.MustCompile(`youtube\.com/channel/([a-zA-Z0-9_-]+)`)
+	ucMatches := ucPattern.FindAllStringSubmatch(text, -1)
+	for _, match := range ucMatches {
+		if len(match) > 1 {
+			channelIDs = append(channelIDs, match[1])
+		}
+	}
+	
+	// Look for handle-based channels (@xxxx)
+	handlePattern := regexp.MustCompile(`youtube\.com/@([a-zA-Z0-9_.-]+)`)
+	handleMatches := handlePattern.FindAllStringSubmatch(text, -1)
+	for _, match := range handleMatches {
+		if len(match) > 1 {
+			// Add @ prefix to indicate it's a handle
+			channelIDs = append(channelIDs, "@"+match[1])
+		}
+	}
+	
+	return channelIDs
 }
 
 // GetChannelType returns "youtube" as the channel type
