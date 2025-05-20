@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -191,7 +192,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		Int64("view_count", channel.ViewCount).
 		Int64("video_count", channel.VideoCount).
 		Str("country", channel.Country).
-		Msg("YouTube channel info retrieved")
+		Msg("YouTube channel info retrieved - all engagement data populated")
 
 	return channel, nil
 }
@@ -788,6 +789,7 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 }
 
 // GetRandomVideos retrieves videos using random sampling with the prefix generator
+// Uses parallel processing to handle multiple channels concurrently
 func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
@@ -797,7 +799,7 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 		Time("from_time", fromTime).
 		Time("to_time", toTime).
 		Int("limit", limit).
-		Msg("Starting random YouTube video sampling")
+		Msg("Starting parallel random YouTube video sampling")
 
 	// Use current time as default if toTime is zero
 	effectiveToTime := toTime
@@ -811,123 +813,346 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 		effectiveLimit = 1000
 	}
 
+	// Define concurrency limits
+	const maxWorkers = 5 // Maximum number of parallel workers
+	const maxAttempts = 50 // Maximum number of search attempts with random prefixes
+	const maxChannelsPerSearch = 10 // Maximum channels to process from each search
+
+	// Shared data with mutex protection
+	var mu sync.Mutex
 	videos := make([]*youtubemodel.YouTubeVideo, 0, effectiveLimit)
 	processedChannels := make(map[string]bool)
 	channelsWithMinVideos := make(map[string]bool)
 
-	// Continue searching until we reach the limit
-	maxAttempts := 50 // Limit the number of search attempts
-	for attempt := 0; len(videos) < effectiveLimit && attempt < maxAttempts; attempt++ {
-		// Generate a random prefix
-		prefix := c.generateRandomPrefix(5)
-		
-		log.Info().
-			Str("prefix", prefix).
-			Int("attempt", attempt+1).
-			Int("current_videos", len(videos)).
-			Int("target_videos", effectiveLimit).
-			Msg("Searching with random prefix")
+	// Channel for discovered channel IDs to process
+	channelQueue := make(chan string, 1000) // Buffer to prevent blocking
 
-		// Search for videos with this prefix
-		searchCall := c.service.Search.List([]string{"id", "snippet"}).
-			Q(prefix).
-			MaxResults(50). // Max allowed by API
-			Context(ctx).
-			Type("video").
-			Order("date") // Sort by date
+	// Create a context that can be canceled
+	ctxWithCancel, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-		// Add time restrictions if provided
-		if !fromTime.IsZero() {
-			searchCall = searchCall.PublishedAfter(fromTime.Format(time.RFC3339))
-		}
-		if !effectiveToTime.IsZero() {
-			searchCall = searchCall.PublishedBefore(effectiveToTime.Format(time.RFC3339))
-		}
+	// Create control channel to signal workers to stop
+	done := make(chan struct{})
+	defer close(done)
 
-		searchResponse, err := searchCall.Do()
-		if err != nil {
-			log.Error().Err(err).Str("prefix", prefix).Msg("Failed to search videos with prefix")
-			continue // Try another prefix
-		}
+	// Create a channel for collecting video results
+	resultsChan := make(chan []*youtubemodel.YouTubeVideo, maxWorkers)
 
-		log.Info().
-			Str("prefix", prefix).
-			Int("results", len(searchResponse.Items)).
-			Msg("Search results received")
+	// Create WaitGroup for tracking workers
+	var wg sync.WaitGroup
 
-		// Process search results
-		channelVideoCount := make(map[string]int)
-		for _, item := range searchResponse.Items {
-			channelID := item.Snippet.ChannelId
-			
-			// Count videos per channel
-			channelVideoCount[channelID]++
-			
-			// Process channel if not already processed
-			if !processedChannels[channelID] {
-				processedChannels[channelID] = true
-				
-				// Check if this channel has more than 10 videos
-				channel, err := c.GetChannelInfo(ctx, channelID)
-				if err != nil {
-					log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get channel info")
-					continue
+	// Create semaphore for limiting concurrent API calls
+	sem := make(chan struct{}, maxWorkers)
+
+	// Create a separate goroutine for prefix searching
+	go func() {
+		defer close(channelQueue) // Close channel when done searching
+
+		// Generate random prefixes and search for videos
+		for attempt := 0; attempt < maxAttempts; attempt++ {
+			// Check if context is done
+			select {
+			case <-ctxWithCancel.Done():
+				log.Debug().Msg("Context cancelled, stopping prefix search")
+				return
+			default:
+				// Continue with search
+			}
+
+			// Get unique prefixes using mutex-protected rng
+			prefix := c.generateRandomPrefix(5)
+
+			log.Debug().
+				Str("prefix", prefix).
+				Int("attempt", attempt+1).
+				Int("max_attempts", maxAttempts).
+				Msg("Searching with random prefix")
+
+			// Search for videos with this prefix
+			searchCall := c.service.Search.List([]string{"id", "snippet"}).
+				Q(prefix).
+				MaxResults(50). // Max allowed by API
+				Context(ctxWithCancel).
+				Type("video").
+				Order("date") // Sort by date
+
+			// Add time restrictions if provided
+			if !fromTime.IsZero() {
+				searchCall = searchCall.PublishedAfter(fromTime.Format(time.RFC3339))
+			}
+			if !effectiveToTime.IsZero() {
+				searchCall = searchCall.PublishedBefore(effectiveToTime.Format(time.RFC3339))
+			}
+
+			searchResponse, err := searchCall.Do()
+			if err != nil {
+				log.Error().Err(err).Str("prefix", prefix).Msg("Failed to search videos with prefix")
+				continue // Try another prefix
+			}
+
+			log.Debug().
+				Str("prefix", prefix).
+				Int("results", len(searchResponse.Items)).
+				Msg("Search results received")
+
+			// Process search results - collect unique channel IDs
+			channelIDs := make(map[string]bool)
+			channelsAdded := 0
+
+			for _, item := range searchResponse.Items {
+				channelID := item.Snippet.ChannelId
+
+				mu.Lock()
+				alreadyProcessed := processedChannels[channelID]
+				if !alreadyProcessed {
+					processedChannels[channelID] = true
+					channelIDs[channelID] = true
 				}
-				
-				// Only include channels with > 10 videos
-				if channel.VideoCount > 10 {
-					channelsWithMinVideos[channelID] = true
-					
-					// Get videos from this channel
-					channelVideos, err := c.GetVideosFromChannel(ctx, channelID, fromTime, effectiveToTime, 50)
-					if err != nil {
-						log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get videos from channel")
-						continue
-					}
-					
-					// Add videos to result, up to the limit
-					remaining := effectiveLimit - len(videos)
-					if remaining <= 0 {
-						break
-					}
-					
-					// Take up to remaining videos
-					toAdd := min(remaining, len(channelVideos))
-					videos = append(videos, channelVideos[:toAdd]...)
-					
+				mu.Unlock()
+
+				if len(channelIDs) >= maxChannelsPerSearch {
+					break // Limit channels per search
+				}
+			}
+
+			// Queue discovered channels for processing
+			for channelID := range channelIDs {
+				// Check if context is done before each send
+				select {
+				case <-ctxWithCancel.Done():
+					return
+				case channelQueue <- channelID:
+					channelsAdded++
 					log.Debug().
 						Str("channel_id", channelID).
-						Str("channel_title", channel.Title).
-						Int("videos_added", toAdd).
-						Int("total_videos", len(videos)).
-						Msg("Added videos from channel")
+						Str("prefix", prefix).
+						Msg("Queued channel for processing")
+				default:
+					// Channel queue is full, wait briefly and try again
+					time.Sleep(100 * time.Millisecond)
+					select {
+					case <-ctxWithCancel.Done():
+						return
+					case channelQueue <- channelID:
+						channelsAdded++
+					default:
+						log.Warn().
+							Str("channel_id", channelID).
+							Msg("Channel queue is full, dropping channel")
+					}
 				}
 			}
-			
-			// Break if we've reached the limit
-			if len(videos) >= effectiveLimit {
-				break
+
+			log.Info().
+				Str("prefix", prefix).
+				Int("channels_added", channelsAdded).
+				Msg("Completed processing search results")
+
+			// Check if we should continue searching
+			mu.Lock()
+			videoCount := len(videos)
+			mu.Unlock()
+
+			if videoCount >= effectiveLimit {
+				log.Debug().
+					Int("videos_collected", videoCount).
+					Int("limit", effectiveLimit).
+					Msg("Reached video limit, stopping prefix search")
+				return
 			}
 		}
-		
-		log.Info().
-			Str("prefix", prefix).
-			Int("total_videos", len(videos)).
-			Int("channels_processed", len(processedChannels)).
-			Int("qualified_channels", len(channelsWithMinVideos)).
-			Msg("Processed search results")
+
+		log.Info().Int("total_attempts", maxAttempts).Msg("Completed all random prefix searches")
+	}()
+
+	// Worker function for processing channels
+	channelWorker := func(workerID int) {
+		defer wg.Done()
+
+		for {
+			select {
+			case <-ctxWithCancel.Done():
+				log.Debug().Int("worker_id", workerID).Msg("Worker stopping due to context cancellation")
+				return
+			case <-done:
+				log.Debug().Int("worker_id", workerID).Msg("Worker stopping due to done signal")
+				return
+			case channelID, ok := <-channelQueue:
+				if !ok {
+					log.Debug().Int("worker_id", workerID).Msg("Channel queue closed, worker stopping")
+					return
+				}
+
+				// Acquire semaphore slot
+				sem <- struct{}{}
+
+				log.Debug().
+					Int("worker_id", workerID).
+					Str("channel_id", channelID).
+					Msg("Worker processing channel")
+
+				// Check if this channel has more than minimum required videos
+				channel, err := c.GetChannelInfo(ctxWithCancel, channelID)
+				if err != nil {
+					log.Warn().
+						Err(err).
+						Int("worker_id", workerID).
+						Str("channel_id", channelID).
+						Msg("Failed to get channel info")
+					<-sem // Release semaphore
+					continue
+				}
+
+				// Only include channels with > minimum videos
+				if channel.VideoCount > 10 {
+					mu.Lock()
+					channelsWithMinVideos[channelID] = true
+					mu.Unlock()
+
+					// Get videos from this channel
+					channelVideos, err := c.GetVideosFromChannel(ctxWithCancel, channelID, fromTime, effectiveToTime, 50)
+					if err != nil {
+						log.Warn().
+							Err(err).
+							Int("worker_id", workerID).
+							Str("channel_id", channelID).
+							Msg("Failed to get videos from channel")
+						<-sem // Release semaphore
+						continue
+					}
+
+					// Send results to collector
+					resultsChan <- channelVideos
+
+					log.Debug().
+						Int("worker_id", workerID).
+						Str("channel_id", channelID).
+						Str("channel_title", channel.Title).
+						Int("videos_found", len(channelVideos)).
+						Msg("Sent channel videos to result collector")
+				}
+
+				// Release semaphore
+				<-sem
+			}
+		}
+	}
+
+	// Start worker pool
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		go channelWorker(i)
+	}
+
+	// Collector goroutine to process results
+	go func() {
+		for channelVideos := range resultsChan {
+			mu.Lock()
+
+			// Check if we've reached the limit
+			if len(videos) >= effectiveLimit {
+				mu.Unlock()
+				continue // Skip but keep collecting to prevent blocking
+			}
+
+			// Add videos up to the limit
+			remaining := effectiveLimit - len(videos)
+			if remaining > 0 {
+				toAdd := min(remaining, len(channelVideos))
+				videos = append(videos, channelVideos[:toAdd]...)
+
+				log.Debug().
+					Int("videos_added", toAdd).
+					Int("total_videos", len(videos)).
+					Int("effective_limit", effectiveLimit).
+					Msg("Added videos from channel result")
+
+				// If we've reached the limit, cancel context to signal workers to stop
+				if len(videos) >= effectiveLimit {
+					log.Info().Int("total_videos", len(videos)).Msg("Reached video limit, cancelling remaining work")
+					cancel()
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
+	// Monitor the system and check for completion
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Main control loop
+	for {
+		select {
+		case <-ctxWithCancel.Done():
+			log.Debug().Msg("Context cancelled, stopping all processing")
+			goto Wait
+		case <-ticker.C:
+			// Check if we've reached the limit
+			mu.Lock()
+			videosCount := len(videos)
+			channelsMu := len(processedChannels)
+			qualifiedMu := len(channelsWithMinVideos)
+			mu.Unlock()
+
+			if videosCount >= effectiveLimit {
+				log.Debug().Int("videos_count", videosCount).Msg("Video limit reached in main loop, stopping processing")
+				cancel() // Cancel context to signal workers to stop
+				goto Wait
+			}
+
+			// Check if channel queue is closed and empty, and all workers are idle (semaphore empty)
+			if channelQueue == nil || (len(channelQueue) == 0 && len(sem) == 0) {
+				select {
+				case _, ok := <-channelQueue:
+					if !ok {
+						log.Debug().Msg("Channel queue is closed and empty, stopping")
+						goto Wait
+					}
+					// Put it back if we took one
+					if ok {
+						channelQueue <- ""
+					}
+				default:
+					// Queue is not closed but might be empty
+					// Continue and check again on next tick
+				}
+			}
+
+			log.Debug().
+				Int("videos_collected", videosCount).
+				Int("channels_processed", channelsMu).
+				Int("qualified_channels", qualifiedMu).
+				Int("channel_queue_size", len(channelQueue)).
+				Int("busy_workers", len(sem)).
+				Msg("Progress update")
+		}
+	}
+
+Wait:
+	// Wait for all workers to finish
+	wg.Wait()
+	close(resultsChan)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Ensure we don't exceed the limit
+	if len(videos) > effectiveLimit {
+		videos = videos[:effectiveLimit]
 	}
 
 	log.Info().
 		Int("final_video_count", len(videos)).
 		Int("channels_processed", len(processedChannels)).
 		Int("qualified_channels", len(channelsWithMinVideos)).
-		Msg("Completed random YouTube video sampling")
+		Msg("Completed parallel random YouTube video sampling")
 
 	return videos, nil
 }
 
 // GetSnowballVideos retrieves videos using snowball sampling from channels with > 10 videos
+// Uses parallel processing to handle multiple channels concurrently
 func (c *YouTubeDataClient) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
@@ -942,7 +1167,7 @@ func (c *YouTubeDataClient) GetSnowballVideos(ctx context.Context, seedChannelID
 		Time("from_time", fromTime).
 		Time("to_time", toTime).
 		Int("limit", limit).
-		Msg("Starting snowball YouTube sampling")
+		Msg("Starting parallel snowball YouTube sampling")
 
 	// Use current time as default if toTime is zero
 	effectiveToTime := toTime
@@ -956,93 +1181,279 @@ func (c *YouTubeDataClient) GetSnowballVideos(ctx context.Context, seedChannelID
 		effectiveLimit = 1000
 	}
 
+	// Define concurrency limit - adjust based on API quota
+	const maxWorkers = 5 // Maximum number of parallel workers
+
+	// Shared data with mutex protection
+	var mu sync.Mutex
 	videos := make([]*youtubemodel.YouTubeVideo, 0, effectiveLimit)
 	processedChannels := make(map[string]bool)
-	channelsQueue := make([]string, 0, 100)
 	channelsWithMinVideos := make(map[string]bool)
 
-	// Start with seed channels
+	// Channel for new channel IDs discovered during processing
+	newChannelsQueue := make(chan string, 1000) // Buffer to prevent blocking
+
+	// Initialize with seed channels
 	for _, channelID := range seedChannelIDs {
 		if !processedChannels[channelID] {
-			channelsQueue = append(channelsQueue, channelID)
+			newChannelsQueue <- channelID
+			processedChannels[channelID] = true // Mark as queued
 		}
 	}
 
-	// Process channels in the queue until we reach the limit or exhaust the queue
-	for len(channelsQueue) > 0 && len(videos) < effectiveLimit {
-		// Get the next channel ID from the queue
-		channelID := channelsQueue[0]
-		channelsQueue = channelsQueue[1:] // Remove the processed channel
+	// Create a WaitGroup to track active workers
+	var wg sync.WaitGroup
 
-		if processedChannels[channelID] {
-			continue // Skip if already processed
-		}
-		processedChannels[channelID] = true
+	// Create a context that can be canceled
+	ctxWithCancel, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-		// Check if this channel has more than 10 videos
-		channel, err := c.GetChannelInfo(ctx, channelID)
-		if err != nil {
-			log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get channel info")
-			continue
-		}
+	// Create control channel to signal workers to stop
+	done := make(chan struct{})
+	defer close(done)
 
-		// Only include channels with > 10 videos
-		if channel.VideoCount > 10 {
-			channelsWithMinVideos[channelID] = true
-			
-			log.Info().
-				Str("channel_id", channelID).
-				Str("channel_title", channel.Title).
-				Int64("video_count", channel.VideoCount).
-				Msg("Processing channel with sufficient videos")
+	// Create a channel for collecting results
+	resultsChan := make(chan []*youtubemodel.YouTubeVideo, maxWorkers)
 
-			// Get videos from this channel
-			channelVideos, err := c.GetVideosFromChannel(ctx, channelID, fromTime, effectiveToTime, 50)
-			if err != nil {
-				log.Warn().Err(err).Str("channel_id", channelID).Msg("Failed to get videos from channel")
-				continue
-			}
+	// Launch workers
+	activeWorkers := 0
 
-			// Add videos to result, up to the limit
-			remaining := effectiveLimit - len(videos)
-			if remaining <= 0 {
-				break
-			}
+	// Track active channels being processed
+	activeChannels := make(map[string]bool)
+	var activeChannelsMu sync.Mutex
 
-			// Take up to remaining videos
-			toAdd := min(remaining, len(channelVideos))
-			videos = append(videos, channelVideos[:toAdd]...)
+	// Create semaphore for limiting concurrent API calls
+	sem := make(chan struct{}, maxWorkers)
 
-			log.Debug().
-				Str("channel_id", channelID).
-				Str("channel_title", channel.Title).
-				Int("videos_added", toAdd).
-				Int("total_videos", len(videos)).
-				Msg("Added videos from channel")
+	log.Info().Int("max_workers", maxWorkers).Msg("Starting worker pool for channel processing")
 
-			// Find related channels from video descriptions and add them to the queue
-			for _, video := range channelVideos {
-				// Extract mentioned channel IDs from the description
-				mentionedChannels := extractChannelIDsFromText(video.Description)
-				
-				for _, mentionedChannelID := range mentionedChannels {
-					if !processedChannels[mentionedChannelID] {
-						channelsQueue = append(channelsQueue, mentionedChannelID)
-						log.Debug().
-							Str("source_channel", channelID).
-							Str("mentioned_channel", mentionedChannelID).
-							Msg("Added mentioned channel to queue")
+	// Worker function
+	worker := func(workerID int) {
+		defer wg.Done()
+
+		for {
+			select {
+			case <-ctxWithCancel.Done():
+				log.Debug().Int("worker_id", workerID).Msg("Worker stopping due to context cancellation")
+				return
+			case <-done:
+				log.Debug().Int("worker_id", workerID).Msg("Worker stopping due to done signal")
+				return
+			case channelID, ok := <-newChannelsQueue:
+				if !ok {
+					log.Debug().Int("worker_id", workerID).Msg("Channel queue closed, worker stopping")
+					return
+				}
+
+				// Mark this channel as being processed
+				activeChannelsMu.Lock()
+				activeChannels[channelID] = true
+				activeChannelsMu.Unlock()
+
+				// Acquire semaphore slot
+				sem <- struct{}{}
+
+				log.Debug().
+					Int("worker_id", workerID).
+					Str("channel_id", channelID).
+					Msg("Worker processing channel")
+
+				// Check if this channel has more than minimum required videos
+				channel, err := c.GetChannelInfo(ctxWithCancel, channelID)
+				if err != nil {
+					log.Warn().
+						Err(err).
+						Int("worker_id", workerID).
+						Str("channel_id", channelID).
+						Msg("Failed to get channel info")
+
+					// Release semaphore and mark as done
+					<-sem
+					activeChannelsMu.Lock()
+					delete(activeChannels, channelID)
+					activeChannelsMu.Unlock()
+					continue
+				}
+
+				// Only include channels with > minimum videos
+				if channel.VideoCount > 10 {
+					mu.Lock()
+					channelsWithMinVideos[channelID] = true
+					mu.Unlock()
+
+					log.Debug().
+						Int("worker_id", workerID).
+						Str("channel_id", channelID).
+						Str("channel_title", channel.Title).
+						Int64("video_count", channel.VideoCount).
+						Msg("Processing channel with sufficient videos")
+
+					// Get videos from this channel
+					channelVideos, err := c.GetVideosFromChannel(ctxWithCancel, channelID, fromTime, effectiveToTime, 50)
+					if err != nil {
+						log.Warn().
+							Err(err).
+							Int("worker_id", workerID).
+							Str("channel_id", channelID).
+							Msg("Failed to get videos from channel")
+
+						// Release semaphore and mark as done
+						<-sem
+						activeChannelsMu.Lock()
+						delete(activeChannels, channelID)
+						activeChannelsMu.Unlock()
+						continue
+					}
+
+					// Send channel videos to result channel
+					resultsChan <- channelVideos
+
+					// Find related channels from video descriptions
+					var newChannels []string
+					for _, video := range channelVideos {
+						// Extract mentioned channel IDs from the description
+						mentionedChannels := extractChannelIDsFromText(video.Description)
+
+						mu.Lock()
+						for _, mentionedChannelID := range mentionedChannels {
+							// Check if already processed or queued
+							if !processedChannels[mentionedChannelID] {
+								processedChannels[mentionedChannelID] = true // Mark as queued
+								newChannels = append(newChannels, mentionedChannelID)
+
+								log.Debug().
+									Int("worker_id", workerID).
+									Str("source_channel", channelID).
+									Str("mentioned_channel", mentionedChannelID).
+									Msg("Found new channel to process")
+							}
+						}
+						mu.Unlock()
+					}
+
+					// Queue the newly discovered channels
+					for _, newChannel := range newChannels {
+						select {
+						case newChannelsQueue <- newChannel:
+							// Successfully queued
+						default:
+							// Queue is full, try once more and log if still full
+							select {
+							case newChannelsQueue <- newChannel:
+								// Successfully queued on retry
+							default:
+								log.Warn().
+									Int("worker_id", workerID).
+									Str("channel_id", newChannel).
+									Msg("Channel queue is full, dropping channel")
+							}
+						}
 					}
 				}
+
+				// Release semaphore and mark as done with this channel
+				<-sem
+				activeChannelsMu.Lock()
+				delete(activeChannels, channelID)
+				activeChannelsMu.Unlock()
 			}
 		}
+	}
+
+	// Start initial worker pool
+	for i := 0; i < maxWorkers; i++ {
+		wg.Add(1)
+		activeWorkers++
+		go worker(i)
+	}
+
+	// Collector goroutine to process results
+	go func() {
+		for result := range resultsChan {
+			mu.Lock()
+
+			// Check if we've reached the limit
+			if len(videos) >= effectiveLimit {
+				mu.Unlock()
+				continue // Skip but keep collecting to prevent blocking
+			}
+
+			// Add videos up to the limit
+			remaining := effectiveLimit - len(videos)
+			if remaining > 0 {
+				toAdd := min(remaining, len(result))
+				videos = append(videos, result[:toAdd]...)
+
+				log.Debug().
+					Int("videos_added", toAdd).
+					Int("total_videos", len(videos)).
+					Int("effective_limit", effectiveLimit).
+					Msg("Added videos from channel result")
+
+				// If we've reached the limit, cancel context to signal workers to stop
+				if len(videos) >= effectiveLimit {
+					log.Info().Int("total_videos", len(videos)).Msg("Reached video limit, cancelling remaining work")
+					cancel()
+				}
+			}
+			mu.Unlock()
+		}
+	}()
+
+	// Monitor the system and check for completion
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	// Main control loop
+	for {
+		select {
+		case <-ctxWithCancel.Done():
+			log.Debug().Msg("Context cancelled, stopping all processing")
+			close(newChannelsQueue) // Signal workers to stop
+			goto Wait
+		case <-ticker.C:
+			// Check if we've reached the limit
+			mu.Lock()
+			videosCount := len(videos)
+			mu.Unlock()
+
+			if videosCount >= effectiveLimit {
+				log.Debug().Int("videos_count", videosCount).Msg("Video limit reached in main loop, stopping processing")
+				cancel() // Cancel context to signal workers to stop
+				goto Wait
+			}
+
+			// Check if there's more work to do
+			activeChannelsMu.Lock()
+			activeChannelCount := len(activeChannels)
+			activeChannelsMu.Unlock()
+
+			// Check if channel queue is empty and no active processing
+			if len(newChannelsQueue) == 0 && activeChannelCount == 0 {
+				log.Debug().Msg("No more channels to process and no active processing, stopping")
+				goto Wait
+			}
+		}
+	}
+
+Wait:
+	// Wait for all workers to finish
+	wg.Wait()
+	close(resultsChan)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Ensure we don't exceed the limit
+	if len(videos) > effectiveLimit {
+		videos = videos[:effectiveLimit]
 	}
 
 	log.Info().
 		Int("final_video_count", len(videos)).
 		Int("channels_processed", len(processedChannels)).
 		Int("qualified_channels", len(channelsWithMinVideos)).
-		Msg("Completed snowball YouTube sampling")
+		Msg("Completed parallel snowball YouTube sampling")
 
 	return videos, nil
 }

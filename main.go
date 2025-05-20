@@ -27,6 +27,7 @@ var (
 	daprMode          string
 	minUsers          int
 	crawlID           string
+	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
 	logLevel          string   // Logging level
@@ -213,6 +214,7 @@ var rootCmd = &cobra.Command{
 
 		crawlerCfg.MinUsers = viper.GetInt("crawler.minusers")
 		crawlerCfg.CrawlID = viper.GetString("crawler.crawlid")
+		crawlerCfg.CrawlLabel = viper.GetString("crawler.crawllabel")
 		crawlerCfg.MaxComments = viper.GetInt("crawler.maxcomments")
 		crawlerCfg.MaxPosts = viper.GetInt("crawler.maxposts")
 		crawlerCfg.MaxDepth = viper.GetInt("crawler.maxdepth")
@@ -232,6 +234,7 @@ var rootCmd = &cobra.Command{
 		log.Debug().
 			Int("min_users", crawlerCfg.MinUsers).
 			Str("crawl_id", crawlerCfg.CrawlID).
+			Str("crawl_label", crawlerCfg.CrawlLabel).
 			Int("max_comments", crawlerCfg.MaxComments).
 			Int("max_posts", crawlerCfg.MaxPosts).
 			Int("max_depth", crawlerCfg.MaxDepth).
@@ -391,6 +394,7 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&tdlibDatabaseURLs, "tdlib-database-urls", []string{}, "Comma-separated list of URLs to pre-seeded TDLib database archives for connection pooling")
 	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 100, "Minimum number of users in a channel to crawl")
 	rootCmd.PersistentFlags().StringVar(&crawlID, "crawl-id", "", "Unique identifier for this crawl operation")
+	rootCmd.PersistentFlags().StringVar(&crawlLabel, "crawl-label", "", "User-defined label for the crawl (e.g., 'youtube-snowball')")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxComments, "max-comments", -1, "The maximum number of comments to crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxDepth, "max-depth", -1, "The maximum depth of the crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPosts, "max-posts", -1, "The maximum posts to collect")
@@ -423,6 +427,7 @@ func init() {
 	viper.BindPFlag("tdlib.verbosity", rootCmd.PersistentFlags().Lookup("tdlib-verbosity"))
 	viper.BindPFlag("crawler.minusers", rootCmd.PersistentFlags().Lookup("min-users"))
 	viper.BindPFlag("crawler.crawlid", rootCmd.PersistentFlags().Lookup("crawl-id"))
+	viper.BindPFlag("crawler.crawllabel", rootCmd.PersistentFlags().Lookup("crawl-label"))
 	viper.BindPFlag("crawler.maxcomments", rootCmd.PersistentFlags().Lookup("max-comments"))
 	viper.BindPFlag("crawler.maxposts", rootCmd.PersistentFlags().Lookup("max-posts"))
 	viper.BindPFlag("crawler.maxdepth", rootCmd.PersistentFlags().Lookup("max-depth"))

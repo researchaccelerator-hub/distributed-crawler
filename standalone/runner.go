@@ -419,6 +419,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		crawlerConfig := map[string]interface{}{
 			"client": ytAdapter,
 			"state_manager": sm,
+			"crawl_label": crawlCfg.CrawlLabel, // Pass the crawl label to be added to posts
 		}
 		
 		err = ytCrawler.Initialize(clientCtx, crawlerConfig)

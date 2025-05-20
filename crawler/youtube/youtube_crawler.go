@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
@@ -49,6 +50,7 @@ type YouTubeCrawler struct {
 	initialized     bool
 	config          YouTubeCrawlerConfig
 	defaultConfig   YouTubeCrawlerConfig
+	crawlLabel      string // Label for the crawl operation
 }
 
 // NewYouTubeCrawler creates a new YouTube crawler
@@ -142,6 +144,14 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 		crawlerConfig.SamplingMethod = SamplingMethodChannel
 	}
 	
+	// Check for crawl label in config
+	if crawlLabelObj, ok := config["crawl_label"]; ok {
+		if crawlLabel, ok := crawlLabelObj.(string); ok {
+			c.crawlLabel = crawlLabel
+			log.Info().Str("crawl_label", crawlLabel).Msg("Using configured crawl label")
+		}
+	}
+
 	// Set the client, state manager, and configuration
 	c.client = youtubeClient
 	c.stateManager = stateManager
@@ -152,6 +162,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 		Str("sampling_method", string(c.config.SamplingMethod)).
 		Int64("min_channel_videos", c.config.MinChannelVideos).
 		Int("seed_channels_count", len(c.config.SeedChannels)).
+		Str("crawl_label", c.crawlLabel).
 		Msg("YouTube crawler initialized")
 
 	return nil
@@ -198,11 +209,14 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 
 	// Convert YouTube-specific channel data to common model
 	channelData := &model.ChannelData{
-		ChannelID:           0, // YouTube doesn't use numeric IDs like Telegram
+		ChannelID:           target.ID, // Set the proper YouTube channel ID
 		ChannelName:         channel.Title,
+		ChannelDescription:  channel.Description, // Add channel description
 		ChannelURL:          channelURL,
 		ChannelURLExternal:  channelURL,
 		ChannelProfileImage: channel.Thumbnails["default"],
+		CountryCode:         channel.Country, // Add country code from YouTube data
+		PublishedAt:         channel.PublishedAt, // Add channel creation date
 		ChannelEngagementData: model.EngagementData{
 			FollowerCount: int(channel.SubscriberCount),
 			ViewsCount:    int(channel.ViewCount),
@@ -214,6 +228,9 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 		Str("channel_id", target.ID).
 		Str("channel_name", channel.Title).
 		Int64("subscriber_count", channel.SubscriberCount).
+		Int64("view_count", channel.ViewCount).
+		Int64("video_count", channel.VideoCount).
+		Str("country", channel.Country).
 		Msg("Successfully retrieved YouTube channel info")
 
 	return channelData, nil
@@ -235,40 +252,44 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 		Time("to_time", job.ToTime).
 		Int("limit", job.Limit).
 		Str("sampling_method", string(c.config.SamplingMethod)).
-		Msg("Starting YouTube crawl")
+		Msg("Starting YouTube crawl with parallel processing")
 
 	// Fetch videos using the configured sampling method
 	var videos []*youtubemodel.YouTubeVideo
 	var err error
-	
+
+	// Create a context with timeout for the entire crawl
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
 	switch c.config.SamplingMethod {
 	case SamplingMethodChannel:
 		// Traditional channel-based sampling
-		videos, err = c.client.GetVideosFromChannel(ctx, job.Target.ID, job.FromTime, job.ToTime, job.Limit)
+		videos, err = c.client.GetVideosFromChannel(ctxWithTimeout, job.Target.ID, job.FromTime, job.ToTime, job.Limit)
 		if err != nil {
 			log.Error().Err(err).Str("channel_id", job.Target.ID).Msg("Failed to get videos from YouTube channel")
 			return crawler.CrawlResult{}, err
 		}
-		
+
 		log.Info().
 			Str("channel_id", job.Target.ID).
 			Int("video_count", len(videos)).
 			Msg("Retrieved videos from specific YouTube channel")
-			
+
 	case SamplingMethodRandom:
-		// Random sampling using prefix generator
-		videos, err = c.client.GetRandomVideos(ctx, job.FromTime, job.ToTime, job.Limit)
+		// Random sampling using prefix generator with parallel processing
+		videos, err = c.client.GetRandomVideos(ctxWithTimeout, job.FromTime, job.ToTime, job.Limit)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get videos using random sampling")
 			return crawler.CrawlResult{}, err
 		}
-		
+
 		log.Info().
 			Int("video_count", len(videos)).
-			Msg("Retrieved videos using random sampling")
-			
+			Msg("Retrieved videos using parallel random sampling")
+
 	case SamplingMethodSnowball:
-		// Snowball sampling based on seed channels
+		// Snowball sampling based on seed channels with parallel processing
 		// If target ID is provided and not in seed channels, add it
 		seedChannels := c.config.SeedChannels
 		if job.Target.ID != "" {
@@ -280,51 +301,108 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 					break
 				}
 			}
-			
+
 			// If not found, add it to the beginning of seed channels
 			if !found {
 				seedChannels = append([]string{job.Target.ID}, seedChannels...)
 				log.Info().Str("target_id", job.Target.ID).Msg("Added target ID to seed channels for snowball sampling")
 			}
 		}
-		
+
 		if len(seedChannels) == 0 {
 			return crawler.CrawlResult{}, fmt.Errorf("no seed channels available for snowball sampling")
 		}
-		
-		videos, err = c.client.GetSnowballVideos(ctx, seedChannels, job.FromTime, job.ToTime, job.Limit)
+
+		videos, err = c.client.GetSnowballVideos(ctxWithTimeout, seedChannels, job.FromTime, job.ToTime, job.Limit)
 		if err != nil {
 			log.Error().Err(err).Strs("seed_channels", seedChannels).Msg("Failed to get videos using snowball sampling")
 			return crawler.CrawlResult{}, err
 		}
-		
+
 		log.Info().
 			Int("video_count", len(videos)).
 			Int("seed_channels_count", len(seedChannels)).
-			Msg("Retrieved videos using snowball sampling")
-			
+			Msg("Retrieved videos using parallel snowball sampling")
+
 	default:
 		return crawler.CrawlResult{}, fmt.Errorf("unknown sampling method: %s", c.config.SamplingMethod)
 	}
 
-	// Convert videos to posts
+	// Process videos in parallel to convert them to posts
+	const maxPostWorkers = 10 // Maximum workers for post conversion
+
+	// Use a WaitGroup to track when all post conversions are done
+	var wg sync.WaitGroup
+
+	// Create a mutex for protecting the posts slice
+	var mu sync.Mutex
 	posts := make([]model.Post, 0, len(videos))
+
+	// Create a channel for videos to process
+	videoCh := make(chan *youtubemodel.YouTubeVideo, len(videos))
+
+	// Fill the channel with videos
 	for _, video := range videos {
-		post := c.convertVideoToPost(video)
-
-		// Save the post to the state manager's storage
-		if err := c.stateManager.StorePost(video.ChannelID, post); err != nil {
-			log.Error().Err(err).Str("video_id", video.ID).Msg("Failed to save video post")
-			// Continue with next video
-		}
-
-		posts = append(posts, post)
+		videoCh <- video
 	}
+	// Close the channel to signal no more videos are coming
+	close(videoCh)
+
+	// Log the start of parallel processing
+	log.Info().
+		Int("total_videos", len(videos)).
+		Int("max_workers", maxPostWorkers).
+		Msg("Starting parallel post conversion")
+
+	// Create workers to process videos
+	for i := 0; i < maxPostWorkers; i++ {
+		wg.Add(1)
+
+		go func(workerID int) {
+			defer wg.Done()
+
+			for video := range videoCh {
+				// Convert the video to a post
+				post := c.convertVideoToPost(video)
+
+				// Store the post in state manager
+				if err := c.stateManager.StorePost(video.ChannelID, post); err != nil {
+					log.Error().
+						Err(err).
+						Str("video_id", video.ID).
+						Int("worker_id", workerID).
+						Msg("Failed to save video post")
+					// Continue with next video
+				}
+
+				// Add the post to the result array with mutex protection
+				mu.Lock()
+				posts = append(posts, post)
+				mu.Unlock()
+
+				// Log progress periodically
+				if workerID == 0 && len(posts)%10 == 0 {
+					log.Debug().
+						Int("processed_posts", len(posts)).
+						Int("total_videos", len(videos)).
+						Int("worker_id", workerID).
+						Msg("Post conversion progress")
+				}
+			}
+
+			log.Debug().
+				Int("worker_id", workerID).
+				Msg("Post conversion worker completed")
+		}(i)
+	}
+
+	// Wait for all workers to finish
+	wg.Wait()
 
 	log.Info().
 		Int("post_count", len(posts)).
 		Str("sampling_method", string(c.config.SamplingMethod)).
-		Msg("YouTube crawl completed successfully")
+		Msg("YouTube crawl with parallel processing completed successfully")
 
 	return crawler.CrawlResult{
 		Posts:  posts,
@@ -348,8 +426,8 @@ func (c *YouTubeCrawler) Close() error {
 	return nil
 }
 
-// Private cache of channel names to avoid repeated GetChannelInfo API calls within the same crawler session
-var channelNameCache = make(map[string]string)
+// Private cache of channel data to avoid repeated GetChannelInfo API calls within the same crawler session
+var channelCache = make(map[string]*youtubemodel.YouTubeChannel)
 
 // parseISO8601Duration parses YouTube's ISO 8601 duration format to seconds
 // Example: PT1H2M3S = 1 hour, 2 minutes, 3 seconds = 3723 seconds
@@ -446,19 +524,22 @@ func sanitizeFilename(filename string) string {
 
 // convertVideoToPost converts a YouTubeVideo to model.Post
 func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) model.Post {
-	// Get channel info for consistent naming - check cache first
+	// Get channel info for consistent naming and engagement data - check cache first
 	var channelName string
 	var ok bool
 
 	// For channel data
 	var channel *youtubemodel.YouTubeChannel
 
-	// Check if we already have this channel name in our cache
-	if channelName, ok = channelNameCache[video.ChannelID]; ok {
+	// Check if we already have this channel's full data in our cache
+	if channel, ok = channelCache[video.ChannelID]; ok {
+		channelName = channel.Title
 		log.Debug().
 			Str("channel_id", video.ChannelID).
 			Str("channel_name", channelName).
-			Msg("Using cached channel name for video conversion")
+			Int64("subscriber_count", channel.SubscriberCount).
+			Int64("video_count", channel.VideoCount).
+			Msg("Using cached channel data for video conversion")
 	} else {
 		// Need to fetch from API
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -471,12 +552,14 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			channelName = video.ChannelID
 		} else {
 			channelName = channel.Title
-			// Cache the result for future use
-			channelNameCache[video.ChannelID] = channelName
+			// Cache the full channel data for future use
+			channelCache[video.ChannelID] = channel
 			log.Debug().
 				Str("channel_id", video.ChannelID).
 				Str("channel_name", channelName).
-				Msg("Cached channel name for future video conversions")
+				Int64("subscriber_count", channel.SubscriberCount).
+				Int64("video_count", channel.VideoCount).
+				Msg("Cached complete channel data for future video conversions")
 		}
 	}
 
@@ -614,7 +697,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	post := model.Post{
 		PostUID:        video.ID,
 		ChannelName:    channelName,
-		ChannelID:      0, // YouTube uses string IDs, not numeric
+		ChannelID:      video.ChannelID, // Set the proper YouTube channel ID
 		URL:            videoURL,
 		PublishedAt:    video.PublishedAt,
 		CreatedAt:      time.Now(),
@@ -631,6 +714,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		SearchableText: video.Title + " " + video.Description,
 		AllText:        video.Title + " " + video.Description,
 		PostType:       []string{"video"},
+		CrawlLabel:     c.crawlLabel, // Add the crawl label to identify crawl source
 		CaptureTime:    time.Now(),
 		ThumbURL:       thumbURL,
 		MediaURL:       videoURL,
@@ -663,33 +747,21 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		channelURL = fmt.Sprintf("https://www.youtube.com/%s", video.ChannelID)
 	}
 
-	// Always fetch channel data to get engagement metrics if not already fetched
-	if ok && channel == nil {
-		// We have the channel name in cache, but need to fetch engagement data
-		// Make an API call to get the full channel data
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		var err error
-		log.Debug().
-			Str("channel_id", video.ChannelID).
-			Msg("Fetching channel data to get engagement metrics")
-
-		channel, err = c.client.GetChannelInfo(ctx, video.ChannelID)
-		if err != nil {
-			log.Warn().Err(err).Str("channel_id", video.ChannelID).Msg("Failed to get channel engagement data")
-			// Continue with limited data
-		}
-	}
+	// With our improved cache, we no longer need to fetch channel data separately
+	// as we now cache the complete channel object including engagement metrics
 
 	// Use full channel data if available
 	if channel != nil {
 		// We have channel data, so use all the details
 		post.ChannelData = model.ChannelData{
+			ChannelID:           video.ChannelID, // Set the proper YouTube channel ID
 			ChannelName:         channel.Title,
+			ChannelDescription:  channel.Description, // Add channel description
 			ChannelURL:          channelURL,
 			ChannelURLExternal:  channelURL,
 			ChannelProfileImage: channel.Thumbnails["default"],
+			CountryCode:         channel.Country, // Add country code from YouTube data
+			PublishedAt:         channel.PublishedAt, // Add channel creation date
 			ChannelEngagementData: model.EngagementData{
 				FollowerCount: int(channel.SubscriberCount),
 				ViewsCount:    int(channel.ViewCount),
@@ -698,10 +770,26 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		}
 	} else {
 		// Fallback to basic data if channel info isn't available
+		// But still include any engagement data we have from the video itself
 		post.ChannelData = model.ChannelData{
+			ChannelID:          video.ChannelID, // Set the proper YouTube channel ID
 			ChannelName:        channelName,
+			ChannelDescription: "", // Empty description when not available
 			ChannelURL:         channelURL,
 			ChannelURLExternal: channelURL,
+			CountryCode:        "", // No country data available when channel info is missing
+			PublishedAt:        video.PublishedAt, // Use video's publish date as fallback
+			ChannelEngagementData: model.EngagementData{
+				// Use the video's data to provide some engagement metrics
+				ViewsCount:    int(video.ViewCount),
+				LikeCount:     int(video.LikeCount),
+				CommentCount:  int(video.CommentCount),
+				// These will remain zero as we don't have this information
+				FollowerCount:  0,
+				FollowingCount: 0,
+				PostCount:      0,
+				ShareCount:     0,
+			},
 		}
 
 		log.Warn().

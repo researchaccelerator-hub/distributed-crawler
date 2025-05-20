@@ -28,6 +28,7 @@ type CrawlerConfig struct {
 	DaprJobMode       bool
 	MinUsers          int
 	CrawlID           string
+	CrawlLabel        string         // User-defined label for the crawl (e.g., "youtube-snowball")
 	MaxComments       int
 	MaxPosts          int
 	MaxDepth          int

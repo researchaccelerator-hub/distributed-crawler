@@ -554,7 +554,7 @@ var ParseMessage = func(
 
 	post = model.Post{
 		PostLink:       mlr.Link,
-		ChannelID:      message.ChatId,
+		ChannelID:      fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
 		PostUID:        postUid,
 		URL:            mlr.Link,
 		PublishedAt:    publishedAt,
@@ -583,9 +583,12 @@ var ParseMessage = func(
 		Outlinks:       outlinks,
 		CaptureTime:    time.Now(),
 		ChannelData: model.ChannelData{
-			ChannelID:           message.ChatId,
+			ChannelID:           fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
 			ChannelName:         chat.Title,
+			ChannelDescription:  "", // Empty description for Telegram channels
 			ChannelProfileImage: "",
+			CountryCode:         "", // No country data available for Telegram channels
+			// PublishedAt field is intentionally omitted for Telegram channels
 			ChannelEngagementData: model.EngagementData{
 				FollowerCount:  memberCount,
 				FollowingCount: 0,
