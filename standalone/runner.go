@@ -10,6 +10,7 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	crawlercommon "github.com/researchaccelerator-hub/telegram-scraper/crawler/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler/youtube"
+	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
@@ -416,8 +417,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			return
 		}
 		
+		// The adapter needs to be accessible as a youtubemodel.YouTubeClient
+		// The ClientAdapter struct implements this interface
+		var ytModelClient youtubemodel.YouTubeClient = ytAdapter
+		
 		crawlerConfig := map[string]interface{}{
-			"client": ytAdapter,
+			"client": ytModelClient,
 			"state_manager": sm,
 			"crawl_label": crawlCfg.CrawlLabel, // Pass the crawl label to be added to posts
 		}

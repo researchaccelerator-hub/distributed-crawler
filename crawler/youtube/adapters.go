@@ -25,9 +25,14 @@ func NewClientAdapter(client clientpkg.Client) (*ClientAdapter, error) {
 		return nil, fmt.Errorf("client is not a YouTube client")
 	}
 	
-	return &ClientAdapter{
+	adapter := &ClientAdapter{
 		client: client,
-	}, nil
+	}
+	
+	// Verify adapter implements YouTubeClient interface
+	var _ youtubemodel.YouTubeClient = adapter
+	
+	return adapter, nil
 }
 
 // Connect establishes a connection to the YouTube API
@@ -99,4 +104,24 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 	}
 	
 	return videos, nil
+}
+
+// GetVideosFromChannel retrieves videos from a specific YouTube channel
+func (a *ClientAdapter) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	// Reuse the GetVideos implementation since they do the same thing
+	return a.GetVideos(ctx, channelID, fromTime, toTime, limit)
+}
+
+// GetRandomVideos retrieves videos using random sampling
+func (a *ClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	// This is a simplified implementation since the underlying client doesn't support random sampling
+	// In a real implementation, this would use a more sophisticated method for random sampling
+	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("random sampling not implemented in adapter")
+}
+
+// GetSnowballVideos retrieves videos using snowball sampling
+func (a *ClientAdapter) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	// This is a simplified implementation since the underlying client doesn't support snowball sampling
+	// In a real implementation, this would implement snowball sampling
+	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("snowball sampling not implemented in adapter")
 }
