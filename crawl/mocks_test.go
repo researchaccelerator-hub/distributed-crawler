@@ -189,6 +189,15 @@ func (m *MockTDLibClient) GetUser(req *client.GetUserRequest) (*client.User, err
 	return args.Get(0).(*client.User), args.Error(1)
 }
 
+// DeleteFile implements the DeleteFile method required by TDLibClient interface
+func (m *MockTDLibClient) DeleteFile(req *client.DeleteFileRequest) (*client.Ok, error) {
+	args := m.Called(req)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*client.Ok), args.Error(1)
+}
+
 // MockMessageProcessor implements the MessageProcessor interface for testing.
 type MockMessageProcessor struct {
 	mock.Mock
@@ -290,9 +299,9 @@ func (m *MockStateManager) StorePost(channelID string, post model.Post) error {
 }
 
 // StoreFile stores a file in the state
-func (m *MockStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, error) {
+func (m *MockStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) {
 	args := m.Called(channelID, sourceFilePath, fileName)
-	return args.String(0), args.Error(1)
+	return args.String(0), args.String(1), args.Error(2)
 }
 
 // GetPreviousCrawls returns a list of previous crawl IDs

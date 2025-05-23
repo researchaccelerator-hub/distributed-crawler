@@ -101,10 +101,10 @@ func (m *MockDaprStateManager) StorePost(channelID string, post model.Post) erro
 	return nil
 }
 
-func (m *MockDaprStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, error) {
+func (m *MockDaprStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) {
 	// Call InvokeBinding to simulate storing a file
 	m.client.InvokeBinding(mock.Anything, mock.Anything)
-	return "/mock/path/" + fileName, nil
+	return "/mock/path/" + fileName, sourceFilePath, nil
 }
 
 func (m *MockDaprStateManager) HasProcessedMedia(mediaID string) (bool, error) {
@@ -265,21 +265,6 @@ func (m *MockStateManager) UpdateCrawlMetadata(crawlID string, metadata map[stri
 	return args.Error(0)
 }
 
-func (m *MockStateManager) GetPage(id string) (state.Page, error) {
-	args := m.Called(id)
-	return args.Get(0).(state.Page), args.Error(1)
-}
-
-func (m *MockStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, error) {
-	args := m.Called(channelID, sourceFilePath, fileName)
-	return args.String(0), args.Error(1)
-}
-
-func (m *MockStateManager) GetPreviousCrawls() ([]string, error) {
-	args := m.Called()
-	return args.Get(0).([]string), args.Error(1)
-}
-
 func (m *MockStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 	args := m.Called(mediaID)
 	return args.Bool(0), args.Error(1)
@@ -299,6 +284,26 @@ func (m *MockStateManager) GetMaxDepth() (int, error) {
 	args := m.Called()
 	return args.Int(0), args.Error(1)
 }
+
+
+func (m *MockStateManager) GetPage(id string) (state.Page, error) {
+	args := m.Called(id)
+	return args.Get(0).(state.Page), args.Error(1)
+}
+
+func (m *MockStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) {
+	args := m.Called(channelID, sourceFilePath, fileName)
+	return args.String(0), args.String(1), args.Error(2)
+}
+
+func (m *MockStateManager) GetPreviousCrawls() ([]string, error) {
+	args := m.Called()
+	return args.Get(0).([]string), args.Error(1)
+}
+
+
+
+
 
 // MockStateManagerFactory mocks the state.StateManagerFactory interface
 type MockStateManagerFactory struct {

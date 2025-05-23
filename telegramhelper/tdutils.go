@@ -128,6 +128,7 @@ func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath,
 //   - channelName: Name of the channel from which the file originates
 //   - fileID: Telegram's identifier for the file to download
 //   - postLink: Link to the post containing the media
+//   - cfg: CrawlerConfig containing runtime configuration options
 //
 // Returns:
 //   - The unique remote ID of the file for future reference if successful
@@ -135,14 +136,24 @@ func processMessageSafely(mymsg *client.MessageVideo) (thumbnailPath, videoPath,
 //
 // The function follows these steps:
 // 1. Check if fileID is empty (nothing to download)
-// 2. Download the file from Telegram
-// 3. Verify file existence and size limits
-// 4. Store the file via the state manager
-// 5. Clean up the local file
-// 6. Mark the media as processed to prevent redundant downloads
-func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManagementInterface, crawlid, channelName, fileID, postLink string, cfid int32) (string, error) {
+// 2. Check if media downloads should be skipped based on configuration
+// 3. Download the file from Telegram (if not skipped)
+// 4. Verify file existence and size limits
+// 5. Store the file via the state manager
+// 6. Clean up the local file
+// 7. Mark the media as processed to prevent redundant downloads
+func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManagementInterface, crawlid, channelName, fileID, postLink string, cfid int32, cfg common.CrawlerConfig) (string, error) {
 	if fileID == "" {
 		log.Debug().Msg("Empty file ID provided, nothing to fetch")
+		return "", nil
+	}
+	
+	// Check if media downloads should be skipped
+	if cfg.SkipMediaDownload {
+		log.Debug().
+			Str("file_id", fileID).
+			Str("channel", channelName).
+			Msg("Skipping media download as per configuration")
 		return "", nil
 	}
 
@@ -374,11 +385,11 @@ var ParseMessage = func(
 				thumbnailPath, videoPath, description, _, thumbnailfileid, err = processMessageSafely(content)
 
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
 				}
 
 				//if videoPath != "" {
-				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
+				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid, cfg)
 				//}
 
 				if content.Caption != nil {
@@ -398,7 +409,7 @@ var ParseMessage = func(
 					content.Photo.Sizes[0].Photo.Remote != nil {
 					thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
 					}
 				}
 			}
@@ -415,7 +426,7 @@ var ParseMessage = func(
 					content.Animation.Thumbnail.File.Remote != nil {
 					thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
 					}
 				}
 			}
@@ -447,7 +458,7 @@ var ParseMessage = func(
 				content.Sticker.Sticker.Remote != nil {
 				thumbnailPath = content.Sticker.Sticker.Remote.Id
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
 				}
 			}
 
@@ -465,7 +476,7 @@ var ParseMessage = func(
 						content.VideoNote.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
 						}
 					}
 
@@ -473,7 +484,7 @@ var ParseMessage = func(
 						content.VideoNote.Video.Remote != nil {
 						videoPath = content.VideoNote.Video.Remote.Id
 						//if videoPath != "" {
-						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, thumbnailfileid)
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, thumbnailfileid, cfg)
 						//}
 					}
 				}
@@ -489,7 +500,7 @@ var ParseMessage = func(
 						content.Document.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.Document.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
 						}
 					}
 
@@ -497,7 +508,7 @@ var ParseMessage = func(
 						content.Document.Document.Remote != nil {
 						videoPath = content.Document.Document.Remote.Id
 						//if videoPath != "" {
-						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid)
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid, cfg)
 						//}
 					}
 				}
