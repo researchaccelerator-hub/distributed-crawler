@@ -51,6 +51,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 // initialization steps fail. It will block indefinitely after starting the crawler.
 func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting crawler in standalone mode")
+	
+	log.Info().Msg("Waiting 30 seconds for Dapr sidecar to initialize...")
+	time.Sleep(30 * time.Second)
+	log.Info().Msg("Dapr sidecar initialization wait complete")
 
 	http.HandleFunc("/", handler)
 	go func() {
