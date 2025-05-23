@@ -36,7 +36,19 @@ func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerCon
 	defer poolMu.Unlock()
 	
 	if connectionPool == nil {
-		connectionPool = telegramhelper.NewConnectionPool(maxSize, storagePrefix, cfg)
+		poolConfig := telegramhelper.ConnectionPoolConfig{
+			PoolSize:          maxSize,
+			TDLibDatabaseURLs: cfg.TDLibDatabaseURLs,
+			Verbosity:         cfg.TDLibVerbosity,
+		}
+		
+		pool, err := telegramhelper.NewConnectionPool(poolConfig)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to initialize connection pool")
+			return
+		}
+		
+		connectionPool = pool
 		log.Info().Int("maxSize", maxSize).Msg("Initialized connection pool")
 	}
 }

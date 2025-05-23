@@ -32,36 +32,47 @@ type ConnectionPool struct {
 	connDirMap map[string]string // Maps connection IDs to their directory paths
 }
 
-// NewConnectionPool creates a new connection pool with the specified maximum size.
+// ConnectionPoolConfig provides configuration options for the connection pool
+type ConnectionPoolConfig struct {
+	PoolSize          int      // Number of connections to maintain in the pool
+	TDLibDatabaseURLs []string // URLs to pre-seeded TDLib database archives
+	Verbosity         int      // TDLib verbosity level (0-10, where 10 is most verbose)
+}
+
+// NewConnectionPool creates a new connection pool with the specified configuration.
 // It initializes the pool data structures and, if database URLs are provided in the
 // configuration, preloads connections to minimize startup time for subsequent requests.
 //
 // Parameters:
-//   - maxSize: The maximum number of connections the pool will manage
-//   - storagePrefix: The path prefix where TDLib databases will be stored
-//   - defaultConfig: The default configuration for all connections, including database URLs
+//   - config: The configuration for the connection pool
 //
 // Returns:
 //   - A fully initialized connection pool ready for use
-func NewConnectionPool(maxSize int, storagePrefix string, defaultConfig common.CrawlerConfig) *ConnectionPool {
+func NewConnectionPool(config ConnectionPoolConfig) (*ConnectionPool, error) {
 	pool := &ConnectionPool{
 		availableConns: make(map[string]crawler.TDLibClient),
 		inUseConns:     make(map[string]crawler.TDLibClient),
-		maxSize:        maxSize,
+		maxSize:        config.PoolSize,
 		service:        &RealTelegramService{},
-		storagePrefix:  storagePrefix,
-		defaultConfig:  defaultConfig,
-		connDirMap:     make(map[string]string),
+		storagePrefix:  ".", // Default to current directory
+		defaultConfig: common.CrawlerConfig{
+			TDLibDatabaseURLs: config.TDLibDatabaseURLs,
+			TDLibVerbosity:    config.Verbosity,
+		},
+		//storagePrefix:  storagePrefix,
+		//defaultConfig:  defaultConfig,
+		connDirMap: make(map[string]string),
 	}
 
 	// If there are pre-configured database URLs, initialize connections with them
-	if len(defaultConfig.TDLibDatabaseURLs) > 0 {
+	if len(config.TDLibDatabaseURLs) > 0 {
 		log.Info().Msgf("Initializing connection pool with %d pre-configured database URLs and max size %d",
-			len(defaultConfig.TDLibDatabaseURLs), maxSize)
-		pool.PreloadConnections(defaultConfig.TDLibDatabaseURLs)
+			len(config.TDLibDatabaseURLs), config.PoolSize)
+		pool.PreloadConnections(config.TDLibDatabaseURLs)
 	}
 
-	return pool
+	return pool, nil
+
 }
 
 // PreloadConnections initializes TDLib connections using the provided database URLs.
@@ -105,12 +116,12 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 		// Calculate the directory hash the same way the client initialization does
 		h := fnv.New32a()
 		h.Write([]byte(connConfig.TDLibDatabaseURL))
-		
+
 		// Add unique components to ensure different processes get different folders
 		// even if they share the same database URL
 		uniqueComponent := fmt.Sprintf("%d_%d_%d", time.Now().UnixNano(), os.Getpid(), p.connectionCount)
 		h.Write([]byte(uniqueComponent))
-		
+
 		dirName := fmt.Sprintf("conn_%d", h.Sum32())
 
 		// Use the directory name as the connection ID for perfect matching
@@ -194,12 +205,12 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 		// Calculate the directory hash the same way the client initialization does
 		h := fnv.New32a()
 		h.Write([]byte(connConfig.TDLibDatabaseURL))
-		
+
 		// Add unique components to ensure different processes get different folders
 		// even if they share the same database URL
 		uniqueComponent := fmt.Sprintf("%d_%d_%d", time.Now().UnixNano(), os.Getpid(), p.connectionCount)
 		h.Write([]byte(uniqueComponent))
-		
+
 		dirName := fmt.Sprintf("conn_%d", h.Sum32())
 
 		// Use the directory name as the connection ID for perfect matching

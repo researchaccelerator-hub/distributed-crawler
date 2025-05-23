@@ -1,3 +1,4 @@
+// Package dapr provides Dapr-related functionality
 package dapr
 
 import (
@@ -241,6 +242,7 @@ type JobData struct {
 	CrawlID     string   `json:"crawlId,omitempty"`
 	MaxDepth    int      `json:"maxDepth,omitempty"`
 	Concurrency int      `json:"concurrency,omitempty"`
+	Platform    string   `json:"platform,omitempty"` // Platform to crawl: "telegram", "youtube", etc.
 }
 
 // handleJob processes a job event by unmarshaling the job data and payload,
@@ -273,6 +275,7 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 			MaxDepth:    jobData.MaxDepth,
 			Concurrency: jobData.Concurrency,
 			CrawlID:     jobData.CrawlID,
+			Platform:    jobData.Platform, // Set platform from job data
 		}
 
 		// If CrawlID not provided, generate one
@@ -288,7 +291,7 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 		}
 
 		if jobData.URLFile != "" {
-			fileURLs, err := readURLsFromFile(jobData.URLFile)
+			fileURLs, err := common2.ReadURLsFromFile(jobData.URLFile)
 			if err != nil {
 				log.Error().Err(err).Msg("Failed to read URLs from file")
 				return err
@@ -336,6 +339,7 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
+		Platform:         crawlCfg.Platform, // Pass the platform information
 	}
 
 	smfact := state.DefaultStateManagerFactory{}
@@ -470,23 +474,4 @@ func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.C
 	return out, err
 }
 
-//
-//// Helper function to read URLs from a file
-//func readURLsFromFile(filename string) ([]string, error) {
-//	data, err := os.ReadFile(filename)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	lines := strings.Split(string(data), "\n")
-//	var urls []string
-//
-//	for _, line := range lines {
-//		line = strings.TrimSpace(line)
-//		if line != "" && !strings.HasPrefix(line, "#") {
-//			urls = append(urls, line)
-//		}
-//	}
-//
-//	return urls, nil
-//}
+// Note: readURLsFromFile function removed as we're now using the common implementation

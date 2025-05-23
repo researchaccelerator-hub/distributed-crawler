@@ -20,12 +20,14 @@ var (
 	crawlerCfg        common.CrawlerConfig
 	urlList           []string
 	urlFile           string
+	urlFileURL        string
 	generateCode      bool
 	crawlType         string
 	minPostDate       string
 	daprMode          string
 	minUsers          int
 	crawlID           string
+	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
 	logLevel          string   // Logging level
@@ -126,6 +128,16 @@ var rootCmd = &cobra.Command{
 		zerolog.SetGlobalLevel(level)
 		log.Info().Str("log_level", level.String()).Msg("Logger initialized")
 
+		// Check YouTube API key if platform is YouTube
+		if crawlerCfg.Platform == "youtube" {
+			if crawlerCfg.YouTubeAPIKey == "" {
+				fmt.Println("Error: When using --platform youtube, you must provide a valid YouTube API key with --youtube-api-key")
+				log.Error().Msg("YouTube API key is required but was not provided")
+			} else {
+				log.Info().Str("api_key_status", "provided").Str("api_key_length", fmt.Sprintf("%d chars", len(crawlerCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
+			}
+		}
+
 		// Load configuration file if specified
 		if cfgFile != "" {
 			viper.SetConfigFile(cfgFile)
@@ -203,6 +215,7 @@ var rootCmd = &cobra.Command{
 
 		crawlerCfg.MinUsers = viper.GetInt("crawler.minusers")
 		crawlerCfg.CrawlID = viper.GetString("crawler.crawlid")
+		crawlerCfg.CrawlLabel = viper.GetString("crawler.crawllabel")
 		crawlerCfg.MaxComments = viper.GetInt("crawler.maxcomments")
 		crawlerCfg.MaxPosts = viper.GetInt("crawler.maxposts")
 		crawlerCfg.MaxDepth = viper.GetInt("crawler.maxdepth")
@@ -225,6 +238,7 @@ var rootCmd = &cobra.Command{
 				crawlerCfg.SkipMediaDownload = viper.GetBool("crawler.skipmedia")
 			}
 
+<<<<<<< HEAD
 			log.Debug().
 				Int("min_users", crawlerCfg.MinUsers).
 				Str("crawl_id", crawlerCfg.CrawlID).
@@ -235,6 +249,19 @@ var rootCmd = &cobra.Command{
 				Int("tdlib_verbosity", crawlerCfg.TDLibVerbosity).
 				Bool("skip_media_download", crawlerCfg.SkipMediaDownload).
 				Msg("Crawler limits configured")
+=======
+		log.Debug().
+			Int("min_users", crawlerCfg.MinUsers).
+			Str("crawl_id", crawlerCfg.CrawlID).
+			Str("crawl_label", crawlerCfg.CrawlLabel).
+			Int("max_comments", crawlerCfg.MaxComments).
+			Int("max_posts", crawlerCfg.MaxPosts).
+			Int("max_depth", crawlerCfg.MaxDepth).
+			Int("max_pages", crawlerCfg.MaxPages).
+			Int("tdlib_verbosity", crawlerCfg.TDLibVerbosity).
+			Msg("Crawler limits configured")
+
+>>>>>>> feature/youtube
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
 		if minPostDateStr != "" {
@@ -292,10 +319,34 @@ var rootCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// If no specific subcommand is invoked, show help
-		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" {
+		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" && urlFileURL == "" {
 			log.Info().Msg("No arguments provided, showing help")
 			cmd.Help()
 			return
+		}
+
+		// Handle URL file from URL if provided
+		var downloadedFile string
+		if urlFileURL != "" {
+			log.Info().Str("url_file_url", urlFileURL).Msg("URL file URL provided")
+
+			var err error
+			downloadedFile, err = common.DownloadURLFile(urlFileURL)
+			if err != nil {
+				log.Fatal().Err(err).Str("url", urlFileURL).Msg("Failed to download URL file")
+				return
+			}
+
+			// Set urlFile to the downloaded file path if no local urlFile was specified
+			if urlFile == "" {
+				urlFile = downloadedFile
+				log.Info().Str("downloaded_file", urlFile).Msg("Using downloaded URL file")
+			} else {
+				log.Warn().
+					Str("url_file", urlFile).
+					Str("downloaded_file", downloadedFile).
+					Msg("Both local file and URL provided, using local file")
+			}
 		}
 
 		// Log url information if available
@@ -332,6 +383,15 @@ var rootCmd = &cobra.Command{
 				Msg("Starting in regular standalone mode")
 			standalone.StartStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
 		}
+
+		// Clean up downloaded file if needed
+		if downloadedFile != "" && downloadedFile == urlFile {
+			// Only delete if we're using the downloaded file and not a user-provided one
+			log.Debug().Str("file", downloadedFile).Msg("Cleaning up downloaded URL file")
+			if err := os.Remove(downloadedFile); err != nil {
+				log.Warn().Err(err).Str("file", downloadedFile).Msg("Failed to clean up downloaded URL file")
+			}
+		}
 	},
 }
 
@@ -354,16 +414,23 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVar(&tdlibDatabaseURLs, "tdlib-database-urls", []string{}, "Comma-separated list of URLs to pre-seeded TDLib database archives for connection pooling")
 	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 100, "Minimum number of users in a channel to crawl")
 	rootCmd.PersistentFlags().StringVar(&crawlID, "crawl-id", "", "Unique identifier for this crawl operation")
+	rootCmd.PersistentFlags().StringVar(&crawlLabel, "crawl-label", "", "User-defined label for the crawl (e.g., 'youtube-snowball')")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxComments, "max-comments", -1, "The maximum number of comments to crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxDepth, "max-depth", -1, "The maximum depth of the crawl")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPosts, "max-posts", -1, "The maximum posts to collect")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPages, "max-pages", 108000, "The maximum number of pages/channels to crawl")
 	rootCmd.PersistentFlags().IntVar(&tdlibVerbosity, "tdlib-verbosity", 1, "TDLib verbosity level (0-10, where 10 is most verbose)")
+<<<<<<< HEAD
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
+=======
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
+>>>>>>> feature/youtube
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
 	rootCmd.Flags().StringVar(&urlFile, "url-file", "", "file containing URLs to crawl (one per line)")
+	rootCmd.Flags().StringVar(&urlFileURL, "url-file-url", "", "URL to a file containing URLs to crawl (one per line)")
 	rootCmd.Flags().BoolVar(&generateCode, "generate-code", false, "run code generation after crawling")
 	rootCmd.Flags().StringVar(&crawlType, "crawl-type", "focused", "Select between focused(default) and snowball")
 
@@ -384,11 +451,14 @@ func init() {
 	viper.BindPFlag("tdlib.verbosity", rootCmd.PersistentFlags().Lookup("tdlib-verbosity"))
 	viper.BindPFlag("crawler.minusers", rootCmd.PersistentFlags().Lookup("min-users"))
 	viper.BindPFlag("crawler.crawlid", rootCmd.PersistentFlags().Lookup("crawl-id"))
+	viper.BindPFlag("crawler.crawllabel", rootCmd.PersistentFlags().Lookup("crawl-label"))
 	viper.BindPFlag("crawler.maxcomments", rootCmd.PersistentFlags().Lookup("max-comments"))
 	viper.BindPFlag("crawler.maxposts", rootCmd.PersistentFlags().Lookup("max-posts"))
 	viper.BindPFlag("crawler.maxdepth", rootCmd.PersistentFlags().Lookup("max-depth"))
 	viper.BindPFlag("crawler.maxpages", rootCmd.PersistentFlags().Lookup("max-pages"))
 	viper.BindPFlag("crawler.skipmedia", rootCmd.PersistentFlags().Lookup("skip-media"))
+	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
+	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)

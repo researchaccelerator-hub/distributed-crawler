@@ -31,7 +31,11 @@ go build -gcflags "all=-N -l" -o ./bin/app
 
 echo "Starting Delve debugger..."
 # Pass your app arguments after the double dash
-dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls "kartiny_muzei_zhivopis,pokraslampas,roxman,litvintm" --crawl-id test71 --concurrency 1 --tdlib-database-urls http://tomb218.sg-host.com/tdlib-db.tgz --min-post-date 2025-04-01 --max-comments=1 --max-depth 1 &
+# For YouTube testing:
+dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls "UC3MvNfKIhwubtPr2LMOFSZA" --crawl-id testyt101 --concurrency 2 --min-post-date 2024-01-01 --max-depth 1 --platform youtube --youtube-api-key abc --url-file-url http://tomb218.sg-host.com/df_test.csv &
+
+# For Telegram testing:
+#dlv exec ./bin/app --headless --listen=:2345 --api-version=2 --accept-multiclient -- --dapr --dapr-port 6481 --dapr-mode standalone --urls "kartiny_muzei_zhivopis,pokraslampas,roxman,litvintm" --crawl-id test71 --concurrency 1 --tdlib-database-urls http://tomb218.sg-host.com/tdlib-db.tgz --min-post-date 2025-04-01 --max-comments=1 --max-depth 1 &
 DLV_PID=$!
 
 # Give Delve a moment to initialize

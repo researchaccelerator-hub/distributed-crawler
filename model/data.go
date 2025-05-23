@@ -4,11 +4,11 @@ package model
 
 import "time"
 
-// Post represents a complete Telegram post with all associated metadata.
+// Post represents a complete Telegram or YouTube post with all associated metadata.
 // This struct is used for storing and exporting post data in a standardized format.
 type Post struct {
 	PostLink                string            `json:"post_link"`
-	ChannelID               int64             `json:"channel_id"`
+	ChannelID               string            `json:"channel_id"`
 	PostUID                 string            `json:"post_uid"`
 	URL                     string            `json:"url"`
 	PublishedAt             time.Time         `json:"published_at"`
@@ -19,6 +19,7 @@ type Post struct {
 	LikeCount               int               `json:"like_count"`
 	ShareCount              int               `json:"share_count"`
 	CommentCount            int               `json:"comment_count"`
+	CrawlLabel              string            `json:"crawl_label"`
 	ListIDs                 []interface{}     `json:"list_ids"`
 	ChannelName             string            `json:"channel_name"`
 	SearchTerms             []interface{}     `json:"search_terms"`
@@ -81,15 +82,18 @@ type Comment struct {
 	ReplyCount int            `json:"reply_count"`
 	Handle     string         `json:"handle"`
 }
-// ChannelData contains information about a Telegram channel, including
+// ChannelData contains information about a Telegram or YouTube channel, including
 // its identifying information, engagement metrics, and URLs.
 type ChannelData struct {
-	ChannelID             int64          `json:"channel_id"`
+	ChannelID             string         `json:"channel_id"`
 	ChannelName           string         `json:"channel_name"`
+	ChannelDescription    string         `json:"channel_description"`
 	ChannelProfileImage   string         `json:"channel_profile_image"`
 	ChannelEngagementData EngagementData `json:"channel_engagement_data"`
 	ChannelURLExternal    string         `json:"channel_url_external"`
 	ChannelURL            string         `json:"channel_url"`
+	CountryCode           string         `json:"country_code"`
+	PublishedAt           time.Time      `json:"published_at"`
 }
 
 // EngagementData contains metrics about a channel's audience engagement,
