@@ -231,25 +231,13 @@ var rootCmd = &cobra.Command{
 				crawlerCfg.TDLibVerbosity = 1
 			}
 		}
-			// Set skip media download flag
-			if cmd.Flags().Changed("skip-media") {
-				crawlerCfg.SkipMediaDownload = skipMediaDownload
-			} else {
-				crawlerCfg.SkipMediaDownload = viper.GetBool("crawler.skipmedia")
-			}
+		// Set skip media download flag
+		if cmd.Flags().Changed("skip-media") {
+			crawlerCfg.SkipMediaDownload = skipMediaDownload
+		} else {
+			crawlerCfg.SkipMediaDownload = viper.GetBool("crawler.skipmedia")
+		}
 
-<<<<<<< HEAD
-			log.Debug().
-				Int("min_users", crawlerCfg.MinUsers).
-				Str("crawl_id", crawlerCfg.CrawlID).
-				Int("max_comments", crawlerCfg.MaxComments).
-				Int("max_posts", crawlerCfg.MaxPosts).
-				Int("max_depth", crawlerCfg.MaxDepth).
-				Int("max_pages", crawlerCfg.MaxPages).
-				Int("tdlib_verbosity", crawlerCfg.TDLibVerbosity).
-				Bool("skip_media_download", crawlerCfg.SkipMediaDownload).
-				Msg("Crawler limits configured")
-=======
 		log.Debug().
 			Int("min_users", crawlerCfg.MinUsers).
 			Str("crawl_id", crawlerCfg.CrawlID).
@@ -259,9 +247,9 @@ var rootCmd = &cobra.Command{
 			Int("max_depth", crawlerCfg.MaxDepth).
 			Int("max_pages", crawlerCfg.MaxPages).
 			Int("tdlib_verbosity", crawlerCfg.TDLibVerbosity).
+			Bool("skip_media_download", crawlerCfg.SkipMediaDownload).
 			Msg("Crawler limits configured")
 
->>>>>>> feature/youtube
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
 		if minPostDateStr != "" {
@@ -420,12 +408,9 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPosts, "max-posts", -1, "The maximum posts to collect")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.MaxPages, "max-pages", 108000, "The maximum number of pages/channels to crawl")
 	rootCmd.PersistentFlags().IntVar(&tdlibVerbosity, "tdlib-verbosity", 1, "TDLib verbosity level (0-10, where 10 is most verbose)")
-<<<<<<< HEAD
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
-=======
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
->>>>>>> feature/youtube
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
