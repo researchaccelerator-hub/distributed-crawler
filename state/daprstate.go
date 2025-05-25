@@ -113,7 +113,7 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 	// Create Dapr client with custom connection
 	client := daprc.NewClientWithConnection(conn)
 
-	err = client.Wait(context.Background(), 180)
+	err = client.Wait(context.Background(), 300)
 	if err != nil {
 		log.Panic().Err(err).Msg("DAPR FAILED TO START WITHIN THE TIMEOUT")
 	}
