@@ -67,21 +67,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 
 	// Create a file cleaner that targets the same location as where connections are unzipped
 	// to ensure proper cleanup of temporary files
-	baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
-	cleaner := telegramhelper.NewFileCleaner(
-		baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
-		[]string{
-			".tdlib/files/videos",    // Videos directory to clean up
-			".tdlib/files/photos",    // Database directory to clean up
-			".tdlib/files/documents", // General files directory
-		},
-		5,  // cleanup interval minutes
-		15, // file age threshold minutes
-	)
 
-	if err := cleaner.Start(); err != nil {
-		log.Fatal().Err(err).Msg("Failed to start file cleaner")
-	}
 	// Collect URLs from command line arguments or file
 	var urls []string
 
@@ -120,6 +106,21 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 
 		log.Info().Msg("Using YouTube platform with the provided API key")
 	} else {
+		baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
+		cleaner := telegramhelper.NewFileCleaner(
+			baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
+			[]string{
+				".tdlib/files/videos",    // Videos directory to clean up
+				".tdlib/files/photos",    // Database directory to clean up
+				".tdlib/files/documents", // General files directory
+			},
+			5,  // cleanup interval minutes
+			15, // file age threshold minutes
+		)
+
+		if err := cleaner.Start(); err != nil {
+			log.Fatal().Err(err).Msg("Failed to start file cleaner")
+		}
 		// Default Telegram platform initialization
 		// Initialize connection pool with an appropriate size
 		poolSize := crawlerCfg.Concurrency
