@@ -23,10 +23,10 @@ type SamplingMethod string
 const (
 	// SamplingMethodChannel retrieves videos directly from a specific channel
 	SamplingMethodChannel SamplingMethod = "channel"
-	
+
 	// SamplingMethodRandom uses random sampling with prefix generator
 	SamplingMethodRandom SamplingMethod = "random"
-	
+
 	// SamplingMethodSnowball uses snowball sampling starting from seed channels
 	SamplingMethodSnowball SamplingMethod = "snowball"
 )
@@ -35,22 +35,22 @@ const (
 type YouTubeCrawlerConfig struct {
 	// SamplingMethod specifies how to sample videos (channel, random, snowball)
 	SamplingMethod SamplingMethod `json:"sampling_method"`
-	
+
 	// SeedChannels provides starting points for snowball sampling
 	SeedChannels []string `json:"seed_channels,omitempty"`
-	
+
 	// MinChannelVideos specifies the minimum number of videos a channel must have
 	MinChannelVideos int64 `json:"min_channel_videos"`
 }
 
 // YouTubeCrawler implements the crawler.Crawler interface for YouTube
 type YouTubeCrawler struct {
-	client          youtubemodel.YouTubeClient
-	stateManager    state.StateManagementInterface
-	initialized     bool
-	config          YouTubeCrawlerConfig
-	defaultConfig   YouTubeCrawlerConfig
-	crawlLabel      string // Label for the crawl operation
+	client        youtubemodel.YouTubeClient
+	stateManager  state.StateManagementInterface
+	initialized   bool
+	config        YouTubeCrawlerConfig
+	defaultConfig YouTubeCrawlerConfig
+	crawlLabel    string // Label for the crawl operation
 }
 
 // NewYouTubeCrawler creates a new YouTube crawler
@@ -58,9 +58,9 @@ func NewYouTubeCrawler() crawler.Crawler {
 	// Set default configuration
 	defaultConfig := YouTubeCrawlerConfig{
 		SamplingMethod:   SamplingMethodChannel, // Default to channel-based sampling
-		MinChannelVideos: 10,                   // Default to 10 minimum videos
+		MinChannelVideos: 10,                    // Default to 10 minimum videos
 	}
-	
+
 	return &YouTubeCrawler{
 		initialized:   false,
 		defaultConfig: defaultConfig,
@@ -97,7 +97,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 
 	// Start with default configuration
 	crawlerConfig := c.defaultConfig
-	
+
 	// Process crawler-specific configuration if provided
 	if crawlerConfigObj, ok := config["crawler_config"]; ok {
 		if crawlerConfigMap, ok := crawlerConfigObj.(map[string]interface{}); ok {
@@ -108,7 +108,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 					log.Info().Str("sampling_method", methodStr).Msg("Using configured sampling method")
 				}
 			}
-			
+
 			// Extract seed channels for snowball sampling
 			if seedChannelsObj, ok := crawlerConfigMap["seed_channels"]; ok {
 				if seedChannelsSlice, ok := seedChannelsObj.([]interface{}); ok {
@@ -122,7 +122,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 					log.Info().Strs("seed_channels", seedChannels).Msg("Using configured seed channels")
 				}
 			}
-			
+
 			// Extract minimum channel videos threshold
 			if minVideosObj, ok := crawlerConfigMap["min_channel_videos"]; ok {
 				switch v := minVideosObj.(type) {
@@ -137,13 +137,13 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 			}
 		}
 	}
-	
+
 	// Validate configuration
 	if crawlerConfig.SamplingMethod == SamplingMethodSnowball && len(crawlerConfig.SeedChannels) == 0 {
 		log.Warn().Msg("Snowball sampling method selected but no seed channels provided, using default channel sampling")
 		crawlerConfig.SamplingMethod = SamplingMethodChannel
 	}
-	
+
 	// Check for crawl label in config
 	if crawlLabelObj, ok := config["crawl_label"]; ok {
 		if crawlLabel, ok := crawlLabelObj.(string); ok {
@@ -157,7 +157,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 	c.stateManager = stateManager
 	c.config = crawlerConfig
 	c.initialized = true
-	
+
 	log.Info().
 		Str("sampling_method", string(c.config.SamplingMethod)).
 		Int64("min_channel_videos", c.config.MinChannelVideos).
@@ -215,7 +215,7 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 		ChannelURL:          channelURL,
 		ChannelURLExternal:  channelURL,
 		ChannelProfileImage: channel.Thumbnails["default"],
-		CountryCode:         channel.Country, // Add country code from YouTube data
+		CountryCode:         channel.Country,     // Add country code from YouTube data
 		PublishedAt:         channel.PublishedAt, // Add channel creation date
 		ChannelEngagementData: model.EngagementData{
 			FollowerCount: int(channel.SubscriberCount),
@@ -237,7 +237,25 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 }
 
 // FetchMessages retrieves videos from YouTube
-func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob) (crawler.CrawlResult, error) {
+func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob) (result crawler.CrawlResult, err error) {
+	// Add panic recovery to prevent crawler crashes
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error().
+				Interface("panic", r).
+				Str("channel_id", job.Target.ID).
+				Str("sampling_method", string(c.config.SamplingMethod)).
+				Msg("Panic recovered in YouTube FetchMessages - marking channel as error")
+
+			// Mark the channel as having an error and return error instead of crashing
+			err = fmt.Errorf("panic in YouTube FetchMessages for channel %s: %v", job.Target.ID, r)
+			result = crawler.CrawlResult{
+				Posts:  []model.Post{},
+				Errors: []error{err},
+			}
+		}
+	}()
+
 	if err := c.ValidateTarget(job.Target); err != nil {
 		return crawler.CrawlResult{}, err
 	}
@@ -256,7 +274,6 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 
 	// Fetch videos using the configured sampling method
 	var videos []*youtubemodel.YouTubeVideo
-	var err error
 
 	// Create a context with timeout for the entire crawl
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -760,7 +777,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			ChannelURL:          channelURL,
 			ChannelURLExternal:  channelURL,
 			ChannelProfileImage: channel.Thumbnails["default"],
-			CountryCode:         channel.Country, // Add country code from YouTube data
+			CountryCode:         channel.Country,     // Add country code from YouTube data
 			PublishedAt:         channel.PublishedAt, // Add channel creation date
 			ChannelEngagementData: model.EngagementData{
 				FollowerCount: int(channel.SubscriberCount),
@@ -777,13 +794,13 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			ChannelDescription: "", // Empty description when not available
 			ChannelURL:         channelURL,
 			ChannelURLExternal: channelURL,
-			CountryCode:        "", // No country data available when channel info is missing
+			CountryCode:        "",                // No country data available when channel info is missing
 			PublishedAt:        video.PublishedAt, // Use video's publish date as fallback
 			ChannelEngagementData: model.EngagementData{
 				// Use the video's data to provide some engagement metrics
-				ViewsCount:    int(video.ViewCount),
-				LikeCount:     int(video.LikeCount),
-				CommentCount:  int(video.CommentCount),
+				ViewsCount:   int(video.ViewCount),
+				LikeCount:    int(video.LikeCount),
+				CommentCount: int(video.CommentCount),
 				// These will remain zero as we don't have this information
 				FollowerCount:  0,
 				FollowingCount: 0,
