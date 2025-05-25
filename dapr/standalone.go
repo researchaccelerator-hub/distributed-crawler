@@ -61,8 +61,8 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		}
 	}()
 
-	log.Info().Msg("Waiting 300 seconds for Dapr sidecar to initialize...")
-	time.Sleep(300 * time.Second)
+	log.Info().Msg("Waiting 60 seconds for Dapr sidecar to initialize...")
+	time.Sleep(60 * time.Second)
 	log.Info().Msg("Dapr sidecar initialization wait complete")
 
 	// Create a file cleaner that targets the same location as where connections are unzipped
