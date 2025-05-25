@@ -52,10 +52,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting crawler in standalone mode")
 
-	log.Info().Msg("Waiting 300 seconds for Dapr sidecar to initialize...")
-	time.Sleep(300 * time.Second)
-	log.Info().Msg("Dapr sidecar initialization wait complete")
-
 	http.HandleFunc("/", handler)
 	go func() {
 		if err := http.ListenAndServe(":6481", nil); err != nil {
@@ -64,6 +60,10 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			return
 		}
 	}()
+
+	log.Info().Msg("Waiting 300 seconds for Dapr sidecar to initialize...")
+	time.Sleep(300 * time.Second)
+	log.Info().Msg("Dapr sidecar initialization wait complete")
 
 	// Create a file cleaner that targets the same location as where connections are unzipped
 	// to ensure proper cleanup of temporary files
