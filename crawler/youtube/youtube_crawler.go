@@ -445,6 +445,7 @@ func (c *YouTubeCrawler) Close() error {
 
 // Private cache of channel data to avoid repeated GetChannelInfo API calls within the same crawler session
 var channelCache = make(map[string]*youtubemodel.YouTubeChannel)
+var channelCacheMutex sync.RWMutex
 
 // parseISO8601Duration parses YouTube's ISO 8601 duration format to seconds
 // Example: PT1H2M3S = 1 hour, 2 minutes, 3 seconds = 3723 seconds
@@ -549,7 +550,11 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	var channel *youtubemodel.YouTubeChannel
 
 	// Check if we already have this channel's full data in our cache
-	if channel, ok = channelCache[video.ChannelID]; ok {
+	channelCacheMutex.RLock()
+	channel, ok = channelCache[video.ChannelID]
+	channelCacheMutex.RUnlock()
+
+	if ok {
 		channelName = channel.Title
 		log.Debug().
 			Str("channel_id", video.ChannelID).
@@ -570,7 +575,9 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		} else {
 			channelName = channel.Title
 			// Cache the full channel data for future use
+			channelCacheMutex.Lock()
 			channelCache[video.ChannelID] = channel
+			channelCacheMutex.Unlock()
 			log.Debug().
 				Str("channel_id", video.ChannelID).
 				Str("channel_name", channelName).
