@@ -24,9 +24,9 @@ import (
 
 const (
 	// Default component names
-	defaultStateStoreName = "statestore"
+	defaultStateStoreName  = "statestore"
 	telegramStorageBinding = "telegramcrawlstorage"
-	youtubeStorageBinding = "youtubecrawlstorage"
+	youtubeStorageBinding  = "youtubecrawlstorage"
 )
 
 // DaprStateManager implements StateManagementInterface using Dapr
@@ -113,12 +113,16 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 	// Create Dapr client with custom connection
 	client := daprc.NewClientWithConnection(conn)
 
+	err = client.Wait(context.TODO(), 180)
+	if err != nil {
+		log.Panic().Err(err).Msg("DAPR FAILED TO START WITHIN THE TIMEOUT")
+	}
 	// Get configuration values
 	stateStoreName := defaultStateStoreName
-	
+
 	// Determine storage binding based on platform
 	var storageBinding string
-	
+
 	// If component name is explicitly set in config, use that
 	if config.DaprConfig != nil && config.DaprConfig.ComponentName != "" {
 		storageBinding = config.DaprConfig.ComponentName
@@ -134,7 +138,7 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 			log.Info().Str("platform", config.Platform).Str("storage_binding", storageBinding).Msg("Using Telegram storage binding")
 		}
 	}
-	
+
 	// Set state store name if configured
 	if config.DaprConfig != nil && config.DaprConfig.StateStoreName != "" {
 		stateStoreName = config.DaprConfig.StateStoreName
