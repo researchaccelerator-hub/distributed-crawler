@@ -51,9 +51,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 // initialization steps fail. It will block indefinitely after starting the crawler.
 func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting crawler in standalone mode")
-	
-	log.Info().Msg("Waiting 30 seconds for Dapr sidecar to initialize...")
-	time.Sleep(30 * time.Second)
+
+	log.Info().Msg("Waiting 180 seconds for Dapr sidecar to initialize...")
+	time.Sleep(180 * time.Second)
 	log.Info().Msg("Dapr sidecar initialization wait complete")
 
 	http.HandleFunc("/", handler)
@@ -366,21 +366,21 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Create a map to track unique pages by URL to avoid processing duplicates
 	uniquePages := make(map[string]bool)
-	
+
 	// Log the original count of pages
 	originalCount := len(layer.Pages)
-	
+
 	// Process each page in the current layer, ensuring each URL is processed only once
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
 		pageToProcess := layer.Pages[pageIndex]
-		
+
 		// Skip if this URL has already been seen in this layer
 		if uniquePages[pageToProcess.URL] {
 			log.Debug().Str("url", pageToProcess.URL).Msg("Skipping duplicate page URL in current layer")
 			continue
 		}
 		uniquePages[pageToProcess.URL] = true
-		
+
 		// Add debug log for unique pages
 		log.Debug().Str("url", pageToProcess.URL).Msg("Processing unique URL from current layer")
 
@@ -586,7 +586,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				if updateErr := sm.UpdatePage(page); updateErr != nil {
 					log.Error().Err(updateErr).Msg("Failed to update page status after error")
 				}
-				
+
 				// Save the state to ensure error status is persisted
 				if err := sm.SaveState(); err != nil {
 					log.Error().Err(err).Msgf("Error saving state after marking channel %s as error", page.URL)
@@ -614,7 +614,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Wait for all pages to be processed
 	wg.Wait()
-	
+
 	// Log summary of unique pages processed
 	uniqueCount := len(uniquePages)
 	duplicateCount := originalCount - uniqueCount
@@ -622,21 +622,21 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		Int("original_page_count", originalCount).
 		Int("unique_page_count", uniqueCount).
 		Int("duplicate_page_count", duplicateCount).
-		Msgf("Processed %d unique pages (skipped %d duplicates) in layer at depth %d", 
+		Msgf("Processed %d unique pages (skipped %d duplicates) in layer at depth %d",
 			uniqueCount, duplicateCount, layer.Depth)
 
 	// After all pages in the layer are processed, append the new layer with all discovered channels
 	if len(allDiscoveredChannels) > 0 {
 		currentDepth := layer.Depth
 		newPages := make([]state.Page, 0, len(allDiscoveredChannels))
-		
+
 		// Track unique URLs in the new layer
 		newLayerUniqueURLs := make(map[string]bool)
-		
+
 		// Count of total and unique pages for logging
 		totalDiscovered := len(allDiscoveredChannels)
 		uniqueDiscovered := 0
-		
+
 		for _, channel := range allDiscoveredChannels {
 			// Skip if this URL has already been seen in the new layer
 			if newLayerUniqueURLs[channel.URL] {
@@ -645,7 +645,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			}
 			newLayerUniqueURLs[channel.URL] = true
 			uniqueDiscovered++
-			
+
 			parentID := ""
 			if channel.ParentID != "" {
 				parentID = channel.ParentID
@@ -661,14 +661,14 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			}
 			newPages = append(newPages, page)
 		}
-		
+
 		// Log the deduplication results for the new layer
 		log.Info().
 			Int("total_discovered", totalDiscovered).
 			Int("unique_discovered", uniqueDiscovered).
-			Int("duplicate_discovered", totalDiscovered - uniqueDiscovered).
-			Msgf("Deduplicated discovered channels for next layer at depth %d", currentDepth + 1)
-			
+			Int("duplicate_discovered", totalDiscovered-uniqueDiscovered).
+			Msgf("Deduplicated discovered channels for next layer at depth %d", currentDepth+1)
+
 		if err := sm.AddLayer(newPages); err != nil {
 			log.Error().Err(err).Msg("Failed to add discovered channels as new layer")
 		} else {
