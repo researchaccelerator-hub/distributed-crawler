@@ -23,7 +23,7 @@ type ConnectionPool struct {
 	availableConns  map[string]crawler.TDLibClient // Map of available connections, keyed by connection ID
 	inUseConns      map[string]crawler.TDLibClient // Map of in-use connections, keyed by connection ID
 	maxSize         int                            // Maximum number of connections the pool can manage
-	service         *RealTelegramService           // Service for creating new connections
+	service         TelegramService                // Service for creating new connections
 	storagePrefix   string                         // Prefix for storage paths
 	defaultConfig   common.CrawlerConfig           // Default configuration for new connections
 	connectionCount int                            // Counter for assigning unique connection IDs
@@ -239,8 +239,8 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 // If the connection ID doesn't exist in the in-use connections map, a warning
 // is logged and no action is taken.
 //
-// The connection is fully disconnected, its directory is removed, and a
-// fresh connection is created before being returned to the available pool.
+// The connection is kept alive and simply moved back to the available pool
+// to avoid rate limiting issues from repeated login attempts.
 func (p *ConnectionPool) ReleaseConnection(connID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -255,55 +255,11 @@ func (p *ConnectionPool) ReleaseConnection(connID string) {
 	// Remove the connection from inUse map
 	delete(p.inUseConns, connID)
 
-	// Close the existing connection
-	log.Debug().Str("connectionID", connID).Msg("Closing connection before returning to pool")
-	closeClientSafe(client)
+	// Simply move the connection back to available pool without disconnecting
+	// This prevents rate limiting issues from repeated login attempts
+	p.availableConns[connID] = client
 
-	// The connection ID is already in the correct format for the directory name
-	// Format: "conn_X" where X is a number
-	connDirName := connID
-	dirPath := filepath.Join(p.storagePrefix, "state", connDirName)
-
-	// Remove the connection directory
-	log.Debug().Str("connectionID", connID).Str("dirPath", dirPath).Msg("Removing connection directory")
-	if err := os.RemoveAll(dirPath); err != nil {
-		log.Warn().Err(err).Str("connectionID", connID).Str("dirPath", dirPath).Msg("Failed to remove connection directory")
-	}
-
-	// Create a fresh connection
-	log.Debug().Str("connectionID", connID).Msg("Creating fresh connection to replace the closed one")
-
-	// Check if we have unused database URLs available
-	var connConfig common.CrawlerConfig
-
-	if len(p.defaultConfig.TDLibDatabaseURLs) > 0 {
-		// Calculate which database URL to use based on the current connection count
-		// This ensures we cycle through all available URLs before reusing them
-		urlIndex := p.connectionCount % len(p.defaultConfig.TDLibDatabaseURLs)
-		databaseURL := p.defaultConfig.TDLibDatabaseURLs[urlIndex]
-
-		// Copy the default config and set the specific database URL for this connection
-		connConfig = p.defaultConfig
-		connConfig.TDLibDatabaseURL = databaseURL
-
-		log.Info().Str("databaseURL", databaseURL).Msg("Creating fresh connection with specified database URL")
-	} else {
-		// If no specific URLs provided, use the default config
-		connConfig = p.defaultConfig
-		log.Info().Msg("Creating fresh connection with default configuration")
-	}
-
-	// Create a new connection
-	newClient, err := p.service.InitializeClientWithConfig(p.storagePrefix, connConfig)
-	if err != nil {
-		log.Error().Err(err).Str("connectionID", connID).Msg("Failed to create fresh connection, pool capacity reduced")
-		return
-	}
-
-	// Add the fresh connection to available connections with same ID
-	p.availableConns[connID] = newClient
-
-	log.Info().Str("connectionID", connID).Msg("Fresh connection created and returned to pool")
+	log.Debug().Str("connectionID", connID).Msg("Connection returned to pool (kept alive to avoid rate limiting)")
 }
 
 // Close shuts down all connections in the pool and resets the pool to an empty state.
@@ -374,8 +330,9 @@ func closeClientSafe(client crawler.TDLibClient) {
 //   - A string identifier for the connection (same as input connID if successful)
 //   - An error if the refresh operation fails
 //
-// This method should be called when a connection exhibits errors in normal operation
-// to ensure the next use gets a clean state.
+// Note: Unlike ReleaseConnection, this method DOES disconnect and recreate
+// the connection because the existing connection is in an error state and
+// cannot be reused. This is the only case where disconnection is appropriate.
 func (p *ConnectionPool) HandleConnectionError(ctx context.Context, connID string) (crawler.TDLibClient, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

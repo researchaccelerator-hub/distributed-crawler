@@ -310,21 +310,33 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 			Msg("Retrieved and cached uploads playlist ID for channel")
 	}
 
-	// Now get videos from this playlist
+	// Now get videos from this playlist with optimized batching
 	videos := make([]*youtubemodel.YouTubeVideo, 0)
 	var nextPageToken string
 	pageCounter := 0
+
+	// Optimization: Batch video IDs for more efficient Videos.List calls
+	const maxPlaylistBatchSize = 50  // Maximum videos per playlist call
+	const maxVideosBatchSize = 50    // Maximum videos per Videos.List call
+	
+	// Accumulate video IDs and metadata across multiple playlist pages
+	batchVideoIDs := make([]string, 0, maxVideosBatchSize)
+	batchVideoMap := make(map[string]*youtubemodel.YouTubeVideo)
 
 	log.Debug().
 		Str("channel_id", channelID).
 		Str("uploads_playlist_id", uploadsPlaylistID).
 		Int("original_limit", limit).
 		Int("effective_limit", effectiveLimit).
-		Msg("Starting video retrieval from uploads playlist")
+		Msg("Starting optimized video retrieval from uploads playlist")
+
+	// Early termination flags for time-based optimization
+	consecutiveOldVideos := 0
+	const maxConsecutiveOldVideos = 5 // Stop if we see too many old videos in a row
 
 	for len(videos) < effectiveLimit {
 		pageCounter++
-		maxResultsPerPage := min(50, effectiveLimit-len(videos))
+		maxResultsPerPage := maxPlaylistBatchSize // Always use maximum for efficiency
 
 		log.Debug().
 			Str("playlist_id", uploadsPlaylistID).
@@ -365,18 +377,11 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 			Msg("Retrieved playlist items page")
 
 		// Process each video in the playlist
-		videoIDs := make([]string, 0, len(playlistResponse.Items))
-		videoMap := make(map[string]*youtubemodel.YouTubeVideo)
-
-		log.Debug().
-			Int("processing_items_count", len(playlistResponse.Items)).
-			Str("playlist_id", uploadsPlaylistID).
-			Msg("Processing playlist items")
-
 		itemsSkippedBeforeFromTime := 0
 		itemsSkippedAfterToTime := 0
 		itemsSkippedParseError := 0
 		itemsAccepted := 0
+		oldVideosInThisPage := 0
 
 		for i, item := range playlistResponse.Items {
 			// Basic item info for debugging
@@ -396,7 +401,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				continue
 			}
 
-			// Skip videos outside of the time range
+			// Early termination optimization: if videos are too old, stop processing
 			if !fromTime.IsZero() && publishedAt.Before(fromTime) {
 				log.Debug().
 					Time("published_at", publishedAt).
@@ -404,7 +409,11 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 					Str("video_id", videoID).
 					Msg("Skipping video: published before fromTime")
 				itemsSkippedBeforeFromTime++
+				oldVideosInThisPage++
+				consecutiveOldVideos++
 				continue
+			} else {
+				consecutiveOldVideos = 0 // Reset counter when we find a newer video
 			}
 
 			if publishedAt.After(effectiveToTime) {
@@ -423,9 +432,6 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				Time("to_time", effectiveToTime).
 				Str("video_id", videoID).
 				Msg("Video is within the requested time range")
-
-			// Extract video ID
-			videoIDs = append(videoIDs, videoID)
 
 			// Extract thumbnails
 			thumbnails := make(map[string]string)
@@ -480,7 +486,9 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				Language:    "", // Will be populated later from videos API
 			}
 
-			videoMap[videoID] = video
+			// Add to batch for processing
+			batchVideoIDs = append(batchVideoIDs, videoID)
+			batchVideoMap[videoID] = video
 			itemsAccepted++
 		}
 
@@ -490,45 +498,62 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 			Int("items_skipped_before_from_time", itemsSkippedBeforeFromTime).
 			Int("items_skipped_after_to_time", itemsSkippedAfterToTime).
 			Int("items_skipped_parse_error", itemsSkippedParseError).
+			Int("consecutive_old_videos", consecutiveOldVideos).
+			Int("batch_size", len(batchVideoIDs)).
 			Msg("Processed playlist items")
 
-		// If we have videos to process, fetch their statistics in batches
-		if len(videoIDs) > 0 {
-			log.Debug().
-				Int("video_ids_count", len(videoIDs)).
-				Strs("video_ids", videoIDs).
-				Msg("Fetching statistics for videos")
+		// Early termination optimization: stop if we're seeing too many old videos
+		if consecutiveOldVideos >= maxConsecutiveOldVideos {
+			log.Info().
+				Int("consecutive_old_videos", consecutiveOldVideos).
+				Int("max_allowed", maxConsecutiveOldVideos).
+				Msg("Stopping pagination due to too many consecutive old videos")
+			break
+		}
 
-			// Get statistics for these videos in a single call
+		// Process batch when it reaches optimal size or we're at the end
+		shouldProcessBatch := len(batchVideoIDs) >= maxVideosBatchSize || 
+							  playlistResponse.NextPageToken == "" ||
+							  len(videos) + len(batchVideoIDs) >= effectiveLimit
+
+		if shouldProcessBatch && len(batchVideoIDs) > 0 {
+			log.Debug().
+				Int("batch_video_ids_count", len(batchVideoIDs)).
+				Strs("video_ids", batchVideoIDs).
+				Msg("Processing batch of videos for statistics")
+
+			// Get statistics for this batch of videos in a single call
 			videosCall := c.service.Videos.List([]string{"snippet", "statistics", "contentDetails"}).
-				Id(videoIDs...).
+				Id(batchVideoIDs...).
 				Context(ctx)
 
 			videosResponse, err := videosCall.Do()
 			if err != nil {
-				log.Error().Err(err).Strs("video_ids", videoIDs).Msg("Failed to get video statistics")
+				log.Error().Err(err).Strs("video_ids", batchVideoIDs).Msg("Failed to get video statistics for batch")
 				// Continue with basic information only
 
 				// Even without statistics, add the videos to the results to avoid losing them
-				for _, video := range videoMap {
-					videos = append(videos, video)
+				for _, video := range batchVideoMap {
+					if len(videos) < effectiveLimit {
+						videos = append(videos, video)
+					}
 				}
 
 				log.Warn().
-					Int("videos_added_without_stats", len(videoMap)).
-					Msg("Added videos without statistics due to API error")
+					Int("videos_added_without_stats", len(batchVideoMap)).
+					Msg("Added batch videos without statistics due to API error")
 			} else {
 				log.Debug().
 					Int("stats_response_items", len(videosResponse.Items)).
-					Int("expected_items", len(videoIDs)).
-					Msg("Retrieved video statistics")
+					Int("expected_items", len(batchVideoIDs)).
+					Msg("Retrieved video statistics for batch")
 
 				// Track stats retrieval success rate
 				statsFound := 0
 
 				// Update videos with statistics
 				for _, videoItem := range videosResponse.Items {
-					if video, ok := videoMap[videoItem.Id]; ok {
+					if video, ok := batchVideoMap[videoItem.Id]; ok && len(videos) < effectiveLimit {
 						// Parse statistics
 						viewCount := int64(videoItem.Statistics.ViewCount)
 						likeCount := int64(videoItem.Statistics.LikeCount)
@@ -567,7 +592,10 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 					} else {
 						log.Warn().
 							Str("video_id", videoItem.Id).
-							Msg("Received statistics for video not in our map")
+							Bool("in_map", ok).
+							Int("videos_count", len(videos)).
+							Int("effective_limit", effectiveLimit).
+							Msg("Received statistics for video not in our map or limit reached")
 					}
 				}
 
@@ -580,17 +608,17 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				}
 
 				log.Info().
-					Int("total_videos_processed", len(videoMap)).
+					Int("total_videos_processed", len(batchVideoMap)).
 					Int("stats_found", statsFound).
-					Int("stats_missing", len(videoMap)-statsFound).
+					Int("stats_missing", len(batchVideoMap)-statsFound).
 					Int("videos_with_zero_comments", videosWithZeroComments).
 					Float64("zero_comments_percentage", float64(videosWithZeroComments)/float64(len(videosResponse.Items))*100).
-					Msg("Processed video statistics")
+					Msg("Processed video statistics for batch")
 
 				// Check for videos that didn't get statistics
-				if statsFound < len(videoMap) {
+				if statsFound < len(batchVideoMap) {
 					missingStats := []string{}
-					for videoID, video := range videoMap {
+					for videoID, video := range batchVideoMap {
 						// Check if this video was not processed in the stats response
 						found := false
 						for _, processedVideo := range videos {
@@ -600,7 +628,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 							}
 						}
 
-						if !found {
+						if !found && len(videos) < effectiveLimit {
 							// This video didn't get stats, add it anyway
 							videos = append(videos, video)
 							missingStats = append(missingStats, videoID)
@@ -619,8 +647,15 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 					}
 				}
 			}
-		} else {
-			log.Debug().Msg("No videos to process after time filtering")
+
+			// Clear batch for next iteration
+			batchVideoIDs = batchVideoIDs[:0]
+			batchVideoMap = make(map[string]*youtubemodel.YouTubeVideo)
+
+			log.Debug().
+				Int("videos_collected", len(videos)).
+				Int("effective_limit", effectiveLimit).
+				Msg("Completed batch processing")
 		}
 
 		// Check if we've reached the limit or no more pages
