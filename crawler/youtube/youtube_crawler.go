@@ -443,9 +443,6 @@ func (c *YouTubeCrawler) Close() error {
 	return nil
 }
 
-// Private cache of channel data to avoid repeated GetChannelInfo API calls within the same crawler session
-var channelCache = make(map[string]*youtubemodel.YouTubeChannel)
-var channelCacheMutex sync.RWMutex
 
 // parseISO8601Duration parses YouTube's ISO 8601 duration format to seconds
 // Example: PT1H2M3S = 1 hour, 2 minutes, 3 seconds = 3723 seconds
@@ -549,10 +546,13 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	// For channel data
 	var channel *youtubemodel.YouTubeChannel
 
-	// Check if we already have this channel's full data in our cache
-	channelCacheMutex.RLock()
-	channel, ok = channelCache[video.ChannelID]
-	channelCacheMutex.RUnlock()
+	// Check if we already have this channel's full data in the client's cache
+	channel, err := c.client.GetChannelInfo(context.Background(), video.ChannelID)
+	if err == nil {
+		ok = true
+	} else {
+		ok = false
+	}
 
 	if ok {
 		channelName = channel.Title
@@ -563,28 +563,9 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			Int64("video_count", channel.VideoCount).
 			Msg("Using cached channel data for video conversion")
 	} else {
-		// Need to fetch from API
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		var err error
-		channel, err = c.client.GetChannelInfo(ctx, video.ChannelID)
-		if err != nil {
-			log.Warn().Err(err).Str("channel_id", video.ChannelID).Msg("Failed to get channel info for video conversion")
-			channelName = video.ChannelID
-		} else {
-			channelName = channel.Title
-			// Cache the full channel data for future use
-			channelCacheMutex.Lock()
-			channelCache[video.ChannelID] = channel
-			channelCacheMutex.Unlock()
-			log.Debug().
-				Str("channel_id", video.ChannelID).
-				Str("channel_name", channelName).
-				Int64("subscriber_count", channel.SubscriberCount).
-				Int64("video_count", channel.VideoCount).
-				Msg("Cached complete channel data for future video conversions")
-		}
+		log.Warn().Err(err).Str("channel_id", video.ChannelID).Msg("Failed to get channel info for video conversion")
+		channelName = video.ChannelID
+		channel = nil // Set to nil so we use fallback channel data
 	}
 
 	// Calculate video engagement (likes + comments + views)

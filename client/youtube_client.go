@@ -15,14 +15,26 @@ import (
 	ytapi "google.golang.org/api/youtube/v3"
 )
 
+// BatchConfig holds dynamic batching configuration
+type BatchConfig struct {
+	MinBatchSize     int
+	MaxBatchSize     int
+	OptimalBatchSize int
+}
+
 // YouTubeDataClient implements the youtubemodel.YouTubeClient interface for accessing YouTube Data API
 type YouTubeDataClient struct {
 	service *ytapi.Service
 	apiKey  string
 
-	// Caches to minimize API calls
+	// Unified caching system
 	channelCache         map[string]*youtubemodel.YouTubeChannel
 	uploadsPlaylistCache map[string]string // Maps channelID to uploadsPlaylistID
+	videoStatsCache      map[string]*youtubemodel.YouTubeVideo // Cache for video statistics
+	cacheMutex           sync.RWMutex
+	
+	// Batch configuration
+	batchConfig BatchConfig
 	
 	// RNG instance for generating random values
 	rng *rand.Rand
@@ -39,10 +51,19 @@ func NewYouTubeDataClient(apiKey string) (*YouTubeDataClient, error) {
 	source := rand.NewSource(time.Now().UnixNano())
 	rng := rand.New(source)
 
+	// Initialize batch configuration
+	batchConfig := BatchConfig{
+		MinBatchSize:     10,
+		MaxBatchSize:     50,
+		OptimalBatchSize: 50,
+	}
+
 	return &YouTubeDataClient{
 		apiKey:               apiKey,
 		channelCache:         make(map[string]*youtubemodel.YouTubeChannel),
 		uploadsPlaylistCache: make(map[string]string),
+		videoStatsCache:      make(map[string]*youtubemodel.YouTubeVideo),
+		batchConfig:          batchConfig,
 		rng:                  rng,
 	}, nil
 }
@@ -86,14 +107,19 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		return nil, fmt.Errorf("YouTube client not connected")
 	}
 
-	// Check cache first
-	if cachedChannel, exists := c.channelCache[channelID]; exists {
+	// Check cache first with read lock
+	c.cacheMutex.RLock()
+	cachedChannel, exists := c.channelCache[channelID]
+	c.cacheMutex.RUnlock()
+	
+	if exists {
 		log.Debug().
 			Str("channel_id", channelID).
 			Str("title", cachedChannel.Title).
 			Msg("Using cached channel info instead of API call")
 		return cachedChannel, nil
 	}
+
 
 	log.Info().Str("channel_id", channelID).Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Fetching YouTube channel info")
 
@@ -172,7 +198,8 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		Country:         item.Snippet.Country, // Add country information
 	}
 
-	// Store in cache
+	// Store in cache with write lock
+	c.cacheMutex.Lock()
 	c.channelCache[channelID] = channel
 
 	// If the actual channelID from the API is different from the input channelID,
@@ -184,6 +211,8 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 			Str("actual_channel_id", item.Id).
 			Msg("Cached channel under both input ID and actual ID")
 	}
+	c.cacheMutex.Unlock()
+
 
 	log.Info().
 		Str("channel_id", channel.ID).
@@ -240,7 +269,11 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 	var uploadsPlaylistID string
 	var exists bool
 
-	if uploadsPlaylistID, exists = c.uploadsPlaylistCache[channelID]; exists {
+	c.cacheMutex.RLock()
+	uploadsPlaylistID, exists = c.uploadsPlaylistCache[channelID]
+	c.cacheMutex.RUnlock()
+
+	if exists {
 		log.Debug().
 			Str("channel_id", channelID).
 			Str("uploads_playlist_id", uploadsPlaylistID).
@@ -291,7 +324,8 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 			return nil, fmt.Errorf("no uploads playlist available for channel: %s", channelID)
 		}
 
-		// Store in cache
+		// Store in cache with write lock
+		c.cacheMutex.Lock()
 		c.uploadsPlaylistCache[channelID] = uploadsPlaylistID
 
 		// If the API returned a channel ID different from what was requested, cache it under both
@@ -303,6 +337,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				Str("uploads_playlist_id", uploadsPlaylistID).
 				Msg("Cached uploads playlist ID under both input ID and actual ID")
 		}
+		c.cacheMutex.Unlock()
 
 		log.Debug().
 			Str("channel_id", channelID).
@@ -512,24 +547,54 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 		}
 
 		// Process batch when it reaches optimal size or we're at the end
-		shouldProcessBatch := len(batchVideoIDs) >= maxVideosBatchSize || 
+		shouldProcessBatch := len(batchVideoIDs) >= c.batchConfig.OptimalBatchSize || 
 							  playlistResponse.NextPageToken == "" ||
 							  len(videos) + len(batchVideoIDs) >= effectiveLimit
 
 		if shouldProcessBatch && len(batchVideoIDs) > 0 {
+			// Check cache first for any videos we already have stats for
+			cachedVideos := make(map[string]*youtubemodel.YouTubeVideo)
+			uncachedVideoIDs := make([]string, 0, len(batchVideoIDs))
+			
+			for _, videoID := range batchVideoIDs {
+				if cachedVideo, exists := c.getCachedVideoStats(videoID); exists {
+					cachedVideos[videoID] = cachedVideo
+					log.Debug().Str("video_id", videoID).Msg("Using cached video statistics")
+				} else {
+					uncachedVideoIDs = append(uncachedVideoIDs, videoID)
+				}
+			}
+
 			log.Debug().
-				Int("batch_video_ids_count", len(batchVideoIDs)).
-				Strs("video_ids", batchVideoIDs).
-				Msg("Processing batch of videos for statistics")
+				Int("total_videos", len(batchVideoIDs)).
+				Int("cached_videos", len(cachedVideos)).
+				Int("uncached_videos", len(uncachedVideoIDs)).
+				Strs("uncached_video_ids", uncachedVideoIDs).
+				Msg("Processing batch with cache optimization")
 
-			// Get statistics for this batch of videos in a single call
-			videosCall := c.service.Videos.List([]string{"snippet", "statistics", "contentDetails"}).
-				Id(batchVideoIDs...).
-				Context(ctx)
+			// Add cached videos to results first
+			for videoID, cachedVideo := range cachedVideos {
+				if video, ok := batchVideoMap[videoID]; ok && len(videos) < effectiveLimit {
+					// Update with cached statistics
+					video.ViewCount = cachedVideo.ViewCount
+					video.LikeCount = cachedVideo.LikeCount
+					video.CommentCount = cachedVideo.CommentCount
+					video.Duration = cachedVideo.Duration
+					video.Language = cachedVideo.Language
+					videos = append(videos, video)
+				}
+			}
 
-			videosResponse, err := videosCall.Do()
-			if err != nil {
-				log.Error().Err(err).Strs("video_ids", batchVideoIDs).Msg("Failed to get video statistics for batch")
+			// Only make API call for uncached videos
+			if len(uncachedVideoIDs) > 0 {
+				// Get statistics for uncached videos only
+				videosCall := c.service.Videos.List([]string{"snippet", "statistics", "contentDetails"}).
+					Id(uncachedVideoIDs...).
+					Context(ctx)
+
+				videosResponse, err := videosCall.Do()
+				if err != nil {
+					log.Error().Err(err).Strs("video_ids", uncachedVideoIDs).Msg("Failed to get video statistics for uncached batch")
 				// Continue with basic information only
 
 				// Even without statistics, add the videos to the results to avoid losing them
@@ -573,6 +638,9 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 								video.Language = videoItem.Snippet.DefaultAudioLanguage
 							}
 						}
+
+						// Cache the video statistics for future use
+						c.cacheVideoStats(video)
 
 						// Add to results
 						videos = append(videos, video)
@@ -646,7 +714,8 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 							Msg("Some videos were added without statistics")
 					}
 				}
-			}
+				} // End of uncached videos API call
+			} // End of uncached videos check
 
 			// Clear batch for next iteration
 			batchVideoIDs = batchVideoIDs[:0]
@@ -1520,6 +1589,39 @@ func extractChannelIDsFromText(text string) []string {
 	}
 	
 	return channelIDs
+}
+
+// getDynamicBatchSize returns optimal batch size based on current progress
+func (c *YouTubeDataClient) getDynamicBatchSize(currentVideos, targetLimit int) int {
+	remaining := targetLimit - currentVideos
+	
+	// If we're close to the limit, use smaller batches
+	if remaining <= c.batchConfig.MinBatchSize {
+		return c.batchConfig.MinBatchSize
+	}
+	
+	// Use optimal batch size for normal operation
+	if remaining >= c.batchConfig.OptimalBatchSize {
+		return c.batchConfig.OptimalBatchSize
+	}
+	
+	// Use remaining count if it's between min and optimal
+	return remaining
+}
+
+// getCachedVideoStats checks if video statistics are already cached
+func (c *YouTubeDataClient) getCachedVideoStats(videoID string) (*youtubemodel.YouTubeVideo, bool) {
+	c.cacheMutex.RLock()
+	defer c.cacheMutex.RUnlock()
+	video, exists := c.videoStatsCache[videoID]
+	return video, exists
+}
+
+// cacheVideoStats stores video statistics in cache
+func (c *YouTubeDataClient) cacheVideoStats(video *youtubemodel.YouTubeVideo) {
+	c.cacheMutex.Lock()
+	defer c.cacheMutex.Unlock()
+	c.videoStatsCache[video.ID] = video
 }
 
 // GetChannelType returns "youtube" as the channel type
