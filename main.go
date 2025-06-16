@@ -29,6 +29,7 @@ var (
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
+	dateBetween       string   // Date range in format "YYYY-MM-DD,YYYY-MM-DD"
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
 	logLevel          string   // Logging level
 	tdlibVerbosity    int      // TDLib verbosity level
@@ -293,6 +294,47 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
+		// Parse date-between parameter if provided
+		dateBetweenStr := viper.GetString("crawler.datebetween")
+		if dateBetweenStr != "" {
+			log.Debug().Str("date_between", dateBetweenStr).Msg("Processing date-between parameter")
+			
+			// Parse date range in format "YYYY-MM-DD,YYYY-MM-DD"
+			dates := strings.Split(dateBetweenStr, ",")
+			if len(dates) != 2 {
+				log.Error().Str("date_between", dateBetweenStr).Msg("Invalid date-between format")
+				return fmt.Errorf("invalid date-between format, must be 'YYYY-MM-DD,YYYY-MM-DD'")
+			}
+			
+			minDate, err := time.Parse("2006-01-02", strings.TrimSpace(dates[0]))
+			if err != nil {
+				log.Error().Err(err).Str("min_date", dates[0]).Msg("Invalid min date in date-between")
+				return fmt.Errorf("invalid min date in date-between format, must be YYYY-MM-DD: %v", err)
+			}
+			
+			maxDate, err := time.Parse("2006-01-02", strings.TrimSpace(dates[1]))
+			if err != nil {
+				log.Error().Err(err).Str("max_date", dates[1]).Msg("Invalid max date in date-between")
+				return fmt.Errorf("invalid max date in date-between format, must be YYYY-MM-DD: %v", err)
+			}
+			
+			// Validate that min date is before max date
+			if minDate.After(maxDate) {
+				log.Error().
+					Time("min_date", minDate).
+					Time("max_date", maxDate).
+					Msg("Min date is after max date in date-between")
+				return fmt.Errorf("min date must be before max date in date-between")
+			}
+			
+			crawlerCfg.DateBetweenMin = minDate
+			crawlerCfg.DateBetweenMax = maxDate
+			log.Info().
+				Time("min_date", minDate).
+				Time("max_date", maxDate).
+				Msg("Date range configured for date-between filtering")
+		}
+
 		// Override with command line flags if provided
 		if cmd.Flags().Changed("dapr-mode") {
 			crawlerCfg.DaprJobMode = daprMode == "job"
@@ -398,6 +440,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.StorageRoot, "storage-root", "/tmp/crawl", "Storage root directory")
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "1m", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
+	rootCmd.PersistentFlags().StringVar(&dateBetween, "date-between", "", "Date range to crawl posts between (format: YYYY-MM-DD,YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive (deprecated, use --tdlib-database-urls)")
 	rootCmd.PersistentFlags().StringSliceVar(&tdlibDatabaseURLs, "tdlib-database-urls", []string{}, "Comma-separated list of URLs to pre-seeded TDLib database archives for connection pooling")
 	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 100, "Minimum number of users in a channel to crawl")
@@ -431,6 +474,7 @@ func init() {
 	viper.BindPFlag("storage.root", rootCmd.PersistentFlags().Lookup("storage-root"))
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("crawler.timeago", rootCmd.PersistentFlags().Lookup("time-ago"))
+	viper.BindPFlag("crawler.datebetween", rootCmd.PersistentFlags().Lookup("date-between"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
 	viper.BindPFlag("tdlib.database_urls", rootCmd.PersistentFlags().Lookup("tdlib-database-urls"))
 	viper.BindPFlag("tdlib.verbosity", rootCmd.PersistentFlags().Lookup("tdlib-verbosity"))

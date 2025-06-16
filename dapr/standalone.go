@@ -524,18 +524,33 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 											err = fmt.Errorf("failed to get YouTube channel info: %w", ytErr)
 											log.Error().Err(err).Msg("Failed to get YouTube channel info")
 										} else {
-											// Execute the crawl job
+											// Execute the crawl job with date filtering
+											var fromTime, toTime time.Time
+											if !crawlCfg.DateBetweenMin.IsZero() && !crawlCfg.DateBetweenMax.IsZero() {
+												// Use date-between range
+												fromTime = crawlCfg.DateBetweenMin
+												toTime = crawlCfg.DateBetweenMax
+												log.Info().
+													Time("date_between_min", fromTime).
+													Time("date_between_max", toTime).
+													Msg("Using date-between filter for YouTube crawl in DAPR mode")
+											} else {
+												// Use traditional min post date with current time as upper bound
+												fromTime = crawlCfg.MinPostDate
+												toTime = time.Now()
+											}
+
 											job := crawler.CrawlJob{
 												Target:   target,
-												FromTime: crawlCfg.MinPostDate,
-												ToTime:   time.Now(), // Use current time as the upper bound
+												FromTime: fromTime,
+												ToTime:   toTime,
 												Limit:    crawlCfg.MaxPosts,
 											}
 
 											// Log job details
 											log.Debug().
-												Time("from_time", job.FromTime).
-												Time("to_time", job.ToTime).
+												Time("from_time", fromTime).
+												Time("to_time", toTime).
 												Int("limit", job.Limit).
 												Msg("YouTube crawl job configured in DAPR mode")
 

@@ -486,7 +486,12 @@ func getChannelInfoWithDeps(
 		return nil, nil, err
 	}
 
-	mess, err := telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts)
+	var mess []*client.Message
+	if !cfg.DateBetweenMin.IsZero() && !cfg.DateBetweenMax.IsZero() {
+		mess, err = telegramhelper.FetchChannelMessagesWithDateRange(tdlibClient, chat.Id, page, cfg.DateBetweenMin, cfg.DateBetweenMax, cfg.MaxPosts)
+	} else {
+		mess, err = telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts)
+	}
 
 	// Get channel stats
 	totalViews := 0

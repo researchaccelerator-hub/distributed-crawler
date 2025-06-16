@@ -13,13 +13,24 @@ import (
 )
 
 func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPosts int) ([]*client.Message, error) {
+	return FetchChannelMessagesWithDateRange(tdlibClient, chatID, page, minPostDate, time.Time{}, maxPosts)
+}
+
+func FetchChannelMessagesWithDateRange(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPostDate time.Time, maxPosts int) ([]*client.Message, error) {
 	log.Debug().Msgf("Fetching messages for channel %s since %s", page.URL, minPostDate.Format("2006-01-02 15:04:05"))
+	if !maxPostDate.IsZero() {
+		log.Debug().Msgf("Max post date filter: %s", maxPostDate.Format("2006-01-02 15:04:05"))
+	}
 	var allMessages []*client.Message
 	var fromMessageId int64 = 0 // Start from the latest message
 	var oldestMessageId int64 = 0
 
 	// Convert minPostDate to Unix timestamp for comparison
 	minPostUnix := minPostDate.Unix()
+	var maxPostUnix int64
+	if !maxPostDate.IsZero() {
+		maxPostUnix = maxPostDate.Unix()
+	}
 
 	for {
 		log.Debug().Msgf("Fetching message batch for channel %s starting from ID %d at depth: %v", page.URL, fromMessageId, page.Depth)
@@ -38,17 +49,28 @@ func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *s
 			break
 		}
 
-		// Check messages and add only those newer than minPostDate
+		// Check messages and add only those within the date range
 		reachedOldMessages := false
 		for _, msg := range chatHistory.Messages {
+			msgUnix := int64(msg.Date)
+			
 			// Compare message timestamp with minPostDate
-			if int64(msg.Date) < minPostUnix {
+			if msgUnix < minPostUnix {
 				log.Debug().Msgf("Reached messages older than minimum date (message date: %v, min date: %v)",
-					time.Unix(int64(msg.Date), 0).Format("2006-01-02 15:04:05"),
+					time.Unix(msgUnix, 0).Format("2006-01-02 15:04:05"),
 					minPostDate.Format("2006-01-02 15:04:05"))
 				reachedOldMessages = true
 				break
 			}
+			
+			// Check if message is newer than maxPostDate (if specified)
+			if !maxPostDate.IsZero() && msgUnix > maxPostUnix {
+				log.Debug().Msgf("Skipping message newer than maximum date (message date: %v, max date: %v)",
+					time.Unix(msgUnix, 0).Format("2006-01-02 15:04:05"),
+					maxPostDate.Format("2006-01-02 15:04:05"))
+				continue
+			}
+			
 			allMessages = append(allMessages, msg)
 			if maxPosts > -1 && len(allMessages) == maxPosts {
 				reachedOldMessages = true

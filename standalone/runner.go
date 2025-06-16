@@ -624,17 +624,31 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 							Msg("Retrieved YouTube channel info")
 							
 						// Construct crawl job with appropriate time filters
-						// Construct crawl job with appropriate time filters
+						var fromTime, toTime time.Time
+						if !crawlCfg.DateBetweenMin.IsZero() && !crawlCfg.DateBetweenMax.IsZero() {
+							// Use date-between range
+							fromTime = crawlCfg.DateBetweenMin
+							toTime = crawlCfg.DateBetweenMax
+							log.Info().
+								Time("date_between_min", fromTime).
+								Time("date_between_max", toTime).
+								Msg("Using date-between filter for YouTube crawl")
+						} else {
+							// Use traditional min post date with current time as upper bound
+							fromTime = crawlCfg.MinPostDate
+							toTime = time.Now()
+						}
+						
 						job := crawler.CrawlJob{
 							Target:   target,
-							FromTime: crawlCfg.MinPostDate,
-							ToTime:   time.Now(), // Use current time as the upper bound
+							FromTime: fromTime,
+							ToTime:   toTime,
 							Limit:    crawlCfg.MaxPosts,
 						}
 						
 						log.Debug().
-							Time("from_time", crawlCfg.MinPostDate).
-							Time("to_time", job.ToTime).
+							Time("from_time", fromTime).
+							Time("to_time", toTime).
 							Int("limit", job.Limit).
 							Msg("YouTube crawl job configured")
 						

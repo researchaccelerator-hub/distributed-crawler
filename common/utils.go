@@ -25,6 +25,8 @@ type CrawlerConfig struct {
 	TDLibDatabaseURLs []string // Multiple database URLs for connection pooling
 	MinPostDate       time.Time
 	PostRecency       time.Time
+	DateBetweenMin    time.Time // Start date for date-between range
+	DateBetweenMax    time.Time // End date for date-between range
 	DaprJobMode       bool
 	MinUsers          int
 	CrawlID           string
