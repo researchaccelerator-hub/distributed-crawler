@@ -28,6 +28,9 @@ WORKDIR /app
 # Copy the binary from the builder stage
 COPY --from=builder /app/main .
 
+# Fix issue creating subdirectories on readonlyrootfs
+RUN umask 002
+
 # Set the entrypoint.
 ENTRYPOINT ["./main"]
 CMD ["--dapr", "--dapr-mode", "job"]
