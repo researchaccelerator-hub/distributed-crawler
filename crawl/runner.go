@@ -34,20 +34,21 @@ var poolMu sync.Mutex
 func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerConfig) {
 	poolMu.Lock()
 	defer poolMu.Unlock()
-	
+
 	if connectionPool == nil {
 		poolConfig := telegramhelper.ConnectionPoolConfig{
 			PoolSize:          maxSize,
 			TDLibDatabaseURLs: cfg.TDLibDatabaseURLs,
 			Verbosity:         cfg.TDLibVerbosity,
+			StorageRoot:       storagePrefix,
 		}
-		
+
 		pool, err := telegramhelper.NewConnectionPool(poolConfig)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to initialize connection pool")
 			return
 		}
-		
+
 		connectionPool = pool
 		log.Info().Int("maxSize", maxSize).Msg("Initialized connection pool")
 	}
@@ -90,16 +91,16 @@ func Connect(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClien
 //   - An error if the pool is not initialized or if no connections are available
 //
 // The function is thread-safe with mutex protection. If the pool is not initialized,
-// it returns an error prompting the caller to initialize the pool first or use 
+// it returns an error prompting the caller to initialize the pool first or use
 // a standalone connection.
 func GetConnectionFromPool(ctx context.Context) (crawler.TDLibClient, string, error) {
 	poolMu.Lock()
 	defer poolMu.Unlock()
-	
+
 	if connectionPool == nil {
 		return nil, "", fmt.Errorf("connection pool not initialized")
 	}
-	
+
 	return connectionPool.GetConnection(ctx)
 }
 
@@ -115,7 +116,7 @@ func GetConnectionFromPool(ctx context.Context) (crawler.TDLibClient, string, er
 func ReleaseConnectionToPool(connID string) {
 	poolMu.Lock()
 	defer poolMu.Unlock()
-	
+
 	if connectionPool != nil {
 		connectionPool.ReleaseConnection(connID)
 	}
@@ -130,7 +131,7 @@ func ReleaseConnectionToPool(connID string) {
 func CloseConnectionPool() {
 	poolMu.Lock()
 	defer poolMu.Unlock()
-	
+
 	if connectionPool != nil {
 		connectionPool.Close()
 		connectionPool = nil
@@ -149,36 +150,36 @@ func CloseConnectionPool() {
 func IsConnectionPoolInitialized() bool {
 	poolMu.Lock()
 	defer poolMu.Unlock()
-	
+
 	return connectionPool != nil
 }
 
 // GetConnectionPoolStats retrieves statistics about the current state of the
-// connection pool, including available connections, connections in use, and 
+// connection pool, including available connections, connections in use, and
 // maximum pool size.
 //
 // Returns:
 //   - A map containing statistics about the connection pool:
-//     * "available": Number of connections currently available in the pool
-//     * "inUse": Number of connections currently checked out from the pool
-//     * "maxSize": Maximum size of the pool
-//     * "initialized": 1 if the pool is initialized, 0 otherwise
+//   - "available": Number of connections currently available in the pool
+//   - "inUse": Number of connections currently checked out from the pool
+//   - "maxSize": Maximum size of the pool
+//   - "initialized": 1 if the pool is initialized, 0 otherwise
 //
 // The function is thread-safe with mutex protection and safely handles the case
 // where the pool is not initialized by returning zeroed statistics.
 func GetConnectionPoolStats() map[string]int {
 	poolMu.Lock()
 	defer poolMu.Unlock()
-	
+
 	if connectionPool == nil {
 		return map[string]int{
-			"available": 0,
-			"inUse":     0,
-			"maxSize":   0,
+			"available":   0,
+			"inUse":       0,
+			"maxSize":     0,
 			"initialized": 0,
 		}
 	}
-	
+
 	stats := connectionPool.Stats()
 	stats["initialized"] = 1
 	return stats
@@ -220,7 +221,7 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 		// Ensure we return the pooled connection when done
 		defer ReleaseConnectionToPool(connID)
 	}
-	
+
 	// Continue with the regular channel processing
 	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }
@@ -316,7 +317,7 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 	return timestamp, nil
 }
 
-// isChannelActiveWithinPeriod determines if a channel has had any activity 
+// isChannelActiveWithinPeriod determines if a channel has had any activity
 // (new messages) after the specified cutoff time.
 //
 // Parameters:
@@ -410,7 +411,7 @@ type MessageCountGetter func(client crawler.TDLibClient, messages []*client.Mess
 type MemberCountGetter func(client crawler.TDLibClient, channelUsername string) (int, error)
 
 // getChannelInfo retrieves comprehensive information about a Telegram channel.
-// This is a convenience wrapper around getChannelInfoWithDeps that supplies 
+// This is a convenience wrapper around getChannelInfoWithDeps that supplies
 // the standard implementations of the dependency functions.
 //
 // Parameters:
@@ -454,7 +455,7 @@ func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cfg commo
 //   - A slice of messages from the channel
 //   - An error if critical operations fail
 //
-// The function follows a graceful degradation approach - if non-critical stats (views, 
+// The function follows a graceful degradation approach - if non-critical stats (views,
 // message count, member count) can't be retrieved, it continues with partial information
 // rather than failing completely. This improves crawler resilience while still collecting
 // as much data as possible.
@@ -678,16 +679,16 @@ func processAllMessagesWithProcessor(
 	if err != nil {
 		return nil, err
 	}
-	
+
 	log.Info().
 		Int("total_messages", len(owner.Messages)).
 		Str("page_url", owner.URL).
 		Str("page_id", owner.ID).
 		Msg("Starting message processing after resampling")
-		
+
 	var processErrors []error
 	var fetched, deleted, processed, failed int
-	
+
 	for _, message := range owner.Messages {
 		log.Debug().
 			Int64("chat_id", message.ChatID).
@@ -695,7 +696,7 @@ func processAllMessagesWithProcessor(
 			Str("status", message.Status).
 			Str("page_id", message.PageID).
 			Msg("Evaluating message for processing")
-			
+
 		if message.Status != "fetched" && message.Status != "deleted" {
 			var discMessage *client.Message
 			for _, m := range messages {
@@ -724,7 +725,7 @@ func processAllMessagesWithProcessor(
 				Str("status", message.Status).
 				Str("page_id", message.PageID).
 				Msg("Processing message")
-				
+
 			// Try to process the message, but continue even if it fails
 			outlinks, err := processor.ProcessMessage(tdlibClient, discMessage, message.MessageID, message.ChatID, info, crawlID, channelUsername, &sm, cfg)
 
@@ -776,7 +777,7 @@ func processAllMessagesWithProcessor(
 		Str("page_url", owner.URL).
 		Str("page_id", owner.ID).
 		Msg("Message processing summary")
-	
+
 	owner.Status = "fetched"
 	err = sm.UpdatePage(*owner)
 	if err != nil {
@@ -810,7 +811,7 @@ func resampleMarker(messages []state.Message, discoveredMessages []state.Message
 		Int("existing_message_count", len(messages)).
 		Int("discovered_message_count", len(discoveredMessages)).
 		Msg("Starting message resample marking")
-		
+
 	// Build lookup map for efficient checking
 	discoveredMap := make(map[string]bool)
 	for _, msg := range discoveredMessages {
@@ -819,12 +820,12 @@ func resampleMarker(messages []state.Message, discoveredMessages []state.Message
 	}
 
 	var keptFetched, markedResample, markedDeleted int
-	
+
 	// Process each message in the original messages slice
 	for i := range messages {
 		key := fmt.Sprintf("%d_%d", messages[i].ChatID, messages[i].MessageID)
 		originalStatus := messages[i].Status
-		
+
 		// Skip messages that are already marked as "fetched" - don't reprocess them
 		if messages[i].Status == "fetched" {
 			keptFetched++
@@ -835,7 +836,7 @@ func resampleMarker(messages []state.Message, discoveredMessages []state.Message
 				Msg("Keeping message marked as fetched")
 			continue
 		}
-		
+
 		// If message exists in discoveredMessages, mark as unfetched for re-processing
 		if discoveredMap[key] {
 			messages[i].Status = "resample"
@@ -858,7 +859,7 @@ func resampleMarker(messages []state.Message, discoveredMessages []state.Message
 				Msg("Marking message as deleted")
 		}
 	}
-	
+
 	log.Debug().
 		Int("kept_fetched", keptFetched).
 		Int("marked_resample", markedResample).
@@ -890,7 +891,7 @@ func addNewMessages(discoveredMessages []state.Message, owner *state.Page) []sta
 		Str("page_url", owner.URL).
 		Str("page_id", owner.ID).
 		Msg("Adding new messages to page")
-		
+
 	var newMessages []state.Message
 	existingMessages := make(map[string]bool)
 
@@ -923,7 +924,7 @@ func addNewMessages(discoveredMessages []state.Message, owner *state.Page) []sta
 				Msg("Skipping already existing message")
 		}
 	}
-	
+
 	log.Debug().
 		Int("new_message_count", len(newMessages)).
 		Str("page_url", owner.URL).

@@ -37,6 +37,7 @@ type ConnectionPoolConfig struct {
 	PoolSize          int      // Number of connections to maintain in the pool
 	TDLibDatabaseURLs []string // URLs to pre-seeded TDLib database archives
 	Verbosity         int      // TDLib verbosity level (0-10, where 10 is most verbose)
+	StorageRoot       string
 }
 
 // NewConnectionPool creates a new connection pool with the specified configuration.
@@ -54,7 +55,7 @@ func NewConnectionPool(config ConnectionPoolConfig) (*ConnectionPool, error) {
 		inUseConns:     make(map[string]crawler.TDLibClient),
 		maxSize:        config.PoolSize,
 		service:        &RealTelegramService{},
-		storagePrefix:  ".", // Default to current directory
+		storagePrefix:  config.StorageRoot,
 		defaultConfig: common.CrawlerConfig{
 			TDLibDatabaseURLs: config.TDLibDatabaseURLs,
 			TDLibVerbosity:    config.Verbosity,
