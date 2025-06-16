@@ -640,10 +640,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 						}
 						
 						job := crawler.CrawlJob{
-							Target:   target,
-							FromTime: fromTime,
-							ToTime:   toTime,
-							Limit:    crawlCfg.MaxPosts,
+							Target:     target,
+							FromTime:   fromTime,
+							ToTime:     toTime,
+							Limit:      crawlCfg.MaxPosts,
+							SampleSize: crawlCfg.SampleSize,
 						}
 						
 						log.Debug().

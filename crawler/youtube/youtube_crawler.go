@@ -4,6 +4,7 @@ package youtube
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"regexp"
 	"strconv"
 	"strings"
@@ -421,6 +422,11 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 		Str("sampling_method", string(c.config.SamplingMethod)).
 		Msg("YouTube crawl with parallel processing completed successfully")
 
+	// Apply random sampling if requested
+	if job.SampleSize > 0 {
+		posts = applySampling(posts, job.SampleSize)
+	}
+
 	return crawler.CrawlResult{
 		Posts:  posts,
 		Errors: nil,
@@ -804,4 +810,39 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	}
 
 	return post
+}
+
+// applySampling applies random sampling to posts if sampleSize is specified
+func applySampling(posts []model.Post, sampleSize int) []model.Post {
+	if sampleSize <= 0 || len(posts) <= sampleSize {
+		return posts
+	}
+
+	log.Info().
+		Int("total_posts", len(posts)).
+		Int("sample_size", sampleSize).
+		Msg("Applying random sampling to YouTube posts")
+
+	// Create a random seed based on current time
+	rand.Seed(time.Now().UnixNano())
+
+	// Create a copy of the slice to avoid modifying the original
+	postsCopy := make([]model.Post, len(posts))
+	copy(postsCopy, posts)
+
+	// Shuffle the posts using Fisher-Yates algorithm
+	for i := len(postsCopy) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		postsCopy[i], postsCopy[j] = postsCopy[j], postsCopy[i]
+	}
+
+	// Take only the first sampleSize posts
+	sampledPosts := postsCopy[:sampleSize]
+
+	log.Info().
+		Int("original_count", len(posts)).
+		Int("sampled_count", len(sampledPosts)).
+		Msg("Random sampling completed for YouTube posts")
+
+	return sampledPosts
 }

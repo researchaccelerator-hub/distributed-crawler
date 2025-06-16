@@ -83,9 +83,10 @@ func TestPanicRecovery(t *testing.T) {
 			ID:   "test-channel",
 			Type: crawler.PlatformYouTube,
 		},
-		FromTime: time.Now().Add(-24 * time.Hour),
-		ToTime:   time.Now(),
-		Limit:    10,
+		FromTime:   time.Now().Add(-24 * time.Hour),
+		ToTime:     time.Now(),
+		Limit:      10,
+		SampleSize: 0, // No sampling for tests
 	}
 
 	// Call FetchMessages which should panic but be recovered

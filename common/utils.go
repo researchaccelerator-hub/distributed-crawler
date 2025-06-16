@@ -27,6 +27,7 @@ type CrawlerConfig struct {
 	PostRecency       time.Time
 	DateBetweenMin    time.Time // Start date for date-between range
 	DateBetweenMax    time.Time // End date for date-between range
+	SampleSize        int       // Number of posts to randomly sample when using date-between
 	DaprJobMode       bool
 	MinUsers          int
 	CrawlID           string

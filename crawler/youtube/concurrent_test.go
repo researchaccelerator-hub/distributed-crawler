@@ -87,9 +87,10 @@ func TestConcurrentMapAccess(t *testing.T) {
 						ID:   channelID,
 						Type: crawler.PlatformYouTube,
 					},
-					FromTime: time.Now().Add(-24 * time.Hour),
-					ToTime:   time.Now(),
-					Limit:    2,
+					FromTime:   time.Now().Add(-24 * time.Hour),
+					ToTime:     time.Now(),
+					Limit:      2,
+					SampleSize: 0, // No sampling for tests
 				}
 
 				_, err := c.FetchMessages(context.Background(), job)

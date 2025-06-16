@@ -488,7 +488,7 @@ func getChannelInfoWithDeps(
 
 	var mess []*client.Message
 	if !cfg.DateBetweenMin.IsZero() && !cfg.DateBetweenMax.IsZero() {
-		mess, err = telegramhelper.FetchChannelMessagesWithDateRange(tdlibClient, chat.Id, page, cfg.DateBetweenMin, cfg.DateBetweenMax, cfg.MaxPosts)
+		mess, err = telegramhelper.FetchChannelMessagesWithSampling(tdlibClient, chat.Id, page, cfg.DateBetweenMin, cfg.DateBetweenMax, cfg.MaxPosts, cfg.SampleSize)
 	} else {
 		mess, err = telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts)
 	}

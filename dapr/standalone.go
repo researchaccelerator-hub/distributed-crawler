@@ -541,10 +541,11 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 											}
 
 											job := crawler.CrawlJob{
-												Target:   target,
-												FromTime: fromTime,
-												ToTime:   toTime,
-												Limit:    crawlCfg.MaxPosts,
+												Target:     target,
+												FromTime:   fromTime,
+												ToTime:     toTime,
+												Limit:      crawlCfg.MaxPosts,
+												SampleSize: crawlCfg.SampleSize,
 											}
 
 											// Log job details

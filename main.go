@@ -30,6 +30,7 @@ var (
 	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
 	dateBetween       string   // Date range in format "YYYY-MM-DD,YYYY-MM-DD"
+	sampleSize        int      // Number of posts to randomly sample when using date-between
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
 	logLevel          string   // Logging level
 	tdlibVerbosity    int      // TDLib verbosity level
@@ -335,6 +336,15 @@ var rootCmd = &cobra.Command{
 				Msg("Date range configured for date-between filtering")
 		}
 
+		// Parse sample-size parameter if provided
+		sampleSizeValue := viper.GetInt("crawler.samplesize")
+		if sampleSizeValue > 0 {
+			crawlerCfg.SampleSize = sampleSizeValue
+			log.Info().
+				Int("sample_size", sampleSizeValue).
+				Msg("Random sampling configured for date-between filtering")
+		}
+
 		// Override with command line flags if provided
 		if cmd.Flags().Changed("dapr-mode") {
 			crawlerCfg.DaprJobMode = daprMode == "job"
@@ -441,6 +451,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "1m", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
 	rootCmd.PersistentFlags().StringVar(&dateBetween, "date-between", "", "Date range to crawl posts between (format: YYYY-MM-DD,YYYY-MM-DD)")
+	rootCmd.PersistentFlags().IntVar(&sampleSize, "sample-size", 0, "Number of posts to randomly sample when using date-between (0 means no sampling)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive (deprecated, use --tdlib-database-urls)")
 	rootCmd.PersistentFlags().StringSliceVar(&tdlibDatabaseURLs, "tdlib-database-urls", []string{}, "Comma-separated list of URLs to pre-seeded TDLib database archives for connection pooling")
 	rootCmd.PersistentFlags().IntVar(&minUsers, "min-users", 100, "Minimum number of users in a channel to crawl")
@@ -475,6 +486,7 @@ func init() {
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("crawler.timeago", rootCmd.PersistentFlags().Lookup("time-ago"))
 	viper.BindPFlag("crawler.datebetween", rootCmd.PersistentFlags().Lookup("date-between"))
+	viper.BindPFlag("crawler.samplesize", rootCmd.PersistentFlags().Lookup("sample-size"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
 	viper.BindPFlag("tdlib.database_urls", rootCmd.PersistentFlags().Lookup("tdlib-database-urls"))
 	viper.BindPFlag("tdlib.verbosity", rootCmd.PersistentFlags().Lookup("tdlib-verbosity"))

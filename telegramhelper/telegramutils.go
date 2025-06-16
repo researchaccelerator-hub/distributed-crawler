@@ -7,6 +7,7 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
+	"math/rand"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -17,6 +18,10 @@ func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *s
 }
 
 func FetchChannelMessagesWithDateRange(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPostDate time.Time, maxPosts int) ([]*client.Message, error) {
+	return FetchChannelMessagesWithSampling(tdlibClient, chatID, page, minPostDate, maxPostDate, maxPosts, 0)
+}
+
+func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPostDate time.Time, maxPosts int, sampleSize int) ([]*client.Message, error) {
 	log.Debug().Msgf("Fetching messages for channel %s since %s", page.URL, minPostDate.Format("2006-01-02 15:04:05"))
 	if !maxPostDate.IsZero() {
 		log.Debug().Msgf("Max post date filter: %s", maxPostDate.Format("2006-01-02 15:04:05"))
@@ -100,6 +105,40 @@ func FetchChannelMessagesWithDateRange(tdlibClient crawler.TDLibClient, chatID i
 
 	log.Debug().Msgf("Fetched a total of %d messages for channel %s since %s",
 		len(allMessages), page.URL, minPostDate.Format("2006-01-02 15:04:05"))
+
+	// Apply random sampling if sampleSize is specified and we have more messages than requested
+	if sampleSize > 0 && len(allMessages) > sampleSize {
+		log.Info().
+			Int("total_messages", len(allMessages)).
+			Int("sample_size", sampleSize).
+			Str("channel", page.URL).
+			Msg("Applying random sampling to messages")
+
+		// Create a random seed based on current time
+		rand.Seed(time.Now().UnixNano())
+
+		// Create a copy of the slice to avoid modifying the original
+		messagesCopy := make([]*client.Message, len(allMessages))
+		copy(messagesCopy, allMessages)
+
+		// Shuffle the messages using Fisher-Yates algorithm
+		for i := len(messagesCopy) - 1; i > 0; i-- {
+			j := rand.Intn(i + 1)
+			messagesCopy[i], messagesCopy[j] = messagesCopy[j], messagesCopy[i]
+		}
+
+		// Take only the first sampleSize messages
+		sampledMessages := messagesCopy[:sampleSize]
+
+		log.Info().
+			Int("original_count", len(allMessages)).
+			Int("sampled_count", len(sampledMessages)).
+			Str("channel", page.URL).
+			Msg("Random sampling completed")
+
+		return sampledMessages, nil
+	}
+
 	return allMessages, nil
 }
 
