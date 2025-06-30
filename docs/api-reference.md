@@ -191,31 +191,105 @@ TDLib logging verbosity (0-10). Higher values provide more detailed Telegram cli
 
 ## Environment Variables
 
-All environment variables are prefixed with `CRAWLER_` and override configuration file values.
+Environment variables provide an alternative way to configure the crawler. Variables prefixed with `CRAWLER_` override configuration file values, while platform-specific variables are required for authentication.
 
 ### Telegram API Configuration
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TG_API_ID` | Yes* | Telegram API ID from my.telegram.org |
-| `TG_API_HASH` | Yes* | Telegram API Hash from my.telegram.org |
-| `TG_PHONE_NUMBER` | Yes* | Phone number with country code (e.g., +12025551234) |
-| `TG_PHONE_CODE` | Yes* | OTP sent to your Telegram app |
 
-*Required only for Telegram platform
+**Required when using `--platform telegram`**
+
+**`TG_API_ID`** *(required)*  
+Your Telegram API ID obtained from [my.telegram.org](https://my.telegram.org).  
+Create a new application to get your API credentials.
+
+*Example:* `export TG_API_ID="12345678"`
+
+**`TG_API_HASH`** *(required)*  
+Your Telegram API Hash from the same application.
+
+*Example:* `export TG_API_HASH="abcdef1234567890abcdef1234567890"`
+
+**`TG_PHONE_NUMBER`** *(required)*  
+Your phone number with country code for Telegram authentication.
+
+*Example:* `export TG_PHONE_NUMBER="+1234567890"`
+
+**`TG_PHONE_CODE`** *(required during first auth)*  
+One-time password sent to your Telegram app during initial authentication.
+
+*Example:* `export TG_PHONE_CODE="123456"`
+
+---
 
 ### Azure Blob Storage Configuration
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `CONTAINER_NAME` | No | Azure Blob Storage container name |
-| `BLOB_NAME` | No | Blob path for storing data |
-| `AZURE_STORAGE_ACCOUNT_URL` | No | Azure Storage account URL |
 
-### System Configuration
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CRAWLER_LOGGING_LEVEL` | `"debug"` | Override log level |
-| `CRAWLER_STORAGE_ROOT` | `"/tmp/crawl"` | Override storage root |
-| `CRAWLER_CONCURRENCY` | `1` | Override concurrency setting |
+**Optional - for cloud storage integration**
+
+**`CONTAINER_NAME`** *(optional)*  
+Azure Blob Storage container name for storing crawled data.
+
+*Example:* `export CONTAINER_NAME="crawl-data"`
+
+**`BLOB_NAME`** *(optional)*  
+Blob path prefix for organizing stored data.
+
+*Example:* `export BLOB_NAME="crawls/2024/"`
+
+**`AZURE_STORAGE_ACCOUNT_URL`** *(optional)*  
+Azure Storage account URL for blob access.
+
+*Example:* `export AZURE_STORAGE_ACCOUNT_URL="https://myaccount.blob.core.windows.net"`
+
+---
+
+### System Configuration Overrides
+
+**Override command-line options with environment variables**
+
+**`CRAWLER_LOGGING_LEVEL`** • *Default: `debug`*  
+Override the default logging level.
+
+*Options:* `trace` | `debug` | `info` | `warn` | `error`  
+*Example:* `export CRAWLER_LOGGING_LEVEL="info"`
+
+**`CRAWLER_STORAGE_ROOT`** • *Default: `/tmp/crawl`*  
+Override the default storage directory.
+
+*Example:* `export CRAWLER_STORAGE_ROOT="/data/crawls"`
+
+**`CRAWLER_CONCURRENCY`** • *Default: `1`*  
+Override the default concurrency level.
+
+*Example:* `export CRAWLER_CONCURRENCY="5"`
+
+### Environment Setup Examples
+
+**Development Environment:**
+```bash
+# Telegram API credentials
+export TG_API_ID="12345678"
+export TG_API_HASH="your_api_hash_here"
+export TG_PHONE_NUMBER="+1234567890"
+
+# Local development settings
+export CRAWLER_LOGGING_LEVEL="debug"
+export CRAWLER_STORAGE_ROOT="./local-storage"
+```
+
+**Production Environment:**
+```bash
+# Telegram API credentials
+export TG_API_ID="12345678"
+export TG_API_HASH="your_api_hash_here"
+export TG_PHONE_NUMBER="+1234567890"
+
+# Azure storage for production
+export CONTAINER_NAME="production-crawl-data"
+export AZURE_STORAGE_ACCOUNT_URL="https://myaccount.blob.core.windows.net"
+
+# Production settings
+export CRAWLER_LOGGING_LEVEL="info"
+export CRAWLER_CONCURRENCY="10"
+```
 
 ## Configuration File
 

@@ -49,6 +49,8 @@ navigation:
     url: "api-reference"
   - title: "Examples"
     url: "examples"
+  - title: "Community"
+    url: "community"
 
 # GitHub repository
 repository: "researchaccelerator-hub/distributed-crawler"

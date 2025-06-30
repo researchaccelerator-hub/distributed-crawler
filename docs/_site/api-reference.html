@@ -64,6 +64,8 @@
           
             <a class="page-link" href="/distributed-crawler/examples">Examples</a>
           
+            <a class="page-link" href="/distributed-crawler/community">Community</a>
+          
         </div>
       </nav>
     </div>
@@ -271,31 +273,103 @@ TDLib logging verbosity (0-10). Higher values provide more detailed Telegram cli
 
 <h2 id="environment-variables">Environment Variables</h2>
 
-<p>All environment variables are prefixed with <code class="language-plaintext highlighter-rouge">CRAWLER_</code> and override configuration file values.</p>
+<p>Environment variables provide an alternative way to configure the crawler. Variables prefixed with <code class="language-plaintext highlighter-rouge">CRAWLER_</code> override configuration file values, while platform-specific variables are required for authentication.</p>
 
 <h3 id="telegram-api-configuration">Telegram API Configuration</h3>
-<p>| Variable | Required | Description |
-|———-|———-|————-|
-| <code class="language-plaintext highlighter-rouge">TG_API_ID</code> | Yes* | Telegram API ID from my.telegram.org |
-| <code class="language-plaintext highlighter-rouge">TG_API_HASH</code> | Yes* | Telegram API Hash from my.telegram.org |
-| <code class="language-plaintext highlighter-rouge">TG_PHONE_NUMBER</code> | Yes* | Phone number with country code (e.g., +12025551234) |
-| <code class="language-plaintext highlighter-rouge">TG_PHONE_CODE</code> | Yes* | OTP sent to your Telegram app |</p>
 
-<p>*Required only for Telegram platform</p>
+<p><strong>Required when using <code class="language-plaintext highlighter-rouge">--platform telegram</code></strong></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">TG_API_ID</code></strong> <em>(required)</em><br />
+Your Telegram API ID obtained from <a href="https://my.telegram.org">my.telegram.org</a>.<br />
+Create a new application to get your API credentials.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export TG_API_ID="12345678"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">TG_API_HASH</code></strong> <em>(required)</em><br />
+Your Telegram API Hash from the same application.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export TG_API_HASH="abcdef1234567890abcdef1234567890"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">TG_PHONE_NUMBER</code></strong> <em>(required)</em><br />
+Your phone number with country code for Telegram authentication.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export TG_PHONE_NUMBER="+1234567890"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">TG_PHONE_CODE</code></strong> <em>(required during first auth)</em><br />
+One-time password sent to your Telegram app during initial authentication.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export TG_PHONE_CODE="123456"</code></p>
+
+<hr />
 
 <h3 id="azure-blob-storage-configuration">Azure Blob Storage Configuration</h3>
-<p>| Variable | Required | Description |
-|———-|———-|————-|
-| <code class="language-plaintext highlighter-rouge">CONTAINER_NAME</code> | No | Azure Blob Storage container name |
-| <code class="language-plaintext highlighter-rouge">BLOB_NAME</code> | No | Blob path for storing data |
-| <code class="language-plaintext highlighter-rouge">AZURE_STORAGE_ACCOUNT_URL</code> | No | Azure Storage account URL |</p>
 
-<h3 id="system-configuration-1">System Configuration</h3>
-<p>| Variable | Default | Description |
-|———-|———|————-|
-| <code class="language-plaintext highlighter-rouge">CRAWLER_LOGGING_LEVEL</code> | <code class="language-plaintext highlighter-rouge">"debug"</code> | Override log level |
-| <code class="language-plaintext highlighter-rouge">CRAWLER_STORAGE_ROOT</code> | <code class="language-plaintext highlighter-rouge">"/tmp/crawl"</code> | Override storage root |
-| <code class="language-plaintext highlighter-rouge">CRAWLER_CONCURRENCY</code> | <code class="language-plaintext highlighter-rouge">1</code> | Override concurrency setting |</p>
+<p><strong>Optional - for cloud storage integration</strong></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">CONTAINER_NAME</code></strong> <em>(optional)</em><br />
+Azure Blob Storage container name for storing crawled data.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export CONTAINER_NAME="crawl-data"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">BLOB_NAME</code></strong> <em>(optional)</em><br />
+Blob path prefix for organizing stored data.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export BLOB_NAME="crawls/2024/"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">AZURE_STORAGE_ACCOUNT_URL</code></strong> <em>(optional)</em><br />
+Azure Storage account URL for blob access.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export AZURE_STORAGE_ACCOUNT_URL="https://myaccount.blob.core.windows.net"</code></p>
+
+<hr />
+
+<h3 id="system-configuration-overrides">System Configuration Overrides</h3>
+
+<p><strong>Override command-line options with environment variables</strong></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">CRAWLER_LOGGING_LEVEL</code></strong> • <em>Default: <code class="language-plaintext highlighter-rouge">debug</code></em><br />
+Override the default logging level.</p>
+
+<p><em>Options:</em> <code class="language-plaintext highlighter-rouge">trace</code> | <code class="language-plaintext highlighter-rouge">debug</code> | <code class="language-plaintext highlighter-rouge">info</code> | <code class="language-plaintext highlighter-rouge">warn</code> | <code class="language-plaintext highlighter-rouge">error</code><br />
+<em>Example:</em> <code class="language-plaintext highlighter-rouge">export CRAWLER_LOGGING_LEVEL="info"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">CRAWLER_STORAGE_ROOT</code></strong> • <em>Default: <code class="language-plaintext highlighter-rouge">/tmp/crawl</code></em><br />
+Override the default storage directory.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export CRAWLER_STORAGE_ROOT="/data/crawls"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">CRAWLER_CONCURRENCY</code></strong> • <em>Default: <code class="language-plaintext highlighter-rouge">1</code></em><br />
+Override the default concurrency level.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">export CRAWLER_CONCURRENCY="5"</code></p>
+
+<h3 id="environment-setup-examples">Environment Setup Examples</h3>
+
+<p><strong>Development Environment:</strong></p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Telegram API credentials</span>
+<span class="nb">export </span><span class="nv">TG_API_ID</span><span class="o">=</span><span class="s2">"12345678"</span>
+<span class="nb">export </span><span class="nv">TG_API_HASH</span><span class="o">=</span><span class="s2">"your_api_hash_here"</span>
+<span class="nb">export </span><span class="nv">TG_PHONE_NUMBER</span><span class="o">=</span><span class="s2">"+1234567890"</span>
+
+<span class="c"># Local development settings</span>
+<span class="nb">export </span><span class="nv">CRAWLER_LOGGING_LEVEL</span><span class="o">=</span><span class="s2">"debug"</span>
+<span class="nb">export </span><span class="nv">CRAWLER_STORAGE_ROOT</span><span class="o">=</span><span class="s2">"./local-storage"</span>
+</code></pre></div></div>
+
+<p><strong>Production Environment:</strong></p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Telegram API credentials</span>
+<span class="nb">export </span><span class="nv">TG_API_ID</span><span class="o">=</span><span class="s2">"12345678"</span>
+<span class="nb">export </span><span class="nv">TG_API_HASH</span><span class="o">=</span><span class="s2">"your_api_hash_here"</span>
+<span class="nb">export </span><span class="nv">TG_PHONE_NUMBER</span><span class="o">=</span><span class="s2">"+1234567890"</span>
+
+<span class="c"># Azure storage for production</span>
+<span class="nb">export </span><span class="nv">CONTAINER_NAME</span><span class="o">=</span><span class="s2">"production-crawl-data"</span>
+<span class="nb">export </span><span class="nv">AZURE_STORAGE_ACCOUNT_URL</span><span class="o">=</span><span class="s2">"https://myaccount.blob.core.windows.net"</span>
+
+<span class="c"># Production settings</span>
+<span class="nb">export </span><span class="nv">CRAWLER_LOGGING_LEVEL</span><span class="o">=</span><span class="s2">"info"</span>
+<span class="nb">export </span><span class="nv">CRAWLER_CONCURRENCY</span><span class="o">=</span><span class="s2">"10"</span>
+</code></pre></div></div>
 
 <h2 id="configuration-file">Configuration File</h2>
 
