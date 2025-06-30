@@ -84,78 +84,190 @@
 <h3 id="global-options">Global Options</h3>
 
 <h4 id="execution-mode">Execution Mode</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--mode</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Execution mode: <code class="language-plaintext highlighter-rouge">standalone</code>, <code class="language-plaintext highlighter-rouge">dapr-standalone</code>, <code class="language-plaintext highlighter-rouge">orchestrator</code>, <code class="language-plaintext highlighter-rouge">worker</code> |
-| <code class="language-plaintext highlighter-rouge">--worker-id</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Worker identifier for distributed mode (required for worker mode) |</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--mode</code></strong> <em>(string)</em><br />
+Execution mode for the crawler. Choose based on your deployment needs:</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">standalone</code> - Single process execution (default)</li>
+  <li><code class="language-plaintext highlighter-rouge">dapr-standalone</code> - Single process with DAPR integration</li>
+  <li><code class="language-plaintext highlighter-rouge">orchestrator</code> - Distributes work to multiple workers</li>
+  <li><code class="language-plaintext highlighter-rouge">worker</code> - Processes jobs from orchestrator</li>
+</ul>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--mode orchestrator</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--worker-id</code></strong> <em>(string)</em><br />
+Unique identifier for worker instances in distributed mode. Required when using <code class="language-plaintext highlighter-rouge">--mode worker</code>.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--worker-id "worker-01"</code></p>
+
+<hr />
 
 <h4 id="data-sources">Data Sources</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--urls</code> | []string | <code class="language-plaintext highlighter-rouge">[]</code> | Comma-separated list of channel URLs/IDs to scrape |
-| <code class="language-plaintext highlighter-rouge">--url-file</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | File containing URLs to crawl (one per line) |
-| <code class="language-plaintext highlighter-rouge">--url-file-url</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | URL to a file containing URLs to crawl |</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--urls</code></strong> <em>(comma-separated list)</em><br />
+Channel URLs or IDs to scrape. Supports multiple formats per platform.</p>
+
+<p><em>Examples:</em></p>
+<ul>
+  <li>Telegram: <code class="language-plaintext highlighter-rouge">--urls "channel1,channel2,@username"</code></li>
+  <li>YouTube: <code class="language-plaintext highlighter-rouge">--urls "UCxxx123,UCyyy456,@handle"</code></li>
+</ul>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--url-file</code></strong> <em>(string)</em><br />
+Path to file containing URLs (one per line). Useful for large channel lists.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--url-file "channels.txt"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--url-file-url</code></strong> <em>(string)</em><br />
+HTTP URL to a file containing URLs to crawl. Remote channel list support.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--url-file-url "https://example.com/channels.txt"</code></p>
+
+<hr />
 
 <h4 id="platform-configuration">Platform Configuration</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--platform</code> | string | <code class="language-plaintext highlighter-rouge">"telegram"</code> | Platform to crawl: <code class="language-plaintext highlighter-rouge">telegram</code>, <code class="language-plaintext highlighter-rouge">youtube</code> |
-| <code class="language-plaintext highlighter-rouge">--youtube-api-key</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | API key for YouTube Data API (required for YouTube) |</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--platform</code></strong> <em>(string)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">telegram</code></em><br />
+Target platform for crawling.</p>
+
+<p><em>Options:</em> <code class="language-plaintext highlighter-rouge">telegram</code> | <code class="language-plaintext highlighter-rouge">youtube</code><br />
+<em>Example:</em> <code class="language-plaintext highlighter-rouge">--platform youtube</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--youtube-api-key</code></strong> <em>(string)</em><br />
+API key for YouTube Data API v3. Required when using <code class="language-plaintext highlighter-rouge">--platform youtube</code>.<br />
+Get your key at <a href="https://console.cloud.google.com/">Google Cloud Console</a>.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--youtube-api-key "AIza..."</code></p>
+
+<hr />
 
 <h4 id="crawling-limits">Crawling Limits</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--max-posts</code> | int | <code class="language-plaintext highlighter-rouge">-1</code> | Maximum number of posts to collect per channel (-1 = unlimited) |
-| <code class="language-plaintext highlighter-rouge">--max-comments</code> | int | <code class="language-plaintext highlighter-rouge">-1</code> | Maximum number of comments to crawl per post (-1 = unlimited) |
-| <code class="language-plaintext highlighter-rouge">--max-depth</code> | int | <code class="language-plaintext highlighter-rouge">-1</code> | Maximum depth of the crawl (-1 = unlimited) |
-| <code class="language-plaintext highlighter-rouge">--max-pages</code> | int | <code class="language-plaintext highlighter-rouge">108000</code> | Maximum number of pages/channels to crawl |
-| <code class="language-plaintext highlighter-rouge">--min-users</code> | int | <code class="language-plaintext highlighter-rouge">100</code> | Minimum number of users in a channel to crawl |</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--max-posts</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">-1</code> (unlimited)</em><br />
+Maximum posts to collect per channel. Use to limit resource usage.</p>
+
+<p><em>Examples:</em></p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">--max-posts 1000</code> - Limit to 1000 posts per channel</li>
+  <li><code class="language-plaintext highlighter-rouge">--max-posts -1</code> - No limit</li>
+</ul>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--max-comments</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">-1</code> (unlimited)</em><br />
+Maximum comments to collect per post.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--max-comments 500</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--max-depth</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">-1</code> (unlimited)</em><br />
+Maximum crawl depth for discovery operations.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--max-pages</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">108000</code></em><br />
+Maximum number of pages/channels to process in total.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--min-users</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">100</code></em><br />
+Skip channels with fewer subscribers/members than this threshold.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--min-users 1000</code> - Only crawl channels with 1000+ members</p>
+
+<hr />
 
 <h4 id="time-filtering">Time Filtering</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--min-post-date</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Minimum post date to crawl (format: YYYY-MM-DD) |
-| <code class="language-plaintext highlighter-rouge">--time-ago</code> | string | <code class="language-plaintext highlighter-rouge">"1m"</code> | Only posts newer than this (e.g., <code class="language-plaintext highlighter-rouge">30d</code>, <code class="language-plaintext highlighter-rouge">6h</code>, <code class="language-plaintext highlighter-rouge">2w</code>, <code class="language-plaintext highlighter-rouge">1m</code>, <code class="language-plaintext highlighter-rouge">1y</code>) |
-| <code class="language-plaintext highlighter-rouge">--date-between</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Date range (format: YYYY-MM-DD,YYYY-MM-DD) |
-| <code class="language-plaintext highlighter-rouge">--sample-size</code> | int | <code class="language-plaintext highlighter-rouge">0</code> | Random sample size when using date-between (0 = no sampling) |</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--time-ago</code></strong> <em>(duration)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">1m</code></em><br />
+Only collect posts newer than specified duration.</p>
+
+<p><em>Formats:</em> <code class="language-plaintext highlighter-rouge">30d</code> (days) | <code class="language-plaintext highlighter-rouge">6h</code> (hours) | <code class="language-plaintext highlighter-rouge">2w</code> (weeks) | <code class="language-plaintext highlighter-rouge">1m</code> (months) | <code class="language-plaintext highlighter-rouge">1y</code> (years)<br />
+<em>Example:</em> <code class="language-plaintext highlighter-rouge">--time-ago "30d"</code> - Posts from last 30 days</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--min-post-date</code></strong> <em>(date)</em><br />
+Minimum post date to crawl. Format: YYYY-MM-DD</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--min-post-date "2023-01-01"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--date-between</code></strong> <em>(date range)</em><br />
+Crawl posts within specific date range. Format: YYYY-MM-DD,YYYY-MM-DD</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--date-between "2023-01-01,2023-12-31"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--sample-size</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">0</code> (no sampling)</em><br />
+Randomly sample this many posts when using <code class="language-plaintext highlighter-rouge">--date-between</code>.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--sample-size 5000</code> - Random sample of 5000 posts</p>
+
+<hr />
 
 <h4 id="storage-configuration">Storage Configuration</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--storage-root</code> | string | <code class="language-plaintext highlighter-rouge">"/tmp/crawl"</code> | Root directory for storing data |
-| <code class="language-plaintext highlighter-rouge">--output</code> | string | <code class="language-plaintext highlighter-rouge">"json"</code> | Output format (<code class="language-plaintext highlighter-rouge">json</code>, <code class="language-plaintext highlighter-rouge">csv</code>) |
-| <code class="language-plaintext highlighter-rouge">--skip-media</code> | bool | <code class="language-plaintext highlighter-rouge">false</code> | Skip downloading media files |</p>
 
-<h4 id="dapr-configuration">DAPR Configuration</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--dapr</code> | bool | <code class="language-plaintext highlighter-rouge">false</code> | Enable DAPR integration |
-| <code class="language-plaintext highlighter-rouge">--dapr-mode</code> | string | <code class="language-plaintext highlighter-rouge">"job"</code> | DAPR mode: <code class="language-plaintext highlighter-rouge">job</code> or <code class="language-plaintext highlighter-rouge">standalone</code> |
-| <code class="language-plaintext highlighter-rouge">--dapr-port</code> | int | <code class="language-plaintext highlighter-rouge">6481</code> | DAPR sidecar port |</p>
+<p><strong><code class="language-plaintext highlighter-rouge">--storage-root</code></strong> <em>(string)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">/tmp/crawl</code></em><br />
+Root directory for storing crawled data and progress files.</p>
 
-<h4 id="tdlib-configuration">TDLib Configuration</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--tdlib-database-url</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | URL to pre-seeded TDLib database (deprecated) |
-| <code class="language-plaintext highlighter-rouge">--tdlib-database-urls</code> | []string | <code class="language-plaintext highlighter-rouge">[]</code> | Multiple TDLib database URLs for connection pooling |
-| <code class="language-plaintext highlighter-rouge">--tdlib-verbosity</code> | int | <code class="language-plaintext highlighter-rouge">1</code> | TDLib verbosity level (0-10, higher = more verbose) |</p>
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--storage-root "/data/crawls"</code></p>
 
-<h4 id="crawl-management">Crawl Management</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--crawl-id</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Unique identifier for this crawl operation |
-| <code class="language-plaintext highlighter-rouge">--crawl-label</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | User-defined label for the crawl |
-| <code class="language-plaintext highlighter-rouge">--generate-code</code> | bool | <code class="language-plaintext highlighter-rouge">false</code> | Run code generation after crawling |
-| <code class="language-plaintext highlighter-rouge">--crawl-type</code> | string | <code class="language-plaintext highlighter-rouge">"focused"</code> | Crawl type: <code class="language-plaintext highlighter-rouge">focused</code> or <code class="language-plaintext highlighter-rouge">snowball</code> |</p>
+<p><strong><code class="language-plaintext highlighter-rouge">--output</code></strong> <em>(string)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">json</code></em><br />
+Output format for crawled data.</p>
+
+<table>
+  <tbody>
+    <tr>
+      <td><em>Options:</em> <code class="language-plaintext highlighter-rouge">json</code></td>
+      <td><code class="language-plaintext highlighter-rouge">csv</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--skip-media</code></strong> <em>(flag)</em><br />
+Skip downloading media files (images, videos, documents).</p>
+
+<p><em>Usage:</em> <code class="language-plaintext highlighter-rouge">--skip-media</code></p>
+
+<hr />
 
 <h4 id="system-configuration">System Configuration</h4>
-<p>| Option | Type | Default | Description |
-|——–|——|———|————-|
-| <code class="language-plaintext highlighter-rouge">--concurrency</code> | int | <code class="language-plaintext highlighter-rouge">1</code> | Number of concurrent crawlers |
-| <code class="language-plaintext highlighter-rouge">--timeout</code> | int | <code class="language-plaintext highlighter-rouge">30</code> | HTTP request timeout in seconds |
-| <code class="language-plaintext highlighter-rouge">--user-agent</code> | string | <code class="language-plaintext highlighter-rouge">"Mozilla/5.0 Crawler"</code> | User agent string |
-| <code class="language-plaintext highlighter-rouge">--log-level</code> | string | <code class="language-plaintext highlighter-rouge">"debug"</code> | Log level: <code class="language-plaintext highlighter-rouge">trace</code>, <code class="language-plaintext highlighter-rouge">debug</code>, <code class="language-plaintext highlighter-rouge">info</code>, <code class="language-plaintext highlighter-rouge">warn</code>, <code class="language-plaintext highlighter-rouge">error</code>, <code class="language-plaintext highlighter-rouge">fatal</code>, <code class="language-plaintext highlighter-rouge">panic</code> |
-| <code class="language-plaintext highlighter-rouge">--config</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Path to configuration file |</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--concurrency</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">1</code></em><br />
+Number of concurrent crawler threads. Higher values increase speed but use more resources.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--concurrency 5</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--timeout</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">30</code></em><br />
+HTTP request timeout in seconds.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--timeout 60</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--log-level</code></strong> <em>(string)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">debug</code></em><br />
+Logging verbosity level.</p>
+
+<p><em>Options:</em> <code class="language-plaintext highlighter-rouge">trace</code> | <code class="language-plaintext highlighter-rouge">debug</code> | <code class="language-plaintext highlighter-rouge">info</code> | <code class="language-plaintext highlighter-rouge">warn</code> | <code class="language-plaintext highlighter-rouge">error</code> | <code class="language-plaintext highlighter-rouge">fatal</code> | <code class="language-plaintext highlighter-rouge">panic</code><br />
+<em>Example:</em> <code class="language-plaintext highlighter-rouge">--log-level info</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--config</code></strong> <em>(string)</em><br />
+Path to YAML configuration file for advanced settings.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--config "config.yaml"</code></p>
+
+<hr />
+
+<h4 id="advanced-options">Advanced Options</h4>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--crawl-id</code></strong> <em>(string)</em><br />
+Custom identifier for this crawl operation. Auto-generated if not provided.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--crawl-label</code></strong> <em>(string)</em><br />
+Human-readable label for organizing crawl results.</p>
+
+<p><em>Example:</em> <code class="language-plaintext highlighter-rouge">--crawl-label "weekly-analysis"</code></p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--user-agent</code></strong> <em>(string)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">Mozilla/5.0 Crawler</code></em><br />
+Custom User-Agent string for HTTP requests.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--dapr</code></strong> <em>(flag)</em><br />
+Enable DAPR integration for cloud-native deployments.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--dapr-port</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">6481</code></em><br />
+DAPR sidecar port for service communication.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">--tdlib-verbosity</code></strong> <em>(integer)</em> • <em>Default: <code class="language-plaintext highlighter-rouge">1</code></em><br />
+TDLib logging verbosity (0-10). Higher values provide more detailed Telegram client logs.</p>
 
 <h2 id="environment-variables">Environment Variables</h2>
 

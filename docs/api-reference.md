@@ -17,78 +17,177 @@ Complete reference for all command-line options, configuration parameters, and e
 ### Global Options
 
 #### Execution Mode
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--mode` | string | `""` | Execution mode: `standalone`, `dapr-standalone`, `orchestrator`, `worker` |
-| `--worker-id` | string | `""` | Worker identifier for distributed mode (required for worker mode) |
+
+**`--mode`** *(string)*  
+Execution mode for the crawler. Choose based on your deployment needs:
+- `standalone` - Single process execution (default)
+- `dapr-standalone` - Single process with DAPR integration  
+- `orchestrator` - Distributes work to multiple workers
+- `worker` - Processes jobs from orchestrator
+
+*Example:* `--mode orchestrator`
+
+**`--worker-id`** *(string)*  
+Unique identifier for worker instances in distributed mode. Required when using `--mode worker`.
+
+*Example:* `--worker-id "worker-01"`
+
+---
 
 #### Data Sources
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--urls` | []string | `[]` | Comma-separated list of channel URLs/IDs to scrape |
-| `--url-file` | string | `""` | File containing URLs to crawl (one per line) |
-| `--url-file-url` | string | `""` | URL to a file containing URLs to crawl |
+
+**`--urls`** *(comma-separated list)*  
+Channel URLs or IDs to scrape. Supports multiple formats per platform.
+
+*Examples:*
+- Telegram: `--urls "channel1,channel2,@username"`
+- YouTube: `--urls "UCxxx123,UCyyy456,@handle"`
+
+**`--url-file`** *(string)*  
+Path to file containing URLs (one per line). Useful for large channel lists.
+
+*Example:* `--url-file "channels.txt"`
+
+**`--url-file-url`** *(string)*  
+HTTP URL to a file containing URLs to crawl. Remote channel list support.
+
+*Example:* `--url-file-url "https://example.com/channels.txt"`
+
+---
 
 #### Platform Configuration
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--platform` | string | `"telegram"` | Platform to crawl: `telegram`, `youtube` |
-| `--youtube-api-key` | string | `""` | API key for YouTube Data API (required for YouTube) |
+
+**`--platform`** *(string)* • *Default: `telegram`*  
+Target platform for crawling.
+
+*Options:* `telegram` | `youtube`  
+*Example:* `--platform youtube`
+
+**`--youtube-api-key`** *(string)*  
+API key for YouTube Data API v3. Required when using `--platform youtube`.  
+Get your key at [Google Cloud Console](https://console.cloud.google.com/).
+
+*Example:* `--youtube-api-key "AIza..."`
+
+---
 
 #### Crawling Limits
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--max-posts` | int | `-1` | Maximum number of posts to collect per channel (-1 = unlimited) |
-| `--max-comments` | int | `-1` | Maximum number of comments to crawl per post (-1 = unlimited) |
-| `--max-depth` | int | `-1` | Maximum depth of the crawl (-1 = unlimited) |
-| `--max-pages` | int | `108000` | Maximum number of pages/channels to crawl |
-| `--min-users` | int | `100` | Minimum number of users in a channel to crawl |
+
+**`--max-posts`** *(integer)* • *Default: `-1` (unlimited)*  
+Maximum posts to collect per channel. Use to limit resource usage.
+
+*Examples:*
+- `--max-posts 1000` - Limit to 1000 posts per channel
+- `--max-posts -1` - No limit
+
+**`--max-comments`** *(integer)* • *Default: `-1` (unlimited)*  
+Maximum comments to collect per post.
+
+*Example:* `--max-comments 500`
+
+**`--max-depth`** *(integer)* • *Default: `-1` (unlimited)*  
+Maximum crawl depth for discovery operations.
+
+**`--max-pages`** *(integer)* • *Default: `108000`*  
+Maximum number of pages/channels to process in total.
+
+**`--min-users`** *(integer)* • *Default: `100`*  
+Skip channels with fewer subscribers/members than this threshold.
+
+*Example:* `--min-users 1000` - Only crawl channels with 1000+ members
+
+---
 
 #### Time Filtering
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--min-post-date` | string | `""` | Minimum post date to crawl (format: YYYY-MM-DD) |
-| `--time-ago` | string | `"1m"` | Only posts newer than this (e.g., `30d`, `6h`, `2w`, `1m`, `1y`) |
-| `--date-between` | string | `""` | Date range (format: YYYY-MM-DD,YYYY-MM-DD) |
-| `--sample-size` | int | `0` | Random sample size when using date-between (0 = no sampling) |
+
+**`--time-ago`** *(duration)* • *Default: `1m`*  
+Only collect posts newer than specified duration.
+
+*Formats:* `30d` (days) | `6h` (hours) | `2w` (weeks) | `1m` (months) | `1y` (years)  
+*Example:* `--time-ago "30d"` - Posts from last 30 days
+
+**`--min-post-date`** *(date)*  
+Minimum post date to crawl. Format: YYYY-MM-DD
+
+*Example:* `--min-post-date "2023-01-01"`
+
+**`--date-between`** *(date range)*  
+Crawl posts within specific date range. Format: YYYY-MM-DD,YYYY-MM-DD
+
+*Example:* `--date-between "2023-01-01,2023-12-31"`
+
+**`--sample-size`** *(integer)* • *Default: `0` (no sampling)*  
+Randomly sample this many posts when using `--date-between`.
+
+*Example:* `--sample-size 5000` - Random sample of 5000 posts
+
+---
 
 #### Storage Configuration
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--storage-root` | string | `"/tmp/crawl"` | Root directory for storing data |
-| `--output` | string | `"json"` | Output format (`json`, `csv`) |
-| `--skip-media` | bool | `false` | Skip downloading media files |
 
-#### DAPR Configuration
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--dapr` | bool | `false` | Enable DAPR integration |
-| `--dapr-mode` | string | `"job"` | DAPR mode: `job` or `standalone` |
-| `--dapr-port` | int | `6481` | DAPR sidecar port |
+**`--storage-root`** *(string)* • *Default: `/tmp/crawl`*  
+Root directory for storing crawled data and progress files.
 
-#### TDLib Configuration
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--tdlib-database-url` | string | `""` | URL to pre-seeded TDLib database (deprecated) |
-| `--tdlib-database-urls` | []string | `[]` | Multiple TDLib database URLs for connection pooling |
-| `--tdlib-verbosity` | int | `1` | TDLib verbosity level (0-10, higher = more verbose) |
+*Example:* `--storage-root "/data/crawls"`
 
-#### Crawl Management
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--crawl-id` | string | `""` | Unique identifier for this crawl operation |
-| `--crawl-label` | string | `""` | User-defined label for the crawl |
-| `--generate-code` | bool | `false` | Run code generation after crawling |
-| `--crawl-type` | string | `"focused"` | Crawl type: `focused` or `snowball` |
+**`--output`** *(string)* • *Default: `json`*  
+Output format for crawled data.
+
+*Options:* `json` | `csv`
+
+**`--skip-media`** *(flag)*  
+Skip downloading media files (images, videos, documents).
+
+*Usage:* `--skip-media`
+
+---
 
 #### System Configuration
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--concurrency` | int | `1` | Number of concurrent crawlers |
-| `--timeout` | int | `30` | HTTP request timeout in seconds |
-| `--user-agent` | string | `"Mozilla/5.0 Crawler"` | User agent string |
-| `--log-level` | string | `"debug"` | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic` |
-| `--config` | string | `""` | Path to configuration file |
+
+**`--concurrency`** *(integer)* • *Default: `1`*  
+Number of concurrent crawler threads. Higher values increase speed but use more resources.
+
+*Example:* `--concurrency 5`
+
+**`--timeout`** *(integer)* • *Default: `30`*  
+HTTP request timeout in seconds.
+
+*Example:* `--timeout 60`
+
+**`--log-level`** *(string)* • *Default: `debug`*  
+Logging verbosity level.
+
+*Options:* `trace` | `debug` | `info` | `warn` | `error` | `fatal` | `panic`  
+*Example:* `--log-level info`
+
+**`--config`** *(string)*  
+Path to YAML configuration file for advanced settings.
+
+*Example:* `--config "config.yaml"`
+
+---
+
+#### Advanced Options
+
+**`--crawl-id`** *(string)*  
+Custom identifier for this crawl operation. Auto-generated if not provided.
+
+**`--crawl-label`** *(string)*  
+Human-readable label for organizing crawl results.
+
+*Example:* `--crawl-label "weekly-analysis"`
+
+**`--user-agent`** *(string)* • *Default: `Mozilla/5.0 Crawler`*  
+Custom User-Agent string for HTTP requests.
+
+**`--dapr`** *(flag)*  
+Enable DAPR integration for cloud-native deployments.
+
+**`--dapr-port`** *(integer)* • *Default: `6481`*  
+DAPR sidecar port for service communication.
+
+**`--tdlib-verbosity`** *(integer)* • *Default: `1`*  
+TDLib logging verbosity (0-10). Higher values provide more detailed Telegram client logs.
 
 ## Environment Variables
 
