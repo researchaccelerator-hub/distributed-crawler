@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <title>API Reference | Distributed Crawler</title>
+  <meta name="description" content="A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability.">
+  
+  <link rel="stylesheet" href="/distributed-crawler/assets/css/style.css">
+  <link rel="canonical" href="https://researchaccelerator-hub.github.io/distributed-crawler/api-reference.html">
+  <link rel="alternate" type="application/rss+xml" title="Distributed Crawler" href="/distributed-crawler/feed.xml">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/distributed-crawler/assets/images/favicon.svg">
+  
+  <!-- SEO -->
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>API Reference | Distributed Crawler</title>
+<meta name="generator" content="Jekyll v4.3.4" />
+<meta property="og:title" content="API Reference" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability." />
+<meta property="og:description" content="A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability." />
+<link rel="canonical" href="https://researchaccelerator-hub.github.io/distributed-crawler/api-reference.html" />
+<meta property="og:url" content="https://researchaccelerator-hub.github.io/distributed-crawler/api-reference.html" />
+<meta property="og:site_name" content="Distributed Crawler" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="API Reference" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability.","headline":"API Reference","url":"https://researchaccelerator-hub.github.io/distributed-crawler/api-reference.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrapper">
+      <a class="site-title" href="/distributed-crawler/">
+        <span class="site-icon">📡</span>
+        Distributed Crawler
+      </a>
+      
+      <nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewBox="0 0 18 15" width="18px" height="15px">
+              <path d="m18,1.484c0,0.82-0.665,1.484-1.484,1.484h-15.032c-0.819,0-1.484-0.665-1.484-1.484s0.665-1.484,1.484-1.484h15.032c0.819,0,1.484,0.665,1.484,1.484zm0,6.016c0,0.82-0.665,1.484-1.484,1.484h-15.032c-0.819,0-1.484-0.665-1.484-1.484s0.665-1.484,1.484-1.484h15.032c0.819,0,1.484,0.665,1.484,1.484zm0,6.016c0,0.82-0.665,1.484-1.484,1.484h-15.032c-0.819,0-1.484-0.665-1.484-1.484s0.665-1.484,1.484-1.484h15.032c0.819,0,1.484,0.665,1.484,1.484z"/>
+            </svg>
+          </span>
+        </label>
+        
+        <div class="trigger">
+          
+            <a class="page-link" href="/distributed-crawler">Home</a>
+          
+            <a class="page-link" href="/distributed-crawler/getting-started">Getting Started</a>
+          
+            <a class="page-link" href="/distributed-crawler/architecture">Architecture</a>
+          
+            <a class="page-link" href="/distributed-crawler/api-reference">API Reference</a>
+          
+            <a class="page-link" href="/distributed-crawler/examples">Examples</a>
+          
+        </div>
+      </nav>
+    </div>
+  </header>
+  
+  <main class="page-content" aria-label="Content">
+    <div class="wrapper">
+      <h1 id="api-reference">API Reference</h1>
+
+<p>Complete reference for all command-line options, configuration parameters, and environment variables.</p>
+
+<h2 id="command-line-interface">Command Line Interface</h2>
+
+<h3 id="basic-syntax">Basic Syntax</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./distributed-crawler <span class="o">[</span>global-options] <span class="o">[</span><span class="nb">command</span><span class="o">]</span> <span class="o">[</span>command-options]
+</code></pre></div></div>
+
+<h3 id="global-options">Global Options</h3>
+
+<h4 id="execution-mode">Execution Mode</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--mode</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Execution mode: <code class="language-plaintext highlighter-rouge">standalone</code>, <code class="language-plaintext highlighter-rouge">dapr-standalone</code>, <code class="language-plaintext highlighter-rouge">orchestrator</code>, <code class="language-plaintext highlighter-rouge">worker</code> |
+| <code class="language-plaintext highlighter-rouge">--worker-id</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Worker identifier for distributed mode (required for worker mode) |</p>
+
+<h4 id="data-sources">Data Sources</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--urls</code> | []string | <code class="language-plaintext highlighter-rouge">[]</code> | Comma-separated list of channel URLs/IDs to scrape |
+| <code class="language-plaintext highlighter-rouge">--url-file</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | File containing URLs to crawl (one per line) |
+| <code class="language-plaintext highlighter-rouge">--url-file-url</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | URL to a file containing URLs to crawl |</p>
+
+<h4 id="platform-configuration">Platform Configuration</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--platform</code> | string | <code class="language-plaintext highlighter-rouge">"telegram"</code> | Platform to crawl: <code class="language-plaintext highlighter-rouge">telegram</code>, <code class="language-plaintext highlighter-rouge">youtube</code> |
+| <code class="language-plaintext highlighter-rouge">--youtube-api-key</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | API key for YouTube Data API (required for YouTube) |</p>
+
+<h4 id="crawling-limits">Crawling Limits</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--max-posts</code> | int | <code class="language-plaintext highlighter-rouge">-1</code> | Maximum number of posts to collect per channel (-1 = unlimited) |
+| <code class="language-plaintext highlighter-rouge">--max-comments</code> | int | <code class="language-plaintext highlighter-rouge">-1</code> | Maximum number of comments to crawl per post (-1 = unlimited) |
+| <code class="language-plaintext highlighter-rouge">--max-depth</code> | int | <code class="language-plaintext highlighter-rouge">-1</code> | Maximum depth of the crawl (-1 = unlimited) |
+| <code class="language-plaintext highlighter-rouge">--max-pages</code> | int | <code class="language-plaintext highlighter-rouge">108000</code> | Maximum number of pages/channels to crawl |
+| <code class="language-plaintext highlighter-rouge">--min-users</code> | int | <code class="language-plaintext highlighter-rouge">100</code> | Minimum number of users in a channel to crawl |</p>
+
+<h4 id="time-filtering">Time Filtering</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--min-post-date</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Minimum post date to crawl (format: YYYY-MM-DD) |
+| <code class="language-plaintext highlighter-rouge">--time-ago</code> | string | <code class="language-plaintext highlighter-rouge">"1m"</code> | Only posts newer than this (e.g., <code class="language-plaintext highlighter-rouge">30d</code>, <code class="language-plaintext highlighter-rouge">6h</code>, <code class="language-plaintext highlighter-rouge">2w</code>, <code class="language-plaintext highlighter-rouge">1m</code>, <code class="language-plaintext highlighter-rouge">1y</code>) |
+| <code class="language-plaintext highlighter-rouge">--date-between</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Date range (format: YYYY-MM-DD,YYYY-MM-DD) |
+| <code class="language-plaintext highlighter-rouge">--sample-size</code> | int | <code class="language-plaintext highlighter-rouge">0</code> | Random sample size when using date-between (0 = no sampling) |</p>
+
+<h4 id="storage-configuration">Storage Configuration</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--storage-root</code> | string | <code class="language-plaintext highlighter-rouge">"/tmp/crawl"</code> | Root directory for storing data |
+| <code class="language-plaintext highlighter-rouge">--output</code> | string | <code class="language-plaintext highlighter-rouge">"json"</code> | Output format (<code class="language-plaintext highlighter-rouge">json</code>, <code class="language-plaintext highlighter-rouge">csv</code>) |
+| <code class="language-plaintext highlighter-rouge">--skip-media</code> | bool | <code class="language-plaintext highlighter-rouge">false</code> | Skip downloading media files |</p>
+
+<h4 id="dapr-configuration">DAPR Configuration</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--dapr</code> | bool | <code class="language-plaintext highlighter-rouge">false</code> | Enable DAPR integration |
+| <code class="language-plaintext highlighter-rouge">--dapr-mode</code> | string | <code class="language-plaintext highlighter-rouge">"job"</code> | DAPR mode: <code class="language-plaintext highlighter-rouge">job</code> or <code class="language-plaintext highlighter-rouge">standalone</code> |
+| <code class="language-plaintext highlighter-rouge">--dapr-port</code> | int | <code class="language-plaintext highlighter-rouge">6481</code> | DAPR sidecar port |</p>
+
+<h4 id="tdlib-configuration">TDLib Configuration</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--tdlib-database-url</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | URL to pre-seeded TDLib database (deprecated) |
+| <code class="language-plaintext highlighter-rouge">--tdlib-database-urls</code> | []string | <code class="language-plaintext highlighter-rouge">[]</code> | Multiple TDLib database URLs for connection pooling |
+| <code class="language-plaintext highlighter-rouge">--tdlib-verbosity</code> | int | <code class="language-plaintext highlighter-rouge">1</code> | TDLib verbosity level (0-10, higher = more verbose) |</p>
+
+<h4 id="crawl-management">Crawl Management</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--crawl-id</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Unique identifier for this crawl operation |
+| <code class="language-plaintext highlighter-rouge">--crawl-label</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | User-defined label for the crawl |
+| <code class="language-plaintext highlighter-rouge">--generate-code</code> | bool | <code class="language-plaintext highlighter-rouge">false</code> | Run code generation after crawling |
+| <code class="language-plaintext highlighter-rouge">--crawl-type</code> | string | <code class="language-plaintext highlighter-rouge">"focused"</code> | Crawl type: <code class="language-plaintext highlighter-rouge">focused</code> or <code class="language-plaintext highlighter-rouge">snowball</code> |</p>
+
+<h4 id="system-configuration">System Configuration</h4>
+<p>| Option | Type | Default | Description |
+|——–|——|———|————-|
+| <code class="language-plaintext highlighter-rouge">--concurrency</code> | int | <code class="language-plaintext highlighter-rouge">1</code> | Number of concurrent crawlers |
+| <code class="language-plaintext highlighter-rouge">--timeout</code> | int | <code class="language-plaintext highlighter-rouge">30</code> | HTTP request timeout in seconds |
+| <code class="language-plaintext highlighter-rouge">--user-agent</code> | string | <code class="language-plaintext highlighter-rouge">"Mozilla/5.0 Crawler"</code> | User agent string |
+| <code class="language-plaintext highlighter-rouge">--log-level</code> | string | <code class="language-plaintext highlighter-rouge">"debug"</code> | Log level: <code class="language-plaintext highlighter-rouge">trace</code>, <code class="language-plaintext highlighter-rouge">debug</code>, <code class="language-plaintext highlighter-rouge">info</code>, <code class="language-plaintext highlighter-rouge">warn</code>, <code class="language-plaintext highlighter-rouge">error</code>, <code class="language-plaintext highlighter-rouge">fatal</code>, <code class="language-plaintext highlighter-rouge">panic</code> |
+| <code class="language-plaintext highlighter-rouge">--config</code> | string | <code class="language-plaintext highlighter-rouge">""</code> | Path to configuration file |</p>
+
+<h2 id="environment-variables">Environment Variables</h2>
+
+<p>All environment variables are prefixed with <code class="language-plaintext highlighter-rouge">CRAWLER_</code> and override configuration file values.</p>
+
+<h3 id="telegram-api-configuration">Telegram API Configuration</h3>
+<p>| Variable | Required | Description |
+|———-|———-|————-|
+| <code class="language-plaintext highlighter-rouge">TG_API_ID</code> | Yes* | Telegram API ID from my.telegram.org |
+| <code class="language-plaintext highlighter-rouge">TG_API_HASH</code> | Yes* | Telegram API Hash from my.telegram.org |
+| <code class="language-plaintext highlighter-rouge">TG_PHONE_NUMBER</code> | Yes* | Phone number with country code (e.g., +12025551234) |
+| <code class="language-plaintext highlighter-rouge">TG_PHONE_CODE</code> | Yes* | OTP sent to your Telegram app |</p>
+
+<p>*Required only for Telegram platform</p>
+
+<h3 id="azure-blob-storage-configuration">Azure Blob Storage Configuration</h3>
+<p>| Variable | Required | Description |
+|———-|———-|————-|
+| <code class="language-plaintext highlighter-rouge">CONTAINER_NAME</code> | No | Azure Blob Storage container name |
+| <code class="language-plaintext highlighter-rouge">BLOB_NAME</code> | No | Blob path for storing data |
+| <code class="language-plaintext highlighter-rouge">AZURE_STORAGE_ACCOUNT_URL</code> | No | Azure Storage account URL |</p>
+
+<h3 id="system-configuration-1">System Configuration</h3>
+<p>| Variable | Default | Description |
+|———-|———|————-|
+| <code class="language-plaintext highlighter-rouge">CRAWLER_LOGGING_LEVEL</code> | <code class="language-plaintext highlighter-rouge">"debug"</code> | Override log level |
+| <code class="language-plaintext highlighter-rouge">CRAWLER_STORAGE_ROOT</code> | <code class="language-plaintext highlighter-rouge">"/tmp/crawl"</code> | Override storage root |
+| <code class="language-plaintext highlighter-rouge">CRAWLER_CONCURRENCY</code> | <code class="language-plaintext highlighter-rouge">1</code> | Override concurrency setting |</p>
+
+<h2 id="configuration-file">Configuration File</h2>
+
+<h3 id="file-locations-searched-in-order">File Locations (searched in order)</h3>
+<ol>
+  <li>Path specified by <code class="language-plaintext highlighter-rouge">--config</code> flag</li>
+  <li><code class="language-plaintext highlighter-rouge">./config.yaml</code></li>
+  <li><code class="language-plaintext highlighter-rouge">$HOME/.crawler/config.yaml</code></li>
+  <li><code class="language-plaintext highlighter-rouge">/etc/crawler/config.yaml</code></li>
+</ol>
+
+<h3 id="configuration-file-format">Configuration File Format</h3>
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Logging configuration</span>
+<span class="na">logging</span><span class="pi">:</span>
+  <span class="na">level</span><span class="pi">:</span> <span class="s2">"</span><span class="s">info"</span>
+
+<span class="c1"># DAPR configuration</span>
+<span class="na">dapr</span><span class="pi">:</span>
+  <span class="na">enabled</span><span class="pi">:</span> <span class="kc">false</span>
+  <span class="na">port</span><span class="pi">:</span> <span class="m">6481</span>
+  <span class="na">mode</span><span class="pi">:</span> <span class="s2">"</span><span class="s">job"</span>
+
+<span class="c1"># Crawler configuration</span>
+<span class="na">crawler</span><span class="pi">:</span>
+  <span class="na">concurrency</span><span class="pi">:</span> <span class="m">5</span>
+  <span class="na">timeout</span><span class="pi">:</span> <span class="m">30</span>
+  <span class="na">useragent</span><span class="pi">:</span> <span class="s2">"</span><span class="s">Custom</span><span class="nv"> </span><span class="s">Crawler</span><span class="nv"> </span><span class="s">1.0"</span>
+  <span class="na">minusers</span><span class="pi">:</span> <span class="m">100</span>
+  <span class="na">maxcomments</span><span class="pi">:</span> <span class="m">1000</span>
+  <span class="na">maxposts</span><span class="pi">:</span> <span class="m">5000</span>
+  <span class="na">maxdepth</span><span class="pi">:</span> <span class="m">3</span>
+  <span class="na">maxpages</span><span class="pi">:</span> <span class="m">10000</span>
+  <span class="na">minpostdate</span><span class="pi">:</span> <span class="s2">"</span><span class="s">2023-01-01"</span>
+  <span class="na">timeago</span><span class="pi">:</span> <span class="s2">"</span><span class="s">30d"</span>
+  <span class="na">datebetween</span><span class="pi">:</span> <span class="s2">"</span><span class="s">2023-01-01,2023-12-31"</span>
+  <span class="na">samplesize</span><span class="pi">:</span> <span class="m">1000</span>
+  <span class="na">crawlid</span><span class="pi">:</span> <span class="s2">"</span><span class="s">custom-crawl-001"</span>
+  <span class="na">crawllabel</span><span class="pi">:</span> <span class="s2">"</span><span class="s">research-project-q1"</span>
+  <span class="na">skipmedia</span><span class="pi">:</span> <span class="kc">false</span>
+  <span class="na">platform</span><span class="pi">:</span> <span class="s2">"</span><span class="s">telegram"</span>
+
+<span class="c1"># Output configuration</span>
+<span class="na">output</span><span class="pi">:</span>
+  <span class="na">format</span><span class="pi">:</span> <span class="s2">"</span><span class="s">json"</span>
+
+<span class="c1"># Storage configuration</span>
+<span class="na">storage</span><span class="pi">:</span>
+  <span class="na">root</span><span class="pi">:</span> <span class="s2">"</span><span class="s">/data/crawls"</span>
+
+<span class="c1"># TDLib configuration</span>
+<span class="na">tdlib</span><span class="pi">:</span>
+  <span class="na">database_url</span><span class="pi">:</span> <span class="s2">"</span><span class="s">"</span>
+  <span class="na">database_urls</span><span class="pi">:</span> <span class="pi">[]</span>
+  <span class="na">verbosity</span><span class="pi">:</span> <span class="m">1</span>
+
+<span class="c1"># YouTube configuration</span>
+<span class="na">youtube</span><span class="pi">:</span>
+  <span class="na">api_key</span><span class="pi">:</span> <span class="s2">"</span><span class="s">your_api_key_here"</span>
+
+<span class="c1"># Distributed mode configuration</span>
+<span class="na">distributed</span><span class="pi">:</span>
+  <span class="na">mode</span><span class="pi">:</span> <span class="s2">"</span><span class="s">standalone"</span>
+  <span class="na">worker_id</span><span class="pi">:</span> <span class="s2">"</span><span class="s">"</span>
+</code></pre></div></div>
+
+<h2 id="data-models">Data Models</h2>
+
+<h3 id="post-structure">Post Structure</h3>
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"post_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"channel_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"channel_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"published_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2023-04-01T12:34:56Z"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"thumb_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"media_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"views_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"comments_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"shares_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"likes_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"engagement"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"platform_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"post_type"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"string"</span><span class="p">],</span><span class="w">
+  </span><span class="nl">"outlinks"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"string"</span><span class="p">],</span><span class="w">
+  </span><span class="nl">"reactions"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nl">"emoji"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">},</span><span class="w">
+  </span><span class="nl">"comments"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w">
+    </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"comment_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"author"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"text"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"created_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2023-04-01T12:34:56Z"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"likes_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"reply_to_comment_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">],</span><span class="w">
+  </span><span class="nl">"channel_data"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="nl">"channel_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"channel_name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"channel_url_external"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"channel_description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"channel_engagement_data"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"follower_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"post_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"video_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"views_count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">},</span><span class="w">
+  </span><span class="nl">"crawl_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"crawl_label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<h3 id="progress-structure">Progress Structure</h3>
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"crawl_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"string"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"started_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2023-04-01T12:34:56Z"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"updated_at"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2023-04-01T12:34:56Z"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"running"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"total_channels"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"completed_channels"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"total_posts"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"processed_posts"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"errors"</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span><span class="w">
+  </span><span class="nl">"channels"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="nl">"channel_name"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"status"</span><span class="p">:</span><span class="w"> </span><span class="s2">"completed"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"posts_scraped"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"last_post_date"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2023-04-01T12:34:56Z"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"error"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<h2 id="exit-codes">Exit Codes</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Code</th>
+      <th>Meaning</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>0</td>
+      <td>Success</td>
+    </tr>
+    <tr>
+      <td>1</td>
+      <td>General error</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td>Configuration error</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td>Authentication error</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td>Network error</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td>Storage error</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td>API quota exceeded</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="rate-limits-and-quotas">Rate Limits and Quotas</h2>
+
+<h3 id="telegram-api">Telegram API</h3>
+<ul>
+  <li><strong>Message History</strong>: ~20 requests/minute</li>
+  <li><strong>Channel Info</strong>: ~60 requests/minute</li>
+  <li><strong>Media Downloads</strong>: ~30 files/minute</li>
+</ul>
+
+<p>The scraper implements exponential backoff and automatic retry for rate limit handling.</p>
+
+<h3 id="youtube-data-api-v3">YouTube Data API v3</h3>
+<ul>
+  <li><strong>Default Quota</strong>: 10,000 units/day</li>
+  <li><strong>Search Requests</strong>: 100 units each</li>
+  <li><strong>Video Details</strong>: 1 unit each</li>
+  <li><strong>Comment Threads</strong>: 1 unit each</li>
+</ul>
+
+<p>Use <code class="language-plaintext highlighter-rouge">--max-posts</code> to limit quota usage.</p>
+
+<h2 id="examples">Examples</h2>
+
+<h3 id="basic-usage">Basic Usage</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Scrape Telegram channels</span>
+./distributed-crawler <span class="nt">--urls</span> <span class="s2">"channel1,channel2"</span>
+
+<span class="c"># Scrape YouTube channels</span>
+./distributed-crawler <span class="nt">--platform</span> youtube <span class="nt">--youtube-api-key</span> <span class="s2">"KEY"</span> <span class="nt">--urls</span> <span class="s2">"UCxxx,UCyyy"</span>
+</code></pre></div></div>
+
+<h3 id="advanced-configuration">Advanced Configuration</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Distributed mode with time filtering</span>
+./distributed-crawler <span class="nt">--mode</span> orchestrator <span class="nt">--dapr</span> <span class="se">\</span>
+  <span class="nt">--urls</span> <span class="s2">"</span><span class="si">$(</span><span class="nb">cat </span>channels.txt | <span class="nb">tr</span> <span class="s1">'\n'</span> <span class="s1">','</span><span class="si">)</span><span class="s2">"</span> <span class="se">\</span>
+  <span class="nt">--time-ago</span> <span class="s2">"30d"</span> <span class="se">\</span>
+  <span class="nt">--max-posts</span> 1000 <span class="se">\</span>
+  <span class="nt">--skip-media</span> <span class="se">\</span>
+  <span class="nt">--crawl-label</span> <span class="s2">"monthly-analysis"</span>
+
+<span class="c"># Worker node</span>
+./distributed-crawler <span class="nt">--mode</span> worker <span class="nt">--dapr</span> <span class="nt">--worker-id</span> <span class="s2">"worker-01"</span>
+</code></pre></div></div>
+
+<h3 id="configuration-file-usage">Configuration File Usage</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Use custom config file</span>
+./distributed-crawler <span class="nt">--config</span> /path/to/config.yaml <span class="nt">--urls</span> <span class="s2">"channel1,channel2"</span>
+</code></pre></div></div>
+
+<hr />
+
+<p>For more examples and use cases, see the <a href="examples/">Examples</a> section.</p>
+
+    </div>
+  </main>
+  
+  <footer class="site-footer">
+    <div class="wrapper">
+      <div class="footer-col-wrapper">
+        <div class="footer-col footer-col-1">
+          <h3>Distributed Crawler</h3>
+          <p>A powerful Go-based application for scraping messages and metadata from  Telegram channels and YouTube channels. Built for scalability and reliability.</p>
+        </div>
+        
+        <div class="footer-col footer-col-2">
+          <h3>Links</h3>
+          <ul class="social-media-list">
+            
+              <li>
+                <a href="https://github.com/researchaccelerator-hub/distributed-crawler">
+                  <span>GitHub</span>
+                </a>
+              </li>
+            
+              <li>
+                <a href="https://github.com/researchaccelerator-hub/distributed-crawler/issues">
+                  <span>Issues</span>
+                </a>
+              </li>
+            
+          </ul>
+        </div>
+        
+        <div class="footer-col footer-col-3">
+          <h3>About</h3>
+          <p>Built with ❤️ in Go. Licensed under Apache 2.0.</p>
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

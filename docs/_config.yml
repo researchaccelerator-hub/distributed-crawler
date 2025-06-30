@@ -40,15 +40,15 @@ collections:
 # Navigation
 navigation:
   - title: "Home"
-    url: "/"
+    url: ""
   - title: "Getting Started"
-    url: "/getting-started/"
+    url: "getting-started"
   - title: "Architecture"
-    url: "/architecture/"
+    url: "architecture"
   - title: "API Reference"
-    url: "/api-reference/"
+    url: "api-reference"
   - title: "Examples"
-    url: "/examples/"
+    url: "examples"
 
 # GitHub repository
 repository: "researchaccelerator-hub/distributed-crawler"

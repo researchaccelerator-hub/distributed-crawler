@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <title>Examples | Distributed Crawler</title>
+  <meta name="description" content="A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability.">
+  
+  <link rel="stylesheet" href="/distributed-crawler/assets/css/style.css">
+  <link rel="canonical" href="https://researchaccelerator-hub.github.io/distributed-crawler/examples.html">
+  <link rel="alternate" type="application/rss+xml" title="Distributed Crawler" href="/distributed-crawler/feed.xml">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="/distributed-crawler/assets/images/favicon.svg">
+  
+  <!-- SEO -->
+  <!-- Begin Jekyll SEO tag v2.8.0 -->
+<title>Examples | Distributed Crawler</title>
+<meta name="generator" content="Jekyll v4.3.4" />
+<meta property="og:title" content="Examples" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability." />
+<meta property="og:description" content="A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability." />
+<link rel="canonical" href="https://researchaccelerator-hub.github.io/distributed-crawler/examples.html" />
+<meta property="og:url" content="https://researchaccelerator-hub.github.io/distributed-crawler/examples.html" />
+<meta property="og:site_name" content="Distributed Crawler" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="Examples" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebPage","description":"A powerful Go-based application for scraping messages and metadata from Telegram channels and YouTube channels. Built for scalability and reliability.","headline":"Examples","url":"https://researchaccelerator-hub.github.io/distributed-crawler/examples.html"}</script>
+<!-- End Jekyll SEO tag -->
+
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrapper">
+      <a class="site-title" href="/distributed-crawler/">
+        <span class="site-icon">📡</span>
+        Distributed Crawler
+      </a>
+      
+      <nav class="site-nav">
+        <input type="checkbox" id="nav-trigger" class="nav-trigger" />
+        <label for="nav-trigger">
+          <span class="menu-icon">
+            <svg viewBox="0 0 18 15" width="18px" height="15px">
+              <path d="m18,1.484c0,0.82-0.665,1.484-1.484,1.484h-15.032c-0.819,0-1.484-0.665-1.484-1.484s0.665-1.484,1.484-1.484h15.032c0.819,0,1.484,0.665,1.484,1.484zm0,6.016c0,0.82-0.665,1.484-1.484,1.484h-15.032c-0.819,0-1.484-0.665-1.484-1.484s0.665-1.484,1.484-1.484h15.032c0.819,0,1.484,0.665,1.484,1.484zm0,6.016c0,0.82-0.665,1.484-1.484,1.484h-15.032c-0.819,0-1.484-0.665-1.484-1.484s0.665-1.484,1.484-1.484h15.032c0.819,0,1.484,0.665,1.484,1.484z"/>
+            </svg>
+          </span>
+        </label>
+        
+        <div class="trigger">
+          
+            <a class="page-link" href="/distributed-crawler">Home</a>
+          
+            <a class="page-link" href="/distributed-crawler/getting-started">Getting Started</a>
+          
+            <a class="page-link" href="/distributed-crawler/architecture">Architecture</a>
+          
+            <a class="page-link" href="/distributed-crawler/api-reference">API Reference</a>
+          
+            <a class="page-link" href="/distributed-crawler/examples">Examples</a>
+          
+        </div>
+      </nav>
+    </div>
+  </header>
+  
+  <main class="page-content" aria-label="Content">
+    <div class="wrapper">
+      <h1 id="examples">Examples</h1>
+
+<p>Common use cases and configuration examples for the Distributed Crawler.</p>
+
+<h2 id="basic-usage-examples">Basic Usage Examples</h2>
+
+<h3 id="simple-telegram-scraping">Simple Telegram Scraping</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Scrape a few Telegram channels</span>
+./distributed-crawler <span class="nt">--urls</span> <span class="s2">"channel1,channel2,channel3"</span>
+
+<span class="c"># Scrape with time filtering (last 30 days)</span>
+./distributed-crawler <span class="nt">--urls</span> <span class="s2">"news_channel,tech_channel"</span> <span class="nt">--time-ago</span> <span class="s2">"30d"</span>
+
+<span class="c"># Limit the number of posts per channel</span>
+./distributed-crawler <span class="nt">--urls</span> <span class="s2">"busy_channel"</span> <span class="nt">--max-posts</span> 1000
+</code></pre></div></div>
+
+<h3 id="youtube-channel-scraping">YouTube Channel Scraping</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Basic YouTube scraping</span>
+./distributed-crawler <span class="nt">--platform</span> youtube <span class="se">\</span>
+  <span class="nt">--youtube-api-key</span> <span class="s2">"YOUR_API_KEY"</span> <span class="se">\</span>
+  <span class="nt">--urls</span> <span class="s2">"UCxxx1,UCxxx2"</span>
+
+<span class="c"># YouTube with filtering and limits</span>
+./distributed-crawler <span class="nt">--platform</span> youtube <span class="se">\</span>
+  <span class="nt">--youtube-api-key</span> <span class="s2">"YOUR_API_KEY"</span> <span class="se">\</span>
+  <span class="nt">--urls</span> <span class="s2">"@handle1,@handle2"</span> <span class="se">\</span>
+  <span class="nt">--time-ago</span> <span class="s2">"90d"</span> <span class="se">\</span>
+  <span class="nt">--max-posts</span> 500
+</code></pre></div></div>
+
+<h2 id="advanced-configuration-examples">Advanced Configuration Examples</h2>
+
+<h3 id="large-scale-distributed-scraping">Large-Scale Distributed Scraping</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Start orchestrator</span>
+./distributed-crawler <span class="nt">--mode</span> orchestrator <span class="nt">--dapr</span> <span class="se">\</span>
+  <span class="nt">--url-file</span> channels_list.txt <span class="se">\</span>
+  <span class="nt">--crawl-label</span> <span class="s2">"quarterly-analysis"</span> <span class="se">\</span>
+  <span class="nt">--time-ago</span> <span class="s2">"90d"</span> <span class="se">\</span>
+  <span class="nt">--max-posts</span> 5000 <span class="se">\</span>
+  <span class="nt">--skip-media</span>
+
+<span class="c"># Start multiple workers</span>
+./distributed-crawler <span class="nt">--mode</span> worker <span class="nt">--dapr</span> <span class="nt">--worker-id</span> <span class="s2">"worker-01"</span>
+./distributed-crawler <span class="nt">--mode</span> worker <span class="nt">--dapr</span> <span class="nt">--worker-id</span> <span class="s2">"worker-02"</span>
+./distributed-crawler <span class="nt">--mode</span> worker <span class="nt">--dapr</span> <span class="nt">--worker-id</span> <span class="s2">"worker-03"</span>
+</code></pre></div></div>
+
+<h3 id="date-range-analysis">Date Range Analysis</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Scrape posts between specific dates with sampling</span>
+./distributed-crawler <span class="nt">--urls</span> <span class="s2">"channel1,channel2"</span> <span class="se">\</span>
+  <span class="nt">--date-between</span> <span class="s2">"2023-01-01,2023-12-31"</span> <span class="se">\</span>
+  <span class="nt">--sample-size</span> 10000 <span class="se">\</span>
+  <span class="nt">--crawl-label</span> <span class="s2">"2023-annual-analysis"</span>
+</code></pre></div></div>
+
+<h3 id="custom-storage-configuration">Custom Storage Configuration</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Use custom storage directory</span>
+./distributed-crawler <span class="nt">--urls</span> <span class="s2">"channel1,channel2"</span> <span class="se">\</span>
+  <span class="nt">--storage-root</span> <span class="s2">"/data/telegram-scrapes"</span> <span class="se">\</span>
+  <span class="nt">--crawl-id</span> <span class="s2">"custom-crawl-001"</span>
+</code></pre></div></div>
+
+<h2 id="configuration-file-examples">Configuration File Examples</h2>
+
+<h3 id="basic-configuration-file">Basic Configuration File</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">config.yaml</code>:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Basic configuration</span>
+<span class="na">crawler</span><span class="pi">:</span>
+  <span class="na">concurrency</span><span class="pi">:</span> <span class="m">3</span>
+  <span class="na">timeout</span><span class="pi">:</span> <span class="m">45</span>
+  <span class="na">maxposts</span><span class="pi">:</span> <span class="m">2000</span>
+  <span class="na">platform</span><span class="pi">:</span> <span class="s2">"</span><span class="s">telegram"</span>
+  <span class="na">timeago</span><span class="pi">:</span> <span class="s2">"</span><span class="s">30d"</span>
+  <span class="na">skipmedia</span><span class="pi">:</span> <span class="kc">false</span>
+
+<span class="na">storage</span><span class="pi">:</span>
+  <span class="na">root</span><span class="pi">:</span> <span class="s2">"</span><span class="s">/data/crawls"</span>
+
+<span class="na">logging</span><span class="pi">:</span>
+  <span class="na">level</span><span class="pi">:</span> <span class="s2">"</span><span class="s">info"</span>
+
+<span class="na">output</span><span class="pi">:</span>
+  <span class="na">format</span><span class="pi">:</span> <span class="s2">"</span><span class="s">json"</span>
+</code></pre></div></div>
+
+<p>Usage:</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>./distributed-crawler <span class="nt">--config</span> config.yaml <span class="nt">--urls</span> <span class="s2">"channel1,channel2"</span>
+</code></pre></div></div>
+
+<h3 id="advanced-configuration-file">Advanced Configuration File</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">advanced-config.yaml</code>:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Advanced configuration for large-scale operations</span>
+<span class="na">logging</span><span class="pi">:</span>
+  <span class="na">level</span><span class="pi">:</span> <span class="s2">"</span><span class="s">info"</span>
+
+<span class="na">dapr</span><span class="pi">:</span>
+  <span class="na">enabled</span><span class="pi">:</span> <span class="kc">true</span>
+  <span class="na">port</span><span class="pi">:</span> <span class="m">6481</span>
+  <span class="na">mode</span><span class="pi">:</span> <span class="s2">"</span><span class="s">standalone"</span>
+
+<span class="na">crawler</span><span class="pi">:</span>
+  <span class="na">concurrency</span><span class="pi">:</span> <span class="m">10</span>
+  <span class="na">timeout</span><span class="pi">:</span> <span class="m">60</span>
+  <span class="na">useragent</span><span class="pi">:</span> <span class="s2">"</span><span class="s">Research</span><span class="nv"> </span><span class="s">Bot</span><span class="nv"> </span><span class="s">1.0"</span>
+  <span class="na">minusers</span><span class="pi">:</span> <span class="m">500</span>
+  <span class="na">maxcomments</span><span class="pi">:</span> <span class="m">5000</span>
+  <span class="na">maxposts</span><span class="pi">:</span> <span class="m">10000</span>
+  <span class="na">maxdepth</span><span class="pi">:</span> <span class="m">5</span>
+  <span class="na">timeago</span><span class="pi">:</span> <span class="s2">"</span><span class="s">60d"</span>
+  <span class="na">skipmedia</span><span class="pi">:</span> <span class="kc">true</span>
+  <span class="na">platform</span><span class="pi">:</span> <span class="s2">"</span><span class="s">telegram"</span>
+
+<span class="na">storage</span><span class="pi">:</span>
+  <span class="na">root</span><span class="pi">:</span> <span class="s2">"</span><span class="s">/mnt/research-data/crawls"</span>
+
+<span class="na">output</span><span class="pi">:</span>
+  <span class="na">format</span><span class="pi">:</span> <span class="s2">"</span><span class="s">json"</span>
+
+<span class="na">tdlib</span><span class="pi">:</span>
+  <span class="na">verbosity</span><span class="pi">:</span> <span class="m">2</span>
+  <span class="na">database_urls</span><span class="pi">:</span>
+    <span class="pi">-</span> <span class="s2">"</span><span class="s">https://storage.example.com/tdlib-db-1.tgz"</span>
+    <span class="pi">-</span> <span class="s2">"</span><span class="s">https://storage.example.com/tdlib-db-2.tgz"</span>
+</code></pre></div></div>
+
+<h3 id="youtube-specific-configuration">YouTube-Specific Configuration</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">youtube-config.yaml</code>:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">crawler</span><span class="pi">:</span>
+  <span class="na">platform</span><span class="pi">:</span> <span class="s2">"</span><span class="s">youtube"</span>
+  <span class="na">concurrency</span><span class="pi">:</span> <span class="m">5</span>
+  <span class="na">maxposts</span><span class="pi">:</span> <span class="m">1000</span>
+  <span class="na">maxcomments</span><span class="pi">:</span> <span class="m">500</span>
+  <span class="na">timeago</span><span class="pi">:</span> <span class="s2">"</span><span class="s">90d"</span>
+
+<span class="na">youtube</span><span class="pi">:</span>
+  <span class="na">api_key</span><span class="pi">:</span> <span class="s2">"</span><span class="s">YOUR_YOUTUBE_API_KEY"</span>
+
+<span class="na">storage</span><span class="pi">:</span>
+  <span class="na">root</span><span class="pi">:</span> <span class="s2">"</span><span class="s">/data/youtube-crawls"</span>
+
+<span class="na">logging</span><span class="pi">:</span>
+  <span class="na">level</span><span class="pi">:</span> <span class="s2">"</span><span class="s">info"</span>
+</code></pre></div></div>
+
+<h2 id="environment-setup-examples">Environment Setup Examples</h2>
+
+<h3 id="development-environment">Development Environment</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Set up for local development</span>
+<span class="nb">export </span><span class="nv">TG_API_ID</span><span class="o">=</span><span class="s2">"12345678"</span>
+<span class="nb">export </span><span class="nv">TG_API_HASH</span><span class="o">=</span><span class="s2">"abcdef1234567890abcdef1234567890"</span>
+<span class="nb">export </span><span class="nv">TG_PHONE_NUMBER</span><span class="o">=</span><span class="s2">"+1234567890"</span>
+<span class="nb">export </span><span class="nv">CRAWLER_LOGGING_LEVEL</span><span class="o">=</span><span class="s2">"debug"</span>
+<span class="nb">export </span><span class="nv">CRAWLER_STORAGE_ROOT</span><span class="o">=</span><span class="s2">"./local-storage"</span>
+
+./distributed-crawler <span class="nt">--urls</span> <span class="s2">"test_channel"</span> <span class="nt">--max-posts</span> 100
+</code></pre></div></div>
+
+<h3 id="production-environment">Production Environment</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Production setup with Azure storage</span>
+<span class="nb">export </span><span class="nv">TG_API_ID</span><span class="o">=</span><span class="s2">"12345678"</span>
+<span class="nb">export </span><span class="nv">TG_API_HASH</span><span class="o">=</span><span class="s2">"abcdef1234567890abcdef1234567890"</span>
+<span class="nb">export </span><span class="nv">TG_PHONE_NUMBER</span><span class="o">=</span><span class="s2">"+1234567890"</span>
+<span class="nb">export </span><span class="nv">CONTAINER_NAME</span><span class="o">=</span><span class="s2">"production-crawl-data"</span>
+<span class="nb">export </span><span class="nv">BLOB_NAME</span><span class="o">=</span><span class="s2">"crawls/"</span>
+<span class="nb">export </span><span class="nv">AZURE_STORAGE_ACCOUNT_URL</span><span class="o">=</span><span class="s2">"https://myaccount.blob.core.windows.net"</span>
+<span class="nb">export </span><span class="nv">CRAWLER_LOGGING_LEVEL</span><span class="o">=</span><span class="s2">"info"</span>
+
+./distributed-crawler <span class="nt">--mode</span> orchestrator <span class="nt">--dapr</span> <span class="se">\</span>
+  <span class="nt">--url-file</span> production-channels.txt <span class="se">\</span>
+  <span class="nt">--crawl-label</span> <span class="s2">"production-weekly"</span> <span class="se">\</span>
+  <span class="nt">--config</span> production-config.yaml
+</code></pre></div></div>
+
+<h2 id="url-file-examples">URL File Examples</h2>
+
+<h3 id="simple-channel-list">Simple Channel List</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">channels.txt</code>:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>news_channel_1
+tech_updates
+crypto_news
+@political_channel
+science_daily
+</code></pre></div></div>
+
+<h3 id="youtube-channels">YouTube Channels</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">youtube-channels.txt</code>:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>UCxxx1234567890
+UCyyy0987654321
+@techreviewer
+@newsnetwork
+@sciencechannel
+</code></pre></div></div>
+
+<h3 id="mixed-format-with-comments">Mixed Format with Comments</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">mixed-channels.txt</code>:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code># Telegram channels
+news_channel_1
+tech_updates
+@verified_channel
+
+# YouTube channels (will be ignored if platform=telegram)
+UCxxx1234567890
+@youtuber_handle
+</code></pre></div></div>
+
+<h2 id="docker-examples">Docker Examples</h2>
+
+<h3 id="dockerfile">Dockerfile</h3>
+<div class="language-dockerfile highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">FROM</span><span class="w"> </span><span class="s">golang:1.20-alpine</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="s">builder</span>
+
+<span class="c"># Install TDLib dependencies</span>
+<span class="k">RUN </span>apk add <span class="nt">--no-cache</span> <span class="se">\
+</span>    build-base <span class="se">\
+</span>    cmake <span class="se">\
+</span>    gperf <span class="se">\
+</span>    openssl-dev <span class="se">\
+</span>    zlib-dev <span class="se">\
+</span>    git
+
+<span class="c"># Build TDLib</span>
+<span class="k">RUN </span>git clone https://github.com/tdlib/td.git /tmp/td <span class="o">&amp;&amp;</span> <span class="se">\
+</span>    <span class="nb">cd</span> /tmp/td <span class="o">&amp;&amp;</span> <span class="se">\
+</span>    <span class="nb">mkdir </span>build <span class="o">&amp;&amp;</span> <span class="se">\
+</span>    <span class="nb">cd </span>build <span class="o">&amp;&amp;</span> <span class="se">\
+</span>    cmake <span class="nt">-DCMAKE_BUILD_TYPE</span><span class="o">=</span>Release .. <span class="o">&amp;&amp;</span> <span class="se">\
+</span>    cmake <span class="nt">--build</span> <span class="nb">.</span> <span class="o">&amp;&amp;</span> <span class="se">\
+</span>    make <span class="nb">install</span>
+
+<span class="c"># Build application</span>
+<span class="k">WORKDIR</span><span class="s"> /app</span>
+<span class="k">COPY</span><span class="s"> go.mod go.sum ./</span>
+<span class="k">RUN </span>go mod download
+<span class="k">COPY</span><span class="s"> . .</span>
+<span class="k">RUN </span>go build <span class="nt">-o</span> distributed-crawler
+
+<span class="k">FROM</span><span class="s"> alpine:latest</span>
+<span class="k">RUN </span>apk add <span class="nt">--no-cache</span> ca-certificates openssl-dev
+<span class="k">WORKDIR</span><span class="s"> /root/</span>
+<span class="k">COPY</span><span class="s"> --from=builder /app/distributed-crawler .</span>
+<span class="k">COPY</span><span class="s"> --from=builder /usr/local/lib/libtd* /usr/local/lib/</span>
+<span class="k">COPY</span><span class="s"> --from=builder /usr/local/include/td /usr/local/include/td</span>
+<span class="k">ENV</span><span class="s"> LD_LIBRARY_PATH=/usr/local/lib</span>
+<span class="k">CMD</span><span class="s"> ["./distributed-crawler"]</span>
+</code></pre></div></div>
+
+<h3 id="docker-compose-for-distributed-setup">Docker Compose for Distributed Setup</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">docker-compose.yml</code>:</p>
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="na">version</span><span class="pi">:</span> <span class="s1">'</span><span class="s">3.8'</span>
+
+<span class="na">services</span><span class="pi">:</span>
+  <span class="na">orchestrator</span><span class="pi">:</span>
+    <span class="na">build</span><span class="pi">:</span> <span class="s">.</span>
+    <span class="na">environment</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">TG_API_ID=${TG_API_ID}</span>
+      <span class="pi">-</span> <span class="s">TG_API_HASH=${TG_API_HASH}</span>
+      <span class="pi">-</span> <span class="s">TG_PHONE_NUMBER=${TG_PHONE_NUMBER}</span>
+      <span class="pi">-</span> <span class="s">CRAWLER_LOGGING_LEVEL=info</span>
+    <span class="na">command</span><span class="pi">:</span> <span class="pi">&gt;</span>
+      <span class="s">./distributed-crawler --mode orchestrator --dapr</span>
+      <span class="s">--url-file /data/channels.txt</span>
+      <span class="s">--crawl-label docker-crawl</span>
+    <span class="na">volumes</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">./data:/data</span>
+      <span class="pi">-</span> <span class="s">./storage:/storage</span>
+    <span class="na">depends_on</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">redis</span>
+
+  <span class="na">worker1</span><span class="pi">:</span>
+    <span class="na">build</span><span class="pi">:</span> <span class="s">.</span>
+    <span class="na">environment</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">TG_API_ID=${TG_API_ID}</span>
+      <span class="pi">-</span> <span class="s">TG_API_HASH=${TG_API_HASH}</span>
+      <span class="pi">-</span> <span class="s">TG_PHONE_NUMBER=${TG_PHONE_NUMBER}</span>
+      <span class="pi">-</span> <span class="s">CRAWLER_LOGGING_LEVEL=info</span>
+    <span class="na">command</span><span class="pi">:</span> <span class="pi">&gt;</span>
+      <span class="s">./distributed-crawler --mode worker --dapr</span>
+      <span class="s">--worker-id worker-1</span>
+    <span class="na">volumes</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">./storage:/storage</span>
+    <span class="na">depends_on</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">redis</span>
+
+  <span class="na">worker2</span><span class="pi">:</span>
+    <span class="na">build</span><span class="pi">:</span> <span class="s">.</span>
+    <span class="na">environment</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">TG_API_ID=${TG_API_ID}</span>
+      <span class="pi">-</span> <span class="s">TG_API_HASH=${TG_API_HASH}</span>
+      <span class="pi">-</span> <span class="s">TG_PHONE_NUMBER=${TG_PHONE_NUMBER}</span>
+      <span class="pi">-</span> <span class="s">CRAWLER_LOGGING_LEVEL=info</span>
+    <span class="na">command</span><span class="pi">:</span> <span class="pi">&gt;</span>
+      <span class="s">./distributed-crawler --mode worker --dapr</span>
+      <span class="s">--worker-id worker-2</span>
+    <span class="na">volumes</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">./storage:/storage</span>
+    <span class="na">depends_on</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s">redis</span>
+
+  <span class="na">redis</span><span class="pi">:</span>
+    <span class="na">image</span><span class="pi">:</span> <span class="s">redis:alpine</span>
+    <span class="na">ports</span><span class="pi">:</span>
+      <span class="pi">-</span> <span class="s2">"</span><span class="s">6379:6379"</span>
+</code></pre></div></div>
+
+<h2 id="script-examples">Script Examples</h2>
+
+<h3 id="batch-processing-script">Batch Processing Script</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">batch-scrape.sh</code>:</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">#!/bin/bash</span>
+
+<span class="c"># Configuration</span>
+<span class="nv">CHANNELS_DIR</span><span class="o">=</span><span class="s2">"./channel-lists"</span>
+<span class="nv">OUTPUT_DIR</span><span class="o">=</span><span class="s2">"./batch-results"</span>
+<span class="nv">SCRAPER</span><span class="o">=</span><span class="s2">"./distributed-crawler"</span>
+
+<span class="c"># Create output directory</span>
+<span class="nb">mkdir</span> <span class="nt">-p</span> <span class="s2">"</span><span class="nv">$OUTPUT_DIR</span><span class="s2">"</span>
+
+<span class="c"># Process each channel list</span>
+<span class="k">for </span>channel_file <span class="k">in</span> <span class="s2">"</span><span class="nv">$CHANNELS_DIR</span><span class="s2">"</span>/<span class="k">*</span>.txt<span class="p">;</span> <span class="k">do
+    if</span> <span class="o">[</span> <span class="nt">-f</span> <span class="s2">"</span><span class="nv">$channel_file</span><span class="s2">"</span> <span class="o">]</span><span class="p">;</span> <span class="k">then
+        </span><span class="nv">filename</span><span class="o">=</span><span class="si">$(</span><span class="nb">basename</span> <span class="s2">"</span><span class="nv">$channel_file</span><span class="s2">"</span> .txt<span class="si">)</span>
+        <span class="nb">echo</span> <span class="s2">"Processing </span><span class="nv">$filename</span><span class="s2">..."</span>
+        
+        <span class="nv">$SCRAPER</span> <span class="se">\</span>
+            <span class="nt">--url-file</span> <span class="s2">"</span><span class="nv">$channel_file</span><span class="s2">"</span> <span class="se">\</span>
+            <span class="nt">--storage-root</span> <span class="s2">"</span><span class="nv">$OUTPUT_DIR</span><span class="s2">/</span><span class="nv">$filename</span><span class="s2">"</span> <span class="se">\</span>
+            <span class="nt">--crawl-label</span> <span class="s2">"batch-</span><span class="nv">$filename</span><span class="s2">"</span> <span class="se">\</span>
+            <span class="nt">--time-ago</span> <span class="s2">"30d"</span> <span class="se">\</span>
+            <span class="nt">--max-posts</span> 1000 <span class="se">\</span>
+            <span class="nt">--log-level</span> info
+        
+        <span class="nb">echo</span> <span class="s2">"Completed </span><span class="nv">$filename</span><span class="s2">"</span>
+    <span class="k">fi
+done
+
+</span><span class="nb">echo</span> <span class="s2">"Batch processing completed"</span>
+</code></pre></div></div>
+
+<h3 id="monitoring-script">Monitoring Script</h3>
+<p>Create <code class="language-plaintext highlighter-rouge">monitor-crawl.sh</code>:</p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">#!/bin/bash</span>
+
+<span class="nv">CRAWL_ID</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span>
+<span class="nv">STORAGE_ROOT</span><span class="o">=</span><span class="s2">"</span><span class="k">${</span><span class="nv">2</span><span class="k">:-</span><span class="p">/tmp/crawl</span><span class="k">}</span><span class="s2">"</span>
+
+<span class="k">if</span> <span class="o">[</span> <span class="nt">-z</span> <span class="s2">"</span><span class="nv">$CRAWL_ID</span><span class="s2">"</span> <span class="o">]</span><span class="p">;</span> <span class="k">then
+    </span><span class="nb">echo</span> <span class="s2">"Usage: </span><span class="nv">$0</span><span class="s2"> &lt;crawl-id&gt; [storage-root]"</span>
+    <span class="nb">exit </span>1
+<span class="k">fi
+
+</span><span class="nv">PROGRESS_FILE</span><span class="o">=</span><span class="s2">"</span><span class="nv">$STORAGE_ROOT</span><span class="s2">/crawls/</span><span class="nv">$CRAWL_ID</span><span class="s2">/progress.json"</span>
+
+<span class="nb">echo</span> <span class="s2">"Monitoring crawl: </span><span class="nv">$CRAWL_ID</span><span class="s2">"</span>
+<span class="nb">echo</span> <span class="s2">"Progress file: </span><span class="nv">$PROGRESS_FILE</span><span class="s2">"</span>
+<span class="nb">echo</span> <span class="s2">"================================"</span>
+
+<span class="k">while</span> <span class="o">[</span> <span class="nt">-f</span> <span class="s2">"</span><span class="nv">$PROGRESS_FILE</span><span class="s2">"</span> <span class="o">]</span><span class="p">;</span> <span class="k">do
+    if </span><span class="nb">command</span> <span class="nt">-v</span> jq &amp;&gt; /dev/null<span class="p">;</span> <span class="k">then
+        </span><span class="nv">status</span><span class="o">=</span><span class="si">$(</span>jq <span class="nt">-r</span> <span class="s1">'.status'</span> <span class="s2">"</span><span class="nv">$PROGRESS_FILE</span><span class="s2">"</span><span class="si">)</span>
+        <span class="nv">completed</span><span class="o">=</span><span class="si">$(</span>jq <span class="nt">-r</span> <span class="s1">'.completed_channels'</span> <span class="s2">"</span><span class="nv">$PROGRESS_FILE</span><span class="s2">"</span><span class="si">)</span>
+        <span class="nv">total</span><span class="o">=</span><span class="si">$(</span>jq <span class="nt">-r</span> <span class="s1">'.total_channels'</span> <span class="s2">"</span><span class="nv">$PROGRESS_FILE</span><span class="s2">"</span><span class="si">)</span>
+        <span class="nv">posts</span><span class="o">=</span><span class="si">$(</span>jq <span class="nt">-r</span> <span class="s1">'.processed_posts'</span> <span class="s2">"</span><span class="nv">$PROGRESS_FILE</span><span class="s2">"</span><span class="si">)</span>
+        
+        <span class="nb">echo</span> <span class="s2">"Status: </span><span class="nv">$status</span><span class="s2"> | Channels: </span><span class="nv">$completed</span><span class="s2">/</span><span class="nv">$total</span><span class="s2"> | Posts: </span><span class="nv">$posts</span><span class="s2">"</span>
+    <span class="k">else
+        </span><span class="nb">echo</span> <span class="s2">"Progress file exists (install jq for detailed info)"</span>
+    <span class="k">fi
+    
+    </span><span class="nb">sleep </span>10
+<span class="k">done
+
+</span><span class="nb">echo</span> <span class="s2">"Crawl completed or progress file not found"</span>
+</code></pre></div></div>
+
+<h2 id="troubleshooting-examples">Troubleshooting Examples</h2>
+
+<h3 id="debug-configuration">Debug Configuration</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Maximum verbosity for troubleshooting</span>
+./distributed-crawler <span class="se">\</span>
+    <span class="nt">--urls</span> <span class="s2">"problematic_channel"</span> <span class="se">\</span>
+    <span class="nt">--log-level</span> trace <span class="se">\</span>
+    <span class="nt">--tdlib-verbosity</span> 5 <span class="se">\</span>
+    <span class="nt">--max-posts</span> 10 <span class="se">\</span>
+    <span class="nt">--timeout</span> 120
+</code></pre></div></div>
+
+<h3 id="test-connection">Test Connection</h3>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Test with minimal configuration</span>
+./distributed-crawler <span class="se">\</span>
+    <span class="nt">--urls</span> <span class="s2">"telegram"</span> <span class="se">\</span>
+    <span class="nt">--max-posts</span> 1 <span class="se">\</span>
+    <span class="nt">--skip-media</span> <span class="se">\</span>
+    <span class="nt">--log-level</span> debug
+</code></pre></div></div>
+
+<hr />
+
+<p>These examples should cover most common use cases. For more specific scenarios, check the <a href="api-reference/">API Reference</a> or <a href="https://github.com/researchaccelerator-hub/distributed-crawler/issues">open an issue</a> on GitHub.</p>
+
+    </div>
+  </main>
+  
+  <footer class="site-footer">
+    <div class="wrapper">
+      <div class="footer-col-wrapper">
+        <div class="footer-col footer-col-1">
+          <h3>Distributed Crawler</h3>
+          <p>A powerful Go-based application for scraping messages and metadata from  Telegram channels and YouTube channels. Built for scalability and reliability.</p>
+        </div>
+        
+        <div class="footer-col footer-col-2">
+          <h3>Links</h3>
+          <ul class="social-media-list">
+            
+              <li>
+                <a href="https://github.com/researchaccelerator-hub/distributed-crawler">
+                  <span>GitHub</span>
+                </a>
+              </li>
+            
+              <li>
+                <a href="https://github.com/researchaccelerator-hub/distributed-crawler/issues">
+                  <span>Issues</span>
+                </a>
+              </li>
+            
+          </ul>
+        </div>
+        
+        <div class="footer-col footer-col-3">
+          <h3>About</h3>
+          <p>Built with ❤️ in Go. Licensed under Apache 2.0.</p>
+        </div>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
