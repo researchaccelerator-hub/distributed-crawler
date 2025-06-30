@@ -73,7 +73,7 @@
     <div class="wrapper">
       <h1 id="distributed-crawler">Distributed Crawler</h1>
 
-<p>A powerful, scalable Go-based application designed to scrape messages and metadata from both <strong>Telegram channels</strong> and <strong>YouTube channels</strong>. Built for researchers, analysts, and developers who need reliable data collection from social media platforms.</p>
+<p>A powerful, scalable Go-based application designed to scrape messages and metadata from multiple social media platforms. Built with a <strong>modular, pluggable architecture</strong> that makes it easy to extend with new data sources while maintaining consistent output formats for seamless data pipeline integration.</p>
 
 <h2 id="key-features">Key Features</h2>
 
@@ -138,14 +138,68 @@ go build <span class="nt">-o</span> distributed-crawler
   <li>Efficient API quota management</li>
 </ul>
 
-<h2 id="architecture-overview">Architecture Overview</h2>
+<h2 id="modular--extensible-architecture">Modular &amp; Extensible Architecture</h2>
 
-<p>The scraper supports multiple execution modes:</p>
+<p>Built in <strong>Go</strong> for performance and portability, the Distributed Crawler features a pluggable architecture that makes it easy to add new platforms and data sources:</p>
+
+<h3 id="-pluggable-platform-support">🔌 Pluggable Platform Support</h3>
+<ul>
+  <li><strong>Interface-based design</strong> allows adding new platforms without core changes</li>
+  <li><strong>Unified data models</strong> ensure consistent output across all platforms</li>
+  <li><strong>Platform-specific adapters</strong> handle API differences and rate limiting</li>
+  <li><strong>Currently supports</strong>: Telegram, YouTube (more platforms coming soon)</li>
+</ul>
+
+<h3 id="-go-powered-performance">🚀 Go-Powered Performance</h3>
+<ul>
+  <li><strong>Cross-platform binaries</strong> - runs on Linux, macOS, Windows, and ARM</li>
+  <li><strong>Low memory footprint</strong> and efficient concurrent processing</li>
+  <li><strong>Single executable</strong> with no runtime dependencies</li>
+  <li><strong>Fast compilation</strong> and easy deployment</li>
+</ul>
+
+<h3 id="-data-pipeline-ready">📊 Data Pipeline Ready</h3>
+<ul>
+  <li><strong>Standardized JSONL output</strong> works with any data processing system</li>
+  <li><strong>Consistent schema</strong> across all platforms simplifies analysis</li>
+  <li><strong>Incremental processing</strong> with progress tracking and resumability</li>
+  <li><strong>Multiple storage backends</strong> (local files, cloud storage, databases)</li>
+</ul>
+
+<h2 id="execution-modes">Execution Modes</h2>
+
+<p>Choose the deployment model that fits your scale:</p>
 
 <ul>
-  <li><strong>Standalone Mode</strong>: Simple single-process execution</li>
+  <li><strong>Standalone Mode</strong>: Simple single-process execution for small jobs</li>
   <li><strong>Distributed Mode</strong>: Orchestrator + worker architecture for large-scale operations</li>
-  <li><strong>DAPR Integration</strong>: Cloud-native deployment with state management</li>
+  <li><strong>DAPR Integration</strong>: Cloud-native deployment with state management and observability</li>
+</ul>
+
+<h2 id="why-choose-distributed-crawler">Why Choose Distributed Crawler?</h2>
+
+<h3 id="️-developer-friendly">🛠️ Developer-Friendly</h3>
+<ul>
+  <li><strong>Single binary deployment</strong> - no complex installations or dependencies</li>
+  <li><strong>Clear CLI interface</strong> with comprehensive help and examples</li>
+  <li><strong>Extensive configuration options</strong> via command line, files, or environment variables</li>
+  <li><strong>Detailed logging and monitoring</strong> for troubleshooting and optimization</li>
+</ul>
+
+<h3 id="-production-ready">🔧 Production-Ready</h3>
+<ul>
+  <li><strong>Graceful error handling</strong> with automatic retries and backoff</li>
+  <li><strong>Progress tracking</strong> with resumable crawls and checkpoint saving</li>
+  <li><strong>Resource management</strong> with configurable concurrency and rate limiting</li>
+  <li><strong>Cloud-native support</strong> with DAPR integration and distributed architectures</li>
+</ul>
+
+<h3 id="-scalable-by-design">📈 Scalable by Design</h3>
+<ul>
+  <li><strong>Horizontal scaling</strong> with orchestrator/worker pattern</li>
+  <li><strong>Efficient resource usage</strong> with Go’s lightweight concurrency model</li>
+  <li><strong>Platform-agnostic deployment</strong> on containers, VMs, or bare metal</li>
+  <li><strong>State management</strong> options for both local and distributed scenarios</li>
 </ul>
 
 <h2 id="use-cases">Use Cases</h2>
@@ -157,9 +211,9 @@ go build <span class="nt">-o</span> distributed-crawler
   <li><strong>Data Journalism</strong>: Gather evidence for investigative reporting</li>
 </ul>
 
-<h2 id="data-output">Data Output</h2>
+<h2 id="unified-data-output">Unified Data Output</h2>
 
-<p>All scraped data is saved in <strong>JSONL format</strong> with comprehensive metadata:</p>
+<p>All platforms output data in a <strong>consistent JSONL format</strong>, making it easy to build data pipelines and analytics workflows:</p>
 
 <div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
   </span><span class="nl">"post_uid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"12345-channel"</span><span class="p">,</span><span class="w">
@@ -174,6 +228,14 @@ go build <span class="nt">-o</span> distributed-crawler
   </span><span class="nl">"channel_data"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="err">...</span><span class="p">}</span><span class="w">
 </span><span class="p">}</span><span class="w">
 </span></code></pre></div></div>
+
+<h3 id="pipeline-integration-benefits">Pipeline Integration Benefits</h3>
+<ul>
+  <li><strong>Same schema</strong> whether scraping Telegram, YouTube, or future platforms</li>
+  <li><strong>Direct ingestion</strong> into data lakes, warehouses, and analytics tools</li>
+  <li><strong>Stream processing ready</strong> with line-by-line JSONL format</li>
+  <li><strong>Metadata rich</strong> with engagement metrics, timestamps, and platform context</li>
+</ul>
 
 <h2 id="getting-started">Getting Started</h2>
 

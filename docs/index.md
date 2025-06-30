@@ -5,7 +5,7 @@ title: "Distributed Crawler"
 
 # Distributed Crawler
 
-A powerful, scalable Go-based application designed to scrape messages and metadata from both **Telegram channels** and **YouTube channels**. Built for researchers, analysts, and developers who need reliable data collection from social media platforms.
+A powerful, scalable Go-based application designed to scrape messages and metadata from multiple social media platforms. Built with a **modular, pluggable architecture** that makes it easy to extend with new data sources while maintaining consistent output formats for seamless data pipeline integration.
 
 ## Key Features
 
@@ -49,13 +49,55 @@ go build -o distributed-crawler
 - Comprehensive engagement data (views, likes, comments)
 - Efficient API quota management
 
-## Architecture Overview
+## Modular & Extensible Architecture
 
-The scraper supports multiple execution modes:
+Built in **Go** for performance and portability, the Distributed Crawler features a pluggable architecture that makes it easy to add new platforms and data sources:
 
-- **Standalone Mode**: Simple single-process execution
+### 🔌 Pluggable Platform Support
+- **Interface-based design** allows adding new platforms without core changes
+- **Unified data models** ensure consistent output across all platforms
+- **Platform-specific adapters** handle API differences and rate limiting
+- **Currently supports**: Telegram, YouTube (more platforms coming soon)
+
+### 🚀 Go-Powered Performance
+- **Cross-platform binaries** - runs on Linux, macOS, Windows, and ARM
+- **Low memory footprint** and efficient concurrent processing
+- **Single executable** with no runtime dependencies
+- **Fast compilation** and easy deployment
+
+### 📊 Data Pipeline Ready
+- **Standardized JSONL output** works with any data processing system
+- **Consistent schema** across all platforms simplifies analysis
+- **Incremental processing** with progress tracking and resumability
+- **Multiple storage backends** (local files, cloud storage, databases)
+
+## Execution Modes
+
+Choose the deployment model that fits your scale:
+
+- **Standalone Mode**: Simple single-process execution for small jobs
 - **Distributed Mode**: Orchestrator + worker architecture for large-scale operations
-- **DAPR Integration**: Cloud-native deployment with state management
+- **DAPR Integration**: Cloud-native deployment with state management and observability
+
+## Why Choose Distributed Crawler?
+
+### 🛠️ Developer-Friendly
+- **Single binary deployment** - no complex installations or dependencies
+- **Clear CLI interface** with comprehensive help and examples
+- **Extensive configuration options** via command line, files, or environment variables
+- **Detailed logging and monitoring** for troubleshooting and optimization
+
+### 🔧 Production-Ready
+- **Graceful error handling** with automatic retries and backoff
+- **Progress tracking** with resumable crawls and checkpoint saving
+- **Resource management** with configurable concurrency and rate limiting
+- **Cloud-native support** with DAPR integration and distributed architectures
+
+### 📈 Scalable by Design
+- **Horizontal scaling** with orchestrator/worker pattern
+- **Efficient resource usage** with Go's lightweight concurrency model
+- **Platform-agnostic deployment** on containers, VMs, or bare metal
+- **State management** options for both local and distributed scenarios
 
 ## Use Cases
 
@@ -64,9 +106,9 @@ The scraper supports multiple execution modes:
 - **Market Research**: Monitor brand mentions and sentiment
 - **Data Journalism**: Gather evidence for investigative reporting
 
-## Data Output
+## Unified Data Output
 
-All scraped data is saved in **JSONL format** with comprehensive metadata:
+All platforms output data in a **consistent JSONL format**, making it easy to build data pipelines and analytics workflows:
 
 ```json
 {
@@ -82,6 +124,12 @@ All scraped data is saved in **JSONL format** with comprehensive metadata:
   "channel_data": {...}
 }
 ```
+
+### Pipeline Integration Benefits
+- **Same schema** whether scraping Telegram, YouTube, or future platforms
+- **Direct ingestion** into data lakes, warehouses, and analytics tools
+- **Stream processing ready** with line-by-line JSONL format
+- **Metadata rich** with engagement metrics, timestamps, and platform context
 
 ## Getting Started
 
