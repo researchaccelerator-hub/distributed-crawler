@@ -1,0 +1,369 @@
+---
+---
+
+@import "minima";
+
+// Custom variables
+:root {
+  --primary-color: #2563eb;
+  --primary-hover: #1d4ed8;
+  --secondary-color: #64748b;
+  --success-color: #059669;
+  --warning-color: #d97706;
+  --danger-color: #dc2626;
+  --light-bg: #f8fafc;
+  --border-color: #e2e8f0;
+  --text-muted: #64748b;
+  --code-bg: #f1f5f9;
+}
+
+// Base improvements
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  line-height: 1.6;
+}
+
+// Header styles
+.site-header {
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+  color: white;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  
+  .site-title {
+    color: white;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 1.5rem;
+    
+    &:hover {
+      text-decoration: none;
+      opacity: 0.9;
+    }
+    
+    .site-icon {
+      margin-right: 0.5rem;
+    }
+  }
+  
+  .site-nav .page-link {
+    color: rgba(255, 255, 255, 0.9);
+    margin-left: 2rem;
+    transition: color 0.3s ease;
+    
+    &:hover {
+      color: white;
+      text-decoration: none;
+    }
+  }
+}
+
+// Hero section for homepage
+.hero {
+  background: linear-gradient(135deg, var(--light-bg), #ffffff);
+  padding: 4rem 0;
+  text-align: center;
+  border-bottom: 1px solid var(--border-color);
+  
+  h1 {
+    font-size: 3rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    background: linear-gradient(135deg, var(--primary-color), var(--primary-hover));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .subtitle {
+    font-size: 1.25rem;
+    color: var(--text-muted);
+    margin-bottom: 2rem;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+// Features grid
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin: 3rem 0;
+}
+
+.feature-card {
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+  }
+  
+  .feature-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    display: block;
+  }
+  
+  h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+  }
+  
+  p {
+    color: var(--text-muted);
+    margin: 0;
+  }
+}
+
+// Buttons
+.button {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+  
+  &.primary {
+    background: var(--primary-color);
+    color: white;
+    
+    &:hover {
+      background: var(--primary-hover);
+      text-decoration: none;
+    }
+  }
+  
+  &.secondary {
+    background: transparent;
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+    
+    &:hover {
+      background: var(--primary-color);
+      color: white;
+      text-decoration: none;
+    }
+  }
+}
+
+.cta-buttons {
+  text-align: center;
+  margin: 3rem 0;
+  
+  .button {
+    margin: 0 0.5rem;
+  }
+}
+
+// Code blocks
+pre, code {
+  background: var(--code-bg);
+  border: 1px solid var(--border-color);
+}
+
+pre {
+  border-radius: 8px;
+  padding: 1.5rem;
+  overflow-x: auto;
+}
+
+code {
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+// Tables
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 2rem 0;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  
+  th, td {
+    padding: 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+  }
+  
+  th {
+    background: var(--light-bg);
+    font-weight: 600;
+    color: var(--primary-color);
+  }
+  
+  tr:hover {
+    background: var(--light-bg);
+  }
+}
+
+// Alerts/callouts
+.alert {
+  padding: 1rem 1.5rem;
+  border-radius: 8px;
+  margin: 1.5rem 0;
+  border-left: 4px solid;
+  
+  &.info {
+    background: #eff6ff;
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+  }
+  
+  &.warning {
+    background: #fffbeb;
+    border-color: var(--warning-color);
+    color: var(--warning-color);
+  }
+  
+  &.success {
+    background: #ecfdf5;
+    border-color: var(--success-color);
+    color: var(--success-color);
+  }
+}
+
+// Navigation improvements
+.site-nav {
+  .trigger {
+    display: flex;
+    align-items: center;
+  }
+  
+  @media screen and (max-width: 600px) {
+    .trigger {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    
+    .page-link {
+      margin-left: 0;
+      margin-top: 0.5rem;
+    }
+  }
+}
+
+// Footer
+.site-footer {
+  background: var(--light-bg);
+  border-top: 1px solid var(--border-color);
+  padding: 3rem 0 1rem;
+  
+  .footer-col-wrapper {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 2rem;
+  }
+  
+  h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+  }
+  
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    
+    li {
+      margin-bottom: 0.5rem;
+      
+      a {
+        color: var(--text-muted);
+        text-decoration: none;
+        
+        &:hover {
+          color: var(--primary-color);
+        }
+      }
+    }
+  }
+}
+
+// Responsive improvements
+@media screen and (max-width: 600px) {
+  .hero h1 {
+    font-size: 2rem;
+  }
+  
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .cta-buttons .button {
+    display: block;
+    margin: 0.5rem 0;
+  }
+  
+  table {
+    font-size: 0.9rem;
+    
+    th, td {
+      padding: 0.5rem;
+    }
+  }
+}
+
+// Content improvements
+.page-content {
+  padding: 2rem 0;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--primary-color);
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+h1:first-child, h2:first-child {
+  margin-top: 0;
+}
+
+// Syntax highlighting improvements
+.highlight {
+  border-radius: 8px;
+  
+  pre {
+    margin: 0;
+    border: none;
+  }
+}
+
+// TOC styling if needed
+.toc {
+  background: var(--light-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 2rem 0;
+  
+  h2 {
+    margin-top: 0;
+    color: var(--primary-color);
+  }
+  
+  ul {
+    margin: 0;
+    
+    a {
+      color: var(--text-muted);
+      text-decoration: none;
+      
+      &:hover {
+        color: var(--primary-color);
+      }
+    }
+  }
+}

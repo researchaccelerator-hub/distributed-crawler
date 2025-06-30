@@ -1,0 +1,76 @@
+# Site settings
+title: "Telegram Scraper"
+email: "your-email@example.com"
+description: >-
+  A powerful Go-based application for scraping messages and metadata from 
+  Telegram channels and YouTube channels. Built for scalability and reliability.
+baseurl: ""
+url: "https://your-username.github.io"
+twitter_username: your_username
+github_username: your_username
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+theme: minima
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+  - jekyll-seo-tag
+
+# Exclude from processing
+exclude:
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+  - Gemfile
+  - Gemfile.lock
+  - node_modules/
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/
+
+# Collections
+collections:
+  docs:
+    output: true
+    permalink: /:collection/:name/
+
+# Navigation
+navigation:
+  - title: "Home"
+    url: "/"
+  - title: "Getting Started"
+    url: "/getting-started/"
+  - title: "Architecture"
+    url: "/architecture/"
+  - title: "API Reference"
+    url: "/api-reference/"
+  - title: "Examples"
+    url: "/examples/"
+
+# GitHub repository
+repository: "your-username/telegram-scraper"
+
+# Social links
+social:
+  - title: "GitHub"
+    url: "https://github.com/your-username/telegram-scraper"
+  - title: "Issues"
+    url: "https://github.com/your-username/telegram-scraper/issues"
+
+# Site features
+features:
+  - title: "Multi-Platform Support"
+    description: "Scrape data from both Telegram channels and YouTube channels"
+    icon: "📱"
+  - title: "Scalable Architecture"
+    description: "Distributed processing with orchestrator and worker modes"
+    icon: "🚀"
+  - title: "Flexible Storage"
+    description: "Local filesystem or Azure Blob Storage integration"
+    icon: "💾"
+  - title: "Rich Data Format"
+    description: "Comprehensive JSONL output with metadata and engagement data"
+    icon: "📊"

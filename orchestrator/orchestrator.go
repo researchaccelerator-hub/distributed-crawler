@@ -297,7 +297,7 @@ func (o *Orchestrator) createWorkItem(page *state.Page) distributed.WorkItem {
 		YouTubeAPIKey:     o.config.YouTubeAPIKey,
 	}
 
-	return distributed.NewWorkItem(page.URL, o.crawlID, o.config.Platform, page.Depth, config)
+	return distributed.NewWorkItem(page.URL, page.Depth, page.ID, o.crawlID, o.config.Platform, config)
 }
 
 // shouldRetry determines if a failed page should be retried

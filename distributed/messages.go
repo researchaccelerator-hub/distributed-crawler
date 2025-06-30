@@ -2,6 +2,8 @@
 package distributed
 
 import (
+	"fmt"
+	"math/rand"
 	"time"
 )
 
@@ -31,6 +33,7 @@ const (
 	StatusSuccess = "success"
 	StatusError   = "error"
 	StatusPartial = "partial"
+	StatusRetry   = "retry"
 	
 	WorkerStatusActive  = "active"
 	WorkerStatusIdle    = "idle"
@@ -79,6 +82,7 @@ type WorkItem struct {
 	AssignedAt  *time.Time             `json:"assigned_at,omitempty"`
 	Deadline    *time.Time             `json:"deadline,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	TraceID     string                 `json:"trace_id,omitempty"`
 }
 
 // WorkItemConfig contains crawl-specific configuration for a work item
@@ -170,16 +174,18 @@ func PubSubTopics() []string {
 }
 
 // NewWorkItem creates a new work item with default values
-func NewWorkItem(url, crawlID, platform string, depth int, config WorkItemConfig) WorkItem {
+func NewWorkItem(url string, depth int, parentID, crawlID, platform string, config WorkItemConfig) WorkItem {
 	return WorkItem{
 		ID:         generateWorkItemID(),
 		URL:        url,
 		Depth:      depth,
+		ParentID:   parentID,
 		CrawlID:    crawlID,
 		Platform:   platform,
 		Config:     config,
 		RetryCount: 0,
 		CreatedAt:  time.Now(),
+		TraceID:    generateTraceID(),
 	}
 }
 
@@ -235,9 +241,91 @@ func generateTraceID() string {
 // generateRandomString generates a random alphanumeric string
 func generateRandomString(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 	b := make([]byte, length)
 	for i := range b {
-		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+		b[i] = charset[rng.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+// Validate validates a WorkItem
+func (w *WorkItem) Validate() error {
+	if w.ID == "" {
+		return fmt.Errorf("work item ID cannot be empty")
+	}
+	if w.URL == "" {
+		return fmt.Errorf("work item URL cannot be empty")
+	}
+	if w.Platform == "" {
+		return fmt.Errorf("work item platform cannot be empty")
+	}
+	if w.Platform != "telegram" && w.Platform != "youtube" {
+		return fmt.Errorf("unsupported platform: %s", w.Platform)
+	}
+	return nil
+}
+
+// Validate validates a WorkResult
+func (w *WorkResult) Validate() error {
+	if w.WorkItemID == "" {
+		return fmt.Errorf("work result WorkItemID cannot be empty")
+	}
+	if w.WorkerID == "" {
+		return fmt.Errorf("work result WorkerID cannot be empty")
+	}
+	if w.Status != StatusSuccess && w.Status != StatusError && w.Status != StatusPartial && w.Status != StatusRetry {
+		return fmt.Errorf("invalid status: %s", w.Status)
+	}
+	if w.Status == StatusError && w.Error == "" {
+		return fmt.Errorf("error status requires error message")
+	}
+	return nil
+}
+
+// Validate validates a DiscoveredPage
+func (d *DiscoveredPage) Validate() error {
+	if d.URL == "" {
+		return fmt.Errorf("discovered page URL cannot be empty")
+	}
+	if d.Platform == "" {
+		return fmt.Errorf("discovered page platform cannot be empty")
+	}
+	if d.Depth < 0 {
+		return fmt.Errorf("discovered page depth cannot be negative")
+	}
+	return nil
+}
+
+// Validate validates a StatusMessage
+func (s *StatusMessage) Validate() error {
+	if s.WorkerID == "" {
+		return fmt.Errorf("status message WorkerID cannot be empty")
+	}
+	
+	validMessageTypes := []string{MessageTypeHeartbeat, MessageTypeWorkerStarted, MessageTypeWorkerStopping}
+	valid := false
+	for _, msgType := range validMessageTypes {
+		if s.MessageType == msgType {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("invalid message type: %s", s.MessageType)
+	}
+	
+	validStatuses := []string{WorkerStatusActive, WorkerStatusIdle, WorkerStatusBusy, WorkerStatusError, WorkerStatusOffline}
+	valid = false
+	for _, status := range validStatuses {
+		if s.Status == status {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return fmt.Errorf("invalid status: %s", s.Status)
+	}
+	
+	return nil
 }

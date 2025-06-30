@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/dapr"
+	"github.com/researchaccelerator-hub/telegram-scraper/orchestrator"
 	"github.com/researchaccelerator-hub/telegram-scraper/standalone"
+	"github.com/researchaccelerator-hub/telegram-scraper/worker"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,6 +30,8 @@ var (
 	crawlType         string
 	minPostDate       string
 	daprMode          string
+	mode              string   // New: execution mode (standalone, dapr-standalone, orchestrator, worker)
+	workerID          string   // New: worker identifier for distributed mode
 	minUsers          int
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
@@ -108,11 +115,34 @@ func parseTimeAgo(timeAgoStr string) (time.Time, error) {
 // Root command setup
 var rootCmd = &cobra.Command{
 	Use:   "crawler",
-	Short: "A flexible web crawler that can run as a DAPR job or standalone",
-	Long: `A web crawler application that can run in three modes:
-1. As a DAPR job - waiting for job requests
-2. As a DAPR standalone - processing URLs directly but using DAPR
-3. As a regular standalone application - processing URLs without DAPR`,
+	Short: "A flexible web crawler that can run in multiple execution modes",
+	Long: `A web crawler application that can run in multiple execution modes:
+
+Distributed modes (Phase 2+):
+  --mode=orchestrator    - Central coordinator that distributes work via Dapr pubsub
+  --mode=worker          - Worker node that processes individual crawl tasks
+
+Direct execution modes:
+  --mode=standalone      - Single process crawling without Dapr
+  --mode=dapr-standalone - Single process crawling with Dapr state management
+
+Legacy modes (for backward compatibility):
+  --dapr --dapr-mode=job - Traditional Dapr job mode
+  --dapr                 - Traditional Dapr standalone mode
+  (no flags)             - Traditional standalone mode
+
+Examples:
+  # Distributed orchestrator (Phase 2+)
+  crawler --mode=orchestrator --dapr --urls="url1,url2"
+  
+  # Distributed worker (Phase 2+)  
+  crawler --mode=worker --dapr --worker-id="worker-1"
+  
+  # Explicit standalone
+  crawler --mode=standalone --urls="url1,url2"
+  
+  # Legacy compatibility
+  crawler --urls="url1,url2"`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Configure logging level
 		logLevelStr := viper.GetString("logging.level")
@@ -354,12 +384,27 @@ var rootCmd = &cobra.Command{
 				Msg("DAPR mode overridden by command line flag")
 		}
 
+		// Validate distributed mode configuration
+		if mode == "worker" && workerID == "" {
+			return fmt.Errorf("worker mode requires --worker-id to be specified")
+		}
+
+		// Log the execution mode
+		if mode != "" {
+			log.Info().Str("execution_mode", mode).Msg("Execution mode explicitly set")
+			if mode == "worker" {
+				log.Info().Str("worker_id", workerID).Msg("Worker ID configured")
+			}
+		} else {
+			log.Debug().Msg("No explicit execution mode set, will use legacy auto-detection")
+		}
+
 		log.Info().Msg("Configuration loaded successfully")
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// If no specific subcommand is invoked, show help
-		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" && urlFileURL == "" {
+		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" && urlFileURL == "" && mode == "" {
 			log.Info().Msg("No arguments provided, showing help")
 			cmd.Help()
 			return
@@ -401,27 +446,45 @@ var rootCmd = &cobra.Command{
 			log.Info().Str("url_file", urlFile).Msg("URL file provided")
 		}
 
-		// Start in appropriate mode
-		if crawlerCfg.DaprMode {
-			if crawlerCfg.DaprJobMode {
-				log.Info().
-					Int("dapr_port", crawlerCfg.DaprPort).
-					Msg("Starting in DAPR job mode")
-				dapr.StartDaprMode(crawlerCfg)
+		// Determine execution mode - new distributed modes take precedence
+		switch mode {
+		case "orchestrator":
+			log.Info().Str("mode", mode).Msg("Starting in orchestrator mode")
+			startOrchestratorMode(urlList, urlFile, crawlerCfg, generateCode)
+		case "worker":
+			log.Info().Str("mode", mode).Str("worker_id", workerID).Msg("Starting in worker mode")
+			startWorkerMode(workerID, crawlerCfg)
+		case "standalone":
+			log.Info().Str("mode", mode).Msg("Starting in explicit standalone mode")
+			standalone.StartStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
+		case "dapr-standalone":
+			log.Info().Str("mode", mode).Msg("Starting in explicit DAPR standalone mode")
+			dapr.StartDaprStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
+		case "":
+			// Legacy mode detection for backward compatibility
+			if crawlerCfg.DaprMode {
+				if crawlerCfg.DaprJobMode {
+					log.Info().
+						Int("dapr_port", crawlerCfg.DaprPort).
+						Msg("Starting in DAPR job mode (legacy)")
+					dapr.StartDaprMode(crawlerCfg)
+				} else {
+					log.Info().
+						Int("dapr_port", crawlerCfg.DaprPort).
+						Int("url_count", len(urlList)).
+						Bool("generate_code", generateCode).
+						Msg("Starting in DAPR standalone mode (legacy)")
+					dapr.StartDaprStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
+				}
 			} else {
 				log.Info().
-					Int("dapr_port", crawlerCfg.DaprPort).
 					Int("url_count", len(urlList)).
 					Bool("generate_code", generateCode).
-					Msg("Starting in DAPR standalone mode")
-				dapr.StartDaprStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
+					Msg("Starting in regular standalone mode (legacy)")
+				standalone.StartStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
 			}
-		} else {
-			log.Info().
-				Int("url_count", len(urlList)).
-				Bool("generate_code", generateCode).
-				Msg("Starting in regular standalone mode")
-			standalone.StartStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
+		default:
+			log.Fatal().Str("mode", mode).Msg("Unknown execution mode")
 		}
 
 		// Clean up downloaded file if needed
@@ -433,6 +496,103 @@ var rootCmd = &cobra.Command{
 			}
 		}
 	},
+}
+
+// startOrchestratorMode starts the distributed orchestrator
+func startOrchestratorMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
+	log.Info().Msg("Starting orchestrator mode (Phase 1 - basic structure)")
+	
+	// Collect URLs from command line arguments or file
+	var urls []string
+	if len(urlList) > 0 {
+		urls = append(urls, urlList...)
+	}
+
+	if urlFile != "" {
+		fileURLs, err := common.ReadURLsFromFile(urlFile)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to read URLs from file")
+		}
+		urls = append(urls, fileURLs...)
+	}
+
+	if len(urls) == 0 {
+		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
+	}
+
+	// Generate crawl ID if not provided
+	if crawlerCfg.CrawlID == "" {
+		crawlerCfg.CrawlID = common.GenerateCrawlID()
+	}
+
+	// Create orchestrator instance
+	orch, err := orchestrator.NewOrchestrator(crawlerCfg.CrawlID, crawlerCfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create orchestrator")
+	}
+
+	// Set up signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start orchestrator
+	err = orch.Start(ctx, urls)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to start orchestrator")
+	}
+
+	log.Info().Str("crawl_id", crawlerCfg.CrawlID).Int("url_count", len(urls)).Msg("Orchestrator started, waiting for signal to stop")
+
+	// Wait for shutdown signal
+	<-sigChan
+	log.Info().Msg("Received shutdown signal, stopping orchestrator")
+
+	// Stop orchestrator
+	if err := orch.Stop(ctx); err != nil {
+		log.Error().Err(err).Msg("Error stopping orchestrator")
+	} else {
+		log.Info().Msg("Orchestrator stopped gracefully")
+	}
+}
+
+// startWorkerMode starts the distributed worker
+func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
+	log.Info().Str("worker_id", workerID).Msg("Starting worker mode (Phase 1 - basic structure)")
+
+	// Create worker instance
+	w, err := worker.NewWorker(workerID, crawlerCfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to create worker")
+	}
+
+	// Set up signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start worker
+	err = w.Start(ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to start worker")
+	}
+
+	log.Info().Str("worker_id", workerID).Msg("Worker started, waiting for signal to stop")
+
+	// Wait for shutdown signal
+	<-sigChan
+	log.Info().Msg("Received shutdown signal, stopping worker")
+
+	// Stop worker
+	if err := w.Stop(ctx); err != nil {
+		log.Error().Err(err).Msg("Error stopping worker")
+	} else {
+		log.Info().Msg("Worker stopped gracefully")
+	}
 }
 
 // Initialize cobra command
@@ -465,6 +625,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
+
+	// New distributed mode flags
+	rootCmd.PersistentFlags().StringVar(&mode, "mode", "", "Execution mode: standalone, dapr-standalone, orchestrator, worker (empty for legacy auto-detection)")
+	rootCmd.PersistentFlags().StringVar(&workerID, "worker-id", "", "Worker identifier for distributed mode (required for worker mode)")
 
 	// Standalone mode specific flags
 	rootCmd.Flags().StringSliceVar(&urlList, "urls", []string{}, "comma-separated list of URLs to crawl")
@@ -500,6 +664,8 @@ func init() {
 	viper.BindPFlag("crawler.skipmedia", rootCmd.PersistentFlags().Lookup("skip-media"))
 	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
 	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
+	viper.BindPFlag("distributed.mode", rootCmd.PersistentFlags().Lookup("mode"))
+	viper.BindPFlag("distributed.worker_id", rootCmd.PersistentFlags().Lookup("worker-id"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)
