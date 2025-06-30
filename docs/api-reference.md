@@ -11,7 +11,7 @@ Complete reference for all command-line options, configuration parameters, and e
 
 ### Basic Syntax
 ```bash
-./telegram-scraper [global-options] [command] [command-options]
+./distributed-crawler [global-options] [command] [command-options]
 ```
 
 ### Global Options
@@ -287,16 +287,16 @@ Use `--max-posts` to limit quota usage.
 ### Basic Usage
 ```bash
 # Scrape Telegram channels
-./telegram-scraper --urls "channel1,channel2"
+./distributed-crawler --urls "channel1,channel2"
 
 # Scrape YouTube channels
-./telegram-scraper --platform youtube --youtube-api-key "KEY" --urls "UCxxx,UCyyy"
+./distributed-crawler --platform youtube --youtube-api-key "KEY" --urls "UCxxx,UCyyy"
 ```
 
 ### Advanced Configuration
 ```bash
 # Distributed mode with time filtering
-./telegram-scraper --mode orchestrator --dapr \
+./distributed-crawler --mode orchestrator --dapr \
   --urls "$(cat channels.txt | tr '\n' ',')" \
   --time-ago "30d" \
   --max-posts 1000 \
@@ -304,13 +304,13 @@ Use `--max-posts` to limit quota usage.
   --crawl-label "monthly-analysis"
 
 # Worker node
-./telegram-scraper --mode worker --dapr --worker-id "worker-01"
+./distributed-crawler --mode worker --dapr --worker-id "worker-01"
 ```
 
 ### Configuration File Usage
 ```bash
 # Use custom config file
-./telegram-scraper --config /path/to/config.yaml --urls "channel1,channel2"
+./distributed-crawler --config /path/to/config.yaml --urls "channel1,channel2"
 ```
 
 ---

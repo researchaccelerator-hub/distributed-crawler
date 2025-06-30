@@ -5,31 +5,31 @@ title: "Examples"
 
 # Examples
 
-Common use cases and configuration examples for the Telegram Scraper.
+Common use cases and configuration examples for the Distributed Crawler.
 
 ## Basic Usage Examples
 
 ### Simple Telegram Scraping
 ```bash
 # Scrape a few Telegram channels
-./telegram-scraper --urls "channel1,channel2,channel3"
+./distributed-crawler --urls "channel1,channel2,channel3"
 
 # Scrape with time filtering (last 30 days)
-./telegram-scraper --urls "news_channel,tech_channel" --time-ago "30d"
+./distributed-crawler --urls "news_channel,tech_channel" --time-ago "30d"
 
 # Limit the number of posts per channel
-./telegram-scraper --urls "busy_channel" --max-posts 1000
+./distributed-crawler --urls "busy_channel" --max-posts 1000
 ```
 
 ### YouTube Channel Scraping
 ```bash
 # Basic YouTube scraping
-./telegram-scraper --platform youtube \
+./distributed-crawler --platform youtube \
   --youtube-api-key "YOUR_API_KEY" \
   --urls "UCxxx1,UCxxx2"
 
 # YouTube with filtering and limits
-./telegram-scraper --platform youtube \
+./distributed-crawler --platform youtube \
   --youtube-api-key "YOUR_API_KEY" \
   --urls "@handle1,@handle2" \
   --time-ago "90d" \
@@ -41,7 +41,7 @@ Common use cases and configuration examples for the Telegram Scraper.
 ### Large-Scale Distributed Scraping
 ```bash
 # Start orchestrator
-./telegram-scraper --mode orchestrator --dapr \
+./distributed-crawler --mode orchestrator --dapr \
   --url-file channels_list.txt \
   --crawl-label "quarterly-analysis" \
   --time-ago "90d" \
@@ -49,15 +49,15 @@ Common use cases and configuration examples for the Telegram Scraper.
   --skip-media
 
 # Start multiple workers
-./telegram-scraper --mode worker --dapr --worker-id "worker-01"
-./telegram-scraper --mode worker --dapr --worker-id "worker-02"
-./telegram-scraper --mode worker --dapr --worker-id "worker-03"
+./distributed-crawler --mode worker --dapr --worker-id "worker-01"
+./distributed-crawler --mode worker --dapr --worker-id "worker-02"
+./distributed-crawler --mode worker --dapr --worker-id "worker-03"
 ```
 
 ### Date Range Analysis
 ```bash
 # Scrape posts between specific dates with sampling
-./telegram-scraper --urls "channel1,channel2" \
+./distributed-crawler --urls "channel1,channel2" \
   --date-between "2023-01-01,2023-12-31" \
   --sample-size 10000 \
   --crawl-label "2023-annual-analysis"
@@ -66,7 +66,7 @@ Common use cases and configuration examples for the Telegram Scraper.
 ### Custom Storage Configuration
 ```bash
 # Use custom storage directory
-./telegram-scraper --urls "channel1,channel2" \
+./distributed-crawler --urls "channel1,channel2" \
   --storage-root "/data/telegram-scrapes" \
   --crawl-id "custom-crawl-001"
 ```
@@ -98,7 +98,7 @@ output:
 
 Usage:
 ```bash
-./telegram-scraper --config config.yaml --urls "channel1,channel2"
+./distributed-crawler --config config.yaml --urls "channel1,channel2"
 ```
 
 ### Advanced Configuration File
@@ -171,7 +171,7 @@ export TG_PHONE_NUMBER="+1234567890"
 export CRAWLER_LOGGING_LEVEL="debug"
 export CRAWLER_STORAGE_ROOT="./local-storage"
 
-./telegram-scraper --urls "test_channel" --max-posts 100
+./distributed-crawler --urls "test_channel" --max-posts 100
 ```
 
 ### Production Environment
@@ -185,7 +185,7 @@ export BLOB_NAME="crawls/"
 export AZURE_STORAGE_ACCOUNT_URL="https://myaccount.blob.core.windows.net"
 export CRAWLER_LOGGING_LEVEL="info"
 
-./telegram-scraper --mode orchestrator --dapr \
+./distributed-crawler --mode orchestrator --dapr \
   --url-file production-channels.txt \
   --crawl-label "production-weekly" \
   --config production-config.yaml
@@ -255,16 +255,16 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o telegram-scraper
+RUN go build -o distributed-crawler
 
 FROM alpine:latest
 RUN apk add --no-cache ca-certificates openssl-dev
 WORKDIR /root/
-COPY --from=builder /app/telegram-scraper .
+COPY --from=builder /app/distributed-crawler .
 COPY --from=builder /usr/local/lib/libtd* /usr/local/lib/
 COPY --from=builder /usr/local/include/td /usr/local/include/td
 ENV LD_LIBRARY_PATH=/usr/local/lib
-CMD ["./telegram-scraper"]
+CMD ["./distributed-crawler"]
 ```
 
 ### Docker Compose for Distributed Setup
@@ -281,7 +281,7 @@ services:
       - TG_PHONE_NUMBER=${TG_PHONE_NUMBER}
       - CRAWLER_LOGGING_LEVEL=info
     command: >
-      ./telegram-scraper --mode orchestrator --dapr
+      ./distributed-crawler --mode orchestrator --dapr
       --url-file /data/channels.txt
       --crawl-label docker-crawl
     volumes:
@@ -298,7 +298,7 @@ services:
       - TG_PHONE_NUMBER=${TG_PHONE_NUMBER}
       - CRAWLER_LOGGING_LEVEL=info
     command: >
-      ./telegram-scraper --mode worker --dapr
+      ./distributed-crawler --mode worker --dapr
       --worker-id worker-1
     volumes:
       - ./storage:/storage
@@ -313,7 +313,7 @@ services:
       - TG_PHONE_NUMBER=${TG_PHONE_NUMBER}
       - CRAWLER_LOGGING_LEVEL=info
     command: >
-      ./telegram-scraper --mode worker --dapr
+      ./distributed-crawler --mode worker --dapr
       --worker-id worker-2
     volumes:
       - ./storage:/storage
@@ -336,7 +336,7 @@ Create `batch-scrape.sh`:
 # Configuration
 CHANNELS_DIR="./channel-lists"
 OUTPUT_DIR="./batch-results"
-SCRAPER="./telegram-scraper"
+SCRAPER="./distributed-crawler"
 
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
@@ -404,7 +404,7 @@ echo "Crawl completed or progress file not found"
 ### Debug Configuration
 ```bash
 # Maximum verbosity for troubleshooting
-./telegram-scraper \
+./distributed-crawler \
     --urls "problematic_channel" \
     --log-level trace \
     --tdlib-verbosity 5 \
@@ -415,7 +415,7 @@ echo "Crawl completed or progress file not found"
 ### Test Connection
 ```bash
 # Test with minimal configuration
-./telegram-scraper \
+./distributed-crawler \
     --urls "telegram" \
     --max-posts 1 \
     --skip-media \
@@ -424,4 +424,4 @@ echo "Crawl completed or progress file not found"
 
 ---
 
-These examples should cover most common use cases. For more specific scenarios, check the [API Reference](api-reference/) or [open an issue](https://github.com/your-username/telegram-scraper/issues) on GitHub.
+These examples should cover most common use cases. For more specific scenarios, check the [API Reference](api-reference/) or [open an issue](https://github.com/researchaccelerator-hub/distributed-crawler/issues) on GitHub.

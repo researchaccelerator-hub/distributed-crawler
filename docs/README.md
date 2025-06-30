@@ -1,6 +1,6 @@
-# Telegram Scraper Documentation
+# Distributed Crawler Documentation
 
-This directory contains the Jekyll-based documentation site for the Telegram Scraper project.
+This directory contains the Jekyll-based documentation site for the Distributed Crawler project.
 
 ## Local Development
 
@@ -89,7 +89,7 @@ Use fenced code blocks with language specification:
 
 ````markdown
 ```bash
-./telegram-scraper --urls "channel1,channel2"
+./distributed-crawler --urls "channel1,channel2"
 ```
 
 ```go

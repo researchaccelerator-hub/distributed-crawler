@@ -5,7 +5,7 @@ title: "Getting Started"
 
 # Getting Started
 
-This guide will help you set up and run the Telegram Scraper for the first time.
+This guide will help you set up and run the Distributed Crawler for the first time.
 
 ## Prerequisites
 
@@ -41,8 +41,8 @@ See the [TDLib documentation](https://tdlib.github.io/td/build.html) for Windows
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/your-username/telegram-scraper.git
-   cd telegram-scraper
+   git clone https://github.com/researchaccelerator-hub/distributed-crawler.git
+   cd distributed-crawler
    ```
 
 2. **Install dependencies**:
@@ -52,14 +52,14 @@ See the [TDLib documentation](https://tdlib.github.io/td/build.html) for Windows
 
 3. **Build the application**:
    ```bash
-   go build -o telegram-scraper
+   go build -o distributed-crawler
    ```
 
    For macOS users, you may need to set environment variables:
    ```bash
    export CGO_CFLAGS=-I/opt/homebrew/include
    export CGO_LDFLAGS=-L/opt/homebrew/lib -lssl -lcrypto
-   go build -o telegram-scraper
+   go build -o distributed-crawler
    ```
 
 ## Configuration
@@ -106,23 +106,23 @@ export AZURE_STORAGE_ACCOUNT_URL="https://youraccount.blob.core.windows.net"
 
 1. **Basic scraping**:
    ```bash
-   ./telegram-scraper --urls "channel1,channel2,channel3"
+   ./distributed-crawler --urls "channel1,channel2,channel3"
    ```
 
 2. **With time filtering**:
    ```bash
-   ./telegram-scraper --urls "channel1,channel2" --time-ago "30d"
+   ./distributed-crawler --urls "channel1,channel2" --time-ago "30d"
    ```
 
 3. **Limit posts per channel**:
    ```bash
-   ./telegram-scraper --urls "channel1,channel2" --max-posts 1000
+   ./distributed-crawler --urls "channel1,channel2" --max-posts 1000
    ```
 
 ### YouTube Example
 
 ```bash
-./telegram-scraper --platform youtube \
+./distributed-crawler --platform youtube \
   --youtube-api-key "YOUR_API_KEY" \
   --urls "UCxxx1,UCxxx2" \
   --time-ago "90d"
@@ -197,7 +197,7 @@ Each `data.jsonl` file contains one JSON object per line with comprehensive mess
 
 ### Getting Help
 
-- **Issues**: Report bugs on [GitHub Issues](https://github.com/your-username/telegram-scraper/issues)
+- **Issues**: Report bugs on [GitHub Issues](https://github.com/researchaccelerator-hub/distributed-crawler/issues)
 - **Logs**: Use `--log-level debug` for detailed troubleshooting information
 - **Documentation**: Check the [Architecture Guide](architecture/) for advanced configuration
 
@@ -209,4 +209,4 @@ Each `data.jsonl` file contains one JSON object per line with comprehensive mess
 
 ---
 
-Need help? Check our [troubleshooting guide](troubleshooting/) or [open an issue](https://github.com/your-username/telegram-scraper/issues) on GitHub.
+Need help? Check our [troubleshooting guide](troubleshooting/) or [open an issue](https://github.com/researchaccelerator-hub/distributed-crawler/issues) on GitHub.

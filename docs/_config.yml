@@ -1,13 +1,13 @@
 # Site settings
-title: "Telegram Scraper"
+title: "Distributed Crawler"
 email: "your-email@example.com"
 description: >-
   A powerful Go-based application for scraping messages and metadata from 
   Telegram channels and YouTube channels. Built for scalability and reliability.
-baseurl: ""
-url: "https://your-username.github.io"
-twitter_username: your_username
-github_username: your_username
+baseurl: "/distributed-crawler"
+url: "https://researchaccelerator-hub.github.io"
+twitter_username: researchaccelerator_hub
+github_username: researchaccelerator-hub
 
 # Build settings
 markdown: kramdown
@@ -51,14 +51,14 @@ navigation:
     url: "/examples/"
 
 # GitHub repository
-repository: "your-username/telegram-scraper"
+repository: "researchaccelerator-hub/distributed-crawler"
 
 # Social links
 social:
   - title: "GitHub"
-    url: "https://github.com/your-username/telegram-scraper"
+    url: "https://github.com/researchaccelerator-hub/distributed-crawler"
   - title: "Issues"
-    url: "https://github.com/your-username/telegram-scraper/issues"
+    url: "https://github.com/researchaccelerator-hub/distributed-crawler/issues"
 
 # Site features
 features:

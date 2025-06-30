@@ -5,13 +5,13 @@ title: "Architecture"
 
 # Architecture Overview
 
-The Telegram Scraper is designed as a modular, scalable system that can operate in multiple execution modes depending on your needs. This guide explains the system architecture, components, and execution modes.
+The Distributed Crawler is designed as a modular, scalable system that can operate in multiple execution modes depending on your needs. This guide explains the system architecture, components, and execution modes.
 
 ## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Telegram Scraper                        │
+│                    Distributed Crawler                        │
 ├─────────────────────────────────────────────────────────────┤
 │  CLI Interface (main.go)                                   │
 │  ├── Configuration Management                              │
@@ -99,7 +99,7 @@ type Post struct {
 **Use case**: Simple, single-machine scraping
 
 ```bash
-./telegram-scraper --mode=standalone --urls "channel1,channel2"
+./distributed-crawler --mode=standalone --urls "channel1,channel2"
 ```
 
 **Characteristics**:
@@ -112,7 +112,7 @@ type Post struct {
 **Use case**: Cloud-ready single instance with state management
 
 ```bash
-./telegram-scraper --mode=dapr-standalone --dapr --urls "channel1,channel2"
+./distributed-crawler --mode=dapr-standalone --dapr --urls "channel1,channel2"
 ```
 
 **Characteristics**:
@@ -125,7 +125,7 @@ type Post struct {
 **Use case**: Large-scale scraping with job distribution
 
 ```bash
-./telegram-scraper --mode=orchestrator --dapr --urls "channel1,channel2,..."
+./distributed-crawler --mode=orchestrator --dapr --urls "channel1,channel2,..."
 ```
 
 **Characteristics**:
@@ -138,7 +138,7 @@ type Post struct {
 **Use case**: Scalable worker nodes for processing
 
 ```bash
-./telegram-scraper --mode=worker --dapr --worker-id="worker-1"
+./distributed-crawler --mode=worker --dapr --worker-id="worker-1"
 ```
 
 **Characteristics**:
@@ -276,7 +276,7 @@ azure:
 
 ### Package Structure
 ```
-telegram-scraper/
+distributed-crawler/
 ├── main.go                 # Entry point
 ├── common/                 # Shared utilities
 ├── crawler/               # Platform crawlers

@@ -1,9 +1,9 @@
 ---
 layout: default
-title: "Telegram Scraper"
+title: "Distributed Crawler"
 ---
 
-# Telegram Scraper
+# Distributed Crawler
 
 A powerful, scalable Go-based application designed to scrape messages and metadata from both **Telegram channels** and **YouTube channels**. Built for researchers, analysts, and developers who need reliable data collection from social media platforms.
 
@@ -25,14 +25,14 @@ Get up and running in minutes:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/telegram-scraper.git
-cd telegram-scraper
+git clone https://github.com/researchaccelerator-hub/distributed-crawler.git
+cd distributed-crawler
 
 # Build the application
-go build -o telegram-scraper
+go build -o distributed-crawler
 
 # Run with basic configuration
-./telegram-scraper --urls "channel1,channel2,channel3"
+./distributed-crawler --urls "channel1,channel2,channel3"
 ```
 
 ## Supported Platforms
@@ -89,12 +89,12 @@ Ready to start scraping? Check out our [Getting Started Guide](getting-started/)
 
 <div class="cta-buttons">
   <a href="getting-started/" class="button primary">Get Started</a>
-  <a href="https://github.com/your-username/telegram-scraper" class="button secondary">View on GitHub</a>
+  <a href="https://github.com/researchaccelerator-hub/distributed-crawler" class="button secondary">View on GitHub</a>
 </div>
 
 ## Community & Support
 
-- **GitHub**: [Report issues](https://github.com/your-username/telegram-scraper/issues) and contribute
+- **GitHub**: [Report issues](https://github.com/researchaccelerator-hub/distributed-crawler/issues) and contribute
 - **Documentation**: Comprehensive guides and API reference
 - **Examples**: Ready-to-use configuration templates
 
