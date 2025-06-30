@@ -150,20 +150,6 @@ Our primary forum for:
 - **Show and Tell**: Share your projects and use cases
 - **Research Collaboration**: Connect with other researchers
 
-### Discord Community
-Join our [Discord server](https://discord.gg/distributed-crawler) for:
-- Real-time support and collaboration
-- Weekly community calls
-- Pair programming sessions
-- Social interaction with other contributors
-
-### Mailing List
-Subscribe to our [quarterly newsletter](mailto:community@distributed-crawler.org) for:
-- Major release announcements
-- Community highlights and contributions
-- Research spotlight features
-- Upcoming events and meetups
-
 ---
 
 ## Code of Conduct
@@ -191,7 +177,7 @@ We are committed to providing a welcoming and inspiring community for all. We pl
 - Publishing others' private information without permission
 
 ### Enforcement
-Instances of unacceptable behavior may be reported to [conduct@distributed-crawler.org](mailto:conduct@distributed-crawler.org). All complaints will be reviewed and investigated promptly and fairly.
+Instances of unacceptable behavior may be reported to [info@research-accelerator.org](mailto:info@research-accelerator.org). All complaints will be reviewed and investigated promptly and fairly.
 
 Community leaders have the right to remove, edit, or reject comments, commits, code, issues, and other contributions that are not aligned with this Code of Conduct.
 
@@ -203,8 +189,6 @@ Community leaders have the right to remove, edit, or reject comments, commits, c
 We celebrate all forms of contribution! Contributors are recognized in:
 - **README Contributors Section**: All contributors listed with profile links
 - **Release Notes**: Major contributions highlighted in release announcements
-- **Community Spotlights**: Monthly features of outstanding contributors
-- **Swag Program**: Exclusive merchandise for regular contributors
 
 ### Maintainer Path
 Interested in becoming a maintainer? We look for contributors who:
@@ -245,27 +229,6 @@ We encourage responsible research practices:
 
 ---
 
-## Events & Meetups
-
-### Monthly Community Calls
-Join us on the first Wednesday of each month at 3 PM UTC for:
-- Project updates and roadmap discussions
-- Community presentations and demos
-- Q&A with maintainers
-- Networking with other users
-
-### Annual Conference
-Our annual Distributed Data Collection Conference brings together:
-- Researchers sharing their findings
-- Platform representatives discussing API changes
-- Technology talks on scaling and performance
-- Workshops on advanced features and techniques
-
-### Local Meetups
-We support local meetups in major cities. Interested in organizing one? Contact us at [events@distributed-crawler.org](mailto:events@distributed-crawler.org).
-
----
-
 ## Getting Help
 
 ### Documentation First
@@ -276,10 +239,10 @@ Before asking questions, please check:
 - [GitHub Issues](https://github.com/researchaccelerator-hub/distributed-crawler/issues) for known problems
 
 ### Where to Ask
-- **Usage Questions**: GitHub Discussions or Discord
+- **Usage Questions**: GitHub Discussions
 - **Bug Reports**: GitHub Issues with detailed reproduction steps  
 - **Feature Requests**: GitHub Issues with use case description
-- **Security Issues**: Email [security@distributed-crawler.org](mailto:security@distributed-crawler.org)
+- **Security Issues**: Email [info@research-accelerator.org](mailto:info@research-accelerator.org)
 
 ### Response Expectations
 - **Community Support**: Typically within 24-48 hours
@@ -297,4 +260,4 @@ Together, we're building the future of ethical, reliable data collection. Thank 
 
 ---
 
-*Want to get involved? Start by introducing yourself in [GitHub Discussions](https://github.com/researchaccelerator-hub/distributed-crawler/discussions) or joining our [Discord community](https://discord.gg/distributed-crawler)!*
+*Want to get involved? Start by introducing yourself in [GitHub Discussions](https://github.com/researchaccelerator-hub/distributed-crawler/discussions)!*
