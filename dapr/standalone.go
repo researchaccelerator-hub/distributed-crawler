@@ -4,6 +4,12 @@ package dapr
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
@@ -14,11 +20,6 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -296,6 +297,8 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			continue
 		}
 
+		log.Debug().Int("config_max_depth", crawlCfg.MaxDepth).Msg("PLSDELETE")
+		// TODO: var used for if is different from logged var
 		if depth > crawlCfg.MaxDepth {
 			log.Info().Msgf("Processed all layers up to max depth %d", maxDepth)
 			break
@@ -534,6 +537,14 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 													Time("date_between_min", fromTime).
 													Time("date_between_max", toTime).
 													Msg("Using date-between filter for YouTube crawl in DAPR mode")
+											} else if !crawlCfg.PostRecency.IsZero() {
+												// Use PostRecency var to generate time between
+												fromTime = crawlCfg.PostRecency
+												toTime = time.Now()
+												log.Debug().
+													Time("date_between_min", fromTime).
+													Time("date_between_max", toTime).
+													Msg("Using time-ago filter for YouTube crawl in DAPR mode")
 											} else {
 												// Use traditional min post date with current time as upper bound
 												fromTime = crawlCfg.MinPostDate
