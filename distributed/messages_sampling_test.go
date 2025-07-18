@@ -3,8 +3,6 @@ package distributed
 import (
 	"testing"
 	"time"
-
-	"github.com/researchaccelerator-hub/telegram-scraper/common"
 )
 
 func TestWorkItemConfigSamplingFields(t *testing.T) {

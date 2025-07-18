@@ -71,7 +71,7 @@ func TestWorkItemConfigToCrawlerConfigSampling(t *testing.T) {
 				Timeout:          45,
 				SamplingMethod:   "channel",
 				MinChannelVideos: 0, // Not relevant for Telegram
-				MaxUsers:         1000,
+				MinUsers:         1000,
 			},
 			workerPlatform: "telegram",
 			expectedConfig: common.CrawlerConfig{
@@ -81,6 +81,7 @@ func TestWorkItemConfigToCrawlerConfigSampling(t *testing.T) {
 				Platform:         "telegram",
 				SamplingMethod:   "channel",
 				MinChannelVideos: 0,
+				MinUsers:         1000,
 			},
 		},
 		{

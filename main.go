@@ -27,7 +27,6 @@ var (
 	urlFile           string
 	urlFileURL        string
 	generateCode      bool
-	crawlType         string
 	minPostDate       string
 	daprMode          string
 	mode              string // New: execution mode (standalone, dapr-standalone, orchestrator, worker)
@@ -695,7 +694,6 @@ func init() {
 	rootCmd.Flags().StringVar(&urlFile, "url-file", "", "file containing URLs to crawl (one per line)")
 	rootCmd.Flags().StringVar(&urlFileURL, "url-file-url", "", "URL to a file containing URLs to crawl (one per line)")
 	rootCmd.Flags().BoolVar(&generateCode, "generate-code", false, "run code generation after crawling")
-	rootCmd.Flags().StringVar(&crawlType, "crawl-type", "focused", "Select between focused(default) and snowball")
 
 	// Bind flags to viper
 	viper.BindPFlag("logging.level", rootCmd.PersistentFlags().Lookup("log-level"))
