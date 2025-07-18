@@ -295,6 +295,8 @@ func (o *Orchestrator) createWorkItem(page *state.Page) distributed.WorkItem {
 		CrawlLabel:        o.config.CrawlLabel,
 		SkipMediaDownload: o.config.SkipMediaDownload,
 		YouTubeAPIKey:     o.config.YouTubeAPIKey,
+		SamplingMethod:    o.config.SamplingMethod,
+		MinChannelVideos:  o.config.MinChannelVideos,
 	}
 
 	return distributed.NewWorkItem(page.URL, page.Depth, page.ID, o.crawlID, o.config.Platform, config)
