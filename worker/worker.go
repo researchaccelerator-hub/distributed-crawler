@@ -427,6 +427,8 @@ func (w *Worker) workItemConfigToCrawlerConfig(config distributed.WorkItemConfig
 		CrawlLabel:        config.CrawlLabel,
 		SkipMediaDownload: config.SkipMediaDownload,
 		YouTubeAPIKey:     config.YouTubeAPIKey,
+		SamplingMethod:    config.SamplingMethod,
+		MinChannelVideos:  config.MinChannelVideos,
 	}
 }
 

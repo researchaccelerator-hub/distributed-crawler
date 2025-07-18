@@ -506,6 +506,10 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 									crawlerConfig := map[string]interface{}{
 										"client":        ytAdapter,
 										"state_manager": sm,
+										"crawler_config": map[string]interface{}{
+											"sampling_method":    crawlCfg.SamplingMethod,
+											"min_channel_videos": crawlCfg.MinChannelVideos,
+										},
 									}
 
 									if ytErr = ytCrawler.Initialize(clientCtx, crawlerConfig); ytErr != nil {

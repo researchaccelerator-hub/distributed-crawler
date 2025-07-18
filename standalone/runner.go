@@ -425,6 +425,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			"client": ytModelClient,
 			"state_manager": sm,
 			"crawl_label": crawlCfg.CrawlLabel, // Pass the crawl label to be added to posts
+			"crawler_config": map[string]interface{}{
+				"sampling_method":    crawlCfg.SamplingMethod,
+				"min_channel_videos": crawlCfg.MinChannelVideos,
+			},
 		}
 		
 		err = ytCrawler.Initialize(clientCtx, crawlerConfig)

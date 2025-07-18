@@ -30,8 +30,8 @@ var (
 	crawlType         string
 	minPostDate       string
 	daprMode          string
-	mode              string   // New: execution mode (standalone, dapr-standalone, orchestrator, worker)
-	workerID          string   // New: worker identifier for distributed mode
+	mode              string // New: execution mode (standalone, dapr-standalone, orchestrator, worker)
+	workerID          string // New: worker identifier for distributed mode
 	minUsers          int
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
@@ -170,6 +170,11 @@ Examples:
 			}
 		}
 
+		// Validate sampling method combinations
+		if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile); err != nil {
+			return err
+		}
+
 		// Load configuration file if specified
 		if cfgFile != "" {
 			viper.SetConfigFile(cfgFile)
@@ -270,6 +275,18 @@ Examples:
 			crawlerCfg.SkipMediaDownload = viper.GetBool("crawler.skipmedia")
 		}
 
+		// Load sampling method configuration
+		crawlerCfg.SamplingMethod = viper.GetString("crawler.sampling")
+		if crawlerCfg.SamplingMethod == "" {
+			crawlerCfg.SamplingMethod = "channel" // Default value
+		}
+
+		// Load minimum channel videos configuration
+		crawlerCfg.MinChannelVideos = viper.GetInt64("crawler.min_channel_videos")
+		if crawlerCfg.MinChannelVideos == 0 {
+			crawlerCfg.MinChannelVideos = 10 // Default value
+		}
+
 		log.Debug().
 			Int("min_users", crawlerCfg.MinUsers).
 			Str("crawl_id", crawlerCfg.CrawlID).
@@ -329,26 +346,26 @@ Examples:
 		dateBetweenStr := viper.GetString("crawler.datebetween")
 		if dateBetweenStr != "" {
 			log.Debug().Str("date_between", dateBetweenStr).Msg("Processing date-between parameter")
-			
+
 			// Parse date range in format "YYYY-MM-DD,YYYY-MM-DD"
 			dates := strings.Split(dateBetweenStr, ",")
 			if len(dates) != 2 {
 				log.Error().Str("date_between", dateBetweenStr).Msg("Invalid date-between format")
 				return fmt.Errorf("invalid date-between format, must be 'YYYY-MM-DD,YYYY-MM-DD'")
 			}
-			
+
 			minDate, err := time.Parse("2006-01-02", strings.TrimSpace(dates[0]))
 			if err != nil {
 				log.Error().Err(err).Str("min_date", dates[0]).Msg("Invalid min date in date-between")
 				return fmt.Errorf("invalid min date in date-between format, must be YYYY-MM-DD: %v", err)
 			}
-			
+
 			maxDate, err := time.Parse("2006-01-02", strings.TrimSpace(dates[1]))
 			if err != nil {
 				log.Error().Err(err).Str("max_date", dates[1]).Msg("Invalid max date in date-between")
 				return fmt.Errorf("invalid max date in date-between format, must be YYYY-MM-DD: %v", err)
 			}
-			
+
 			// Validate that min date is before max date
 			if minDate.After(maxDate) {
 				log.Error().
@@ -357,7 +374,7 @@ Examples:
 					Msg("Min date is after max date in date-between")
 				return fmt.Errorf("min date must be before max date in date-between")
 			}
-			
+
 			crawlerCfg.DateBetweenMin = minDate
 			crawlerCfg.DateBetweenMax = maxDate
 			log.Info().
@@ -501,7 +518,7 @@ Examples:
 // startOrchestratorMode starts the distributed orchestrator
 func startOrchestratorMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting orchestrator mode (Phase 1 - basic structure)")
-	
+
 	// Collect URLs from command line arguments or file
 	var urls []string
 	if len(urlList) > 0 {
@@ -595,6 +612,47 @@ func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
 	}
 }
 
+// validateSamplingMethod validates that the platform supports the specified sampling method
+func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string) error {
+	// Valid sampling methods per platform
+	validMethods := map[string][]string{
+		"telegram": {"channel", "snowball"},
+		"youtube":  {"channel", "random", "snowball"},
+	}
+
+	// Check if platform is supported
+	supportedMethods, exists := validMethods[platform]
+	if !exists {
+		return fmt.Errorf("unsupported platform: %s", platform)
+	}
+
+	// Check if sampling method is valid for this platform
+	isSupported := false
+	for _, method := range supportedMethods {
+		if method == samplingMethod {
+			isSupported = true
+			break
+		}
+	}
+
+	if !isSupported {
+		return fmt.Errorf("sampling method '%s' is not supported for platform '%s'. Supported methods: %v",
+			samplingMethod, platform, supportedMethods)
+	}
+
+	// For random sampling, no URLs/channels are required
+	if samplingMethod == "random" {
+		return nil
+	}
+
+	// For channel and snowball sampling, validate that URLs are provided
+	if (samplingMethod == "channel" || samplingMethod == "snowball") && len(urlList) == 0 && urlFile == "" {
+		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
+	}
+
+	return nil
+}
+
 // Initialize cobra command
 func init() {
 	// Global flags
@@ -625,6 +683,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, snowball")
+	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 
 	// New distributed mode flags
 	rootCmd.PersistentFlags().StringVar(&mode, "mode", "", "Execution mode: standalone, dapr-standalone, orchestrator, worker (empty for legacy auto-detection)")
@@ -664,6 +724,8 @@ func init() {
 	viper.BindPFlag("crawler.skipmedia", rootCmd.PersistentFlags().Lookup("skip-media"))
 	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
 	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
+	viper.BindPFlag("crawler.sampling", rootCmd.PersistentFlags().Lookup("sampling"))
+	viper.BindPFlag("crawler.min_channel_videos", rootCmd.PersistentFlags().Lookup("min-channel-videos"))
 	viper.BindPFlag("distributed.mode", rootCmd.PersistentFlags().Lookup("mode"))
 	viper.BindPFlag("distributed.worker_id", rootCmd.PersistentFlags().Lookup("worker-id"))
 
