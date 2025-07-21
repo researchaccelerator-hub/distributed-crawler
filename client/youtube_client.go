@@ -1628,3 +1628,13 @@ func (c *YouTubeDataClient) cacheVideoStats(video *youtubemodel.YouTubeVideo) {
 func (a *YouTubeClientAdapter) GetChannelType() string {
 	return "youtube"
 }
+
+// GetRandomVideos retrieves videos using random sampling - delegates to the wrapped YouTubeDataClient
+func (a *YouTubeClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	return a.client.GetRandomVideos(ctx, fromTime, toTime, limit)
+}
+
+// GetSnowballVideos retrieves videos using snowball sampling - delegates to the wrapped YouTubeDataClient
+func (a *YouTubeClientAdapter) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	return a.client.GetSnowballVideos(ctx, seedChannelIDs, fromTime, toTime, limit)
+}

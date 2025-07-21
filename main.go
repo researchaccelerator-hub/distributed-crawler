@@ -532,7 +532,8 @@ func startOrchestratorMode(urlList []string, urlFile string, crawlerCfg common.C
 		urls = append(urls, fileURLs...)
 	}
 
-	if len(urls) == 0 {
+	// For random sampling, URLs are not required since we discover content randomly
+	if len(urls) == 0 && !(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
 	}
 

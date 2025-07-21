@@ -114,14 +114,24 @@ func (a *ClientAdapter) GetVideosFromChannel(ctx context.Context, channelID stri
 
 // GetRandomVideos retrieves videos using random sampling
 func (a *ClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	// This is a simplified implementation since the underlying client doesn't support random sampling
-	// In a real implementation, this would use a more sophisticated method for random sampling
-	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("random sampling not implemented in adapter")
+	// Check if the underlying client is a YouTubeClientAdapter that wraps a YouTubeDataClient
+	if ytClientAdapter, ok := a.client.(*clientpkg.YouTubeClientAdapter); ok {
+		// Access the wrapped YouTubeDataClient which has the actual random sampling implementation
+		return ytClientAdapter.GetRandomVideos(ctx, fromTime, toTime, limit)
+	}
+	
+	// Fallback for clients that don't support random sampling
+	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("random sampling not supported by underlying client type %T", a.client)
 }
 
 // GetSnowballVideos retrieves videos using snowball sampling
 func (a *ClientAdapter) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	// This is a simplified implementation since the underlying client doesn't support snowball sampling
-	// In a real implementation, this would implement snowball sampling
-	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("snowball sampling not implemented in adapter")
+	// Check if the underlying client is a YouTubeClientAdapter that wraps a YouTubeDataClient
+	if ytClientAdapter, ok := a.client.(*clientpkg.YouTubeClientAdapter); ok {
+		// Access the wrapped YouTubeDataClient which has the actual snowball sampling implementation
+		return ytClientAdapter.GetSnowballVideos(ctx, seedChannelIDs, fromTime, toTime, limit)
+	}
+	
+	// Fallback for clients that don't support snowball sampling
+	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("snowball sampling not supported by underlying client type %T", a.client)
 }
