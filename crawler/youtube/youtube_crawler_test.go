@@ -3,7 +3,9 @@ package youtube
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 )
@@ -26,31 +28,42 @@ func (m *MockYouTubeClient) GetChannelInfo(ctx context.Context, channelID string
 	}, nil
 }
 
-func (m *MockYouTubeClient) GetVideos(ctx context.Context, channelID string, fromTime, toTime interface{}, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+func (m *MockYouTubeClient) GetVideos(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 
-func (m *MockYouTubeClient) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime interface{}, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+func (m *MockYouTubeClient) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 
-func (m *MockYouTubeClient) GetRandomVideos(ctx context.Context, fromTime, toTime interface{}, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+func (m *MockYouTubeClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 
-func (m *MockYouTubeClient) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime interface{}, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+func (m *MockYouTubeClient) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 
-// MockStateManager implements state.StateManagementInterface for testing
-type MockStateManager struct{}
+// MockYouTubeStateManager implements state.StateManagementInterface for testing
+type MockYouTubeStateManager struct{}
 
-func (m *MockStateManager) Initialize(urls []string) error { return nil }
-func (m *MockStateManager) AddPage(page state.Page) error { return nil }
-func (m *MockStateManager) UpdatePage(page state.Page) error { return nil }
-func (m *MockStateManager) GetLayerByDepth(depth int) ([]*state.Page, error) { return []*state.Page{}, nil }
-func (m *MockStateManager) GetMaxDepth() (int, error) { return 0, nil }
-func (m *MockStateManager) Close() error { return nil }
+func (m *MockYouTubeStateManager) Initialize(urls []string) error { return nil }
+func (m *MockYouTubeStateManager) GetPage(id string) (state.Page, error) { return state.Page{}, nil }
+func (m *MockYouTubeStateManager) UpdatePage(page state.Page) error { return nil }
+func (m *MockYouTubeStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error { return nil }
+func (m *MockYouTubeStateManager) AddLayer(pages []state.Page) error { return nil }
+func (m *MockYouTubeStateManager) GetLayerByDepth(depth int) ([]state.Page, error) { return nil, nil }
+func (m *MockYouTubeStateManager) GetMaxDepth() (int, error) { return 0, nil }
+func (m *MockYouTubeStateManager) SaveState() error { return nil }
+func (m *MockYouTubeStateManager) ExportPagesToBinding(crawlID string) error { return nil }
+func (m *MockYouTubeStateManager) StorePost(channelID string, post model.Post) error { return nil }
+func (m *MockYouTubeStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) { return "", "", nil }
+func (m *MockYouTubeStateManager) GetPreviousCrawls() ([]string, error) { return nil, nil }
+func (m *MockYouTubeStateManager) UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error { return nil }
+func (m *MockYouTubeStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) { return "", false, nil }
+func (m *MockYouTubeStateManager) HasProcessedMedia(mediaID string) (bool, error) { return false, nil }
+func (m *MockYouTubeStateManager) MarkMediaAsProcessed(mediaID string) error { return nil }
+func (m *MockYouTubeStateManager) Close() error { return nil }
 
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {
@@ -64,7 +77,7 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 			name: "basic initialization",
 			config: map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 			},
 			expectError:       false,
 			expectedMethod:    SamplingMethodChannel,
@@ -74,7 +87,7 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 			name: "initialization with crawler config - random sampling",
 			config: map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 				"crawler_config": map[string]interface{}{
 					"sampling_method":    "random",
 					"min_channel_videos": int64(25),
@@ -88,7 +101,7 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 			name: "initialization with crawler config - snowball sampling",
 			config: map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 				"crawler_config": map[string]interface{}{
 					"sampling_method":    "snowball",
 					"seed_channels":      []interface{}{"UC123", "UC456"},
@@ -103,7 +116,7 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 			name: "initialization with different numeric types",
 			config: map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 				"crawler_config": map[string]interface{}{
 					"sampling_method":    "channel",
 					"min_channel_videos": int(100), // int instead of int64
@@ -117,7 +130,7 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 			name: "initialization with float64 numeric type",
 			config: map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 				"crawler_config": map[string]interface{}{
 					"sampling_method":    "channel",
 					"min_channel_videos": float64(75), // float64
@@ -130,7 +143,7 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 		{
 			name: "missing client",
 			config: map[string]interface{}{
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 			},
 			expectError: true,
 		},
@@ -145,7 +158,7 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 			name: "invalid client type",
 			config: map[string]interface{}{
 				"client":        "not a client",
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 			},
 			expectError: true,
 		},
@@ -205,7 +218,7 @@ func TestYouTubeCrawlerSnowballValidation(t *testing.T) {
 			name: "snowball with seed channels",
 			config: map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 				"crawler_config": map[string]interface{}{
 					"sampling_method": "snowball",
 					"seed_channels":   []interface{}{"UC123", "UC456"},
@@ -218,7 +231,7 @@ func TestYouTubeCrawlerSnowballValidation(t *testing.T) {
 			name: "snowball without seed channels - fallback to channel",
 			config: map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 				"crawler_config": map[string]interface{}{
 					"sampling_method": "snowball",
 				},
@@ -277,7 +290,7 @@ func TestYouTubeCrawlerSeedChannelsExtraction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			config := map[string]interface{}{
 				"client":        &MockYouTubeClient{},
-				"state_manager": &MockStateManager{},
+				"state_manager": &MockYouTubeStateManager{},
 				"crawler_config": map[string]interface{}{
 					"sampling_method": "snowball",
 					"seed_channels":   tt.seedChannels,
