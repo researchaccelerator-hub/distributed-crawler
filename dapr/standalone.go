@@ -4,6 +4,12 @@ package dapr
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
@@ -14,11 +20,6 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +145,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		defer crawl.CloseConnectionPool()
 	}
 
+	// TODO: use completely different launch for random sampling
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
@@ -560,6 +562,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 												Int("limit", job.Limit).
 												Msg("YouTube crawl job configured in DAPR mode")
 
+											// TODO: for true loop. breaks if not sample messages. continues until video count is >= sampleSize
 											result, ytErr := ytCrawler.FetchMessages(ctx, job)
 											if ytErr != nil {
 												err = fmt.Errorf("failed to fetch YouTube videos: %w", ytErr)

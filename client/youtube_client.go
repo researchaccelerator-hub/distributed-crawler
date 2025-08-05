@@ -29,15 +29,15 @@ type YouTubeDataClient struct {
 
 	// Unified caching system
 	channelCache         map[string]*youtubemodel.YouTubeChannel
-	uploadsPlaylistCache map[string]string // Maps channelID to uploadsPlaylistID
+	uploadsPlaylistCache map[string]string                     // Maps channelID to uploadsPlaylistID
 	videoStatsCache      map[string]*youtubemodel.YouTubeVideo // Cache for video statistics
 	cacheMutex           sync.RWMutex
-	
+
 	// Batch configuration
 	batchConfig BatchConfig
-	
+
 	// RNG instance for generating random values
-	rng *rand.Rand
+	rng   *rand.Rand
 	rngMu sync.Mutex
 }
 
@@ -111,7 +111,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 	c.cacheMutex.RLock()
 	cachedChannel, exists := c.channelCache[channelID]
 	c.cacheMutex.RUnlock()
-	
+
 	if exists {
 		log.Debug().
 			Str("channel_id", channelID).
@@ -119,7 +119,6 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 			Msg("Using cached channel info instead of API call")
 		return cachedChannel, nil
 	}
-
 
 	log.Info().Str("channel_id", channelID).Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Fetching YouTube channel info")
 
@@ -212,7 +211,6 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 			Msg("Cached channel under both input ID and actual ID")
 	}
 	c.cacheMutex.Unlock()
-
 
 	log.Info().
 		Str("channel_id", channel.ID).
@@ -351,9 +349,9 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 	pageCounter := 0
 
 	// Optimization: Batch video IDs for more efficient Videos.List calls
-	const maxPlaylistBatchSize = 50  // Maximum videos per playlist call
-	const maxVideosBatchSize = 50    // Maximum videos per Videos.List call
-	
+	const maxPlaylistBatchSize = 50 // Maximum videos per playlist call
+	const maxVideosBatchSize = 50   // Maximum videos per Videos.List call
+
 	// Accumulate video IDs and metadata across multiple playlist pages
 	batchVideoIDs := make([]string, 0, maxVideosBatchSize)
 	batchVideoMap := make(map[string]*youtubemodel.YouTubeVideo)
@@ -547,15 +545,15 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 		}
 
 		// Process batch when it reaches optimal size or we're at the end
-		shouldProcessBatch := len(batchVideoIDs) >= c.batchConfig.OptimalBatchSize || 
-							  playlistResponse.NextPageToken == "" ||
-							  len(videos) + len(batchVideoIDs) >= effectiveLimit
+		shouldProcessBatch := len(batchVideoIDs) >= c.batchConfig.OptimalBatchSize ||
+			playlistResponse.NextPageToken == "" ||
+			len(videos)+len(batchVideoIDs) >= effectiveLimit
 
 		if shouldProcessBatch && len(batchVideoIDs) > 0 {
 			// Check cache first for any videos we already have stats for
 			cachedVideos := make(map[string]*youtubemodel.YouTubeVideo)
 			uncachedVideoIDs := make([]string, 0, len(batchVideoIDs))
-			
+
 			for _, videoID := range batchVideoIDs {
 				if cachedVideo, exists := c.getCachedVideoStats(videoID); exists {
 					cachedVideos[videoID] = cachedVideo
@@ -595,125 +593,125 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				videosResponse, err := videosCall.Do()
 				if err != nil {
 					log.Error().Err(err).Strs("video_ids", uncachedVideoIDs).Msg("Failed to get video statistics for uncached batch")
-				// Continue with basic information only
+					// Continue with basic information only
 
-				// Even without statistics, add the videos to the results to avoid losing them
-				for _, video := range batchVideoMap {
-					if len(videos) < effectiveLimit {
-						videos = append(videos, video)
-					}
-				}
-
-				log.Warn().
-					Int("videos_added_without_stats", len(batchVideoMap)).
-					Msg("Added batch videos without statistics due to API error")
-			} else {
-				log.Debug().
-					Int("stats_response_items", len(videosResponse.Items)).
-					Int("expected_items", len(batchVideoIDs)).
-					Msg("Retrieved video statistics for batch")
-
-				// Track stats retrieval success rate
-				statsFound := 0
-
-				// Update videos with statistics
-				for _, videoItem := range videosResponse.Items {
-					if video, ok := batchVideoMap[videoItem.Id]; ok && len(videos) < effectiveLimit {
-						// Parse statistics
-						viewCount := int64(videoItem.Statistics.ViewCount)
-						likeCount := int64(videoItem.Statistics.LikeCount)
-						commentCount := int64(videoItem.Statistics.CommentCount)
-
-						video.ViewCount = viewCount
-						video.LikeCount = likeCount
-						video.CommentCount = commentCount
-						video.Duration = videoItem.ContentDetails.Duration
-						
-						// Get language from snippet if available
-						if videoItem.Snippet != nil {
-							if videoItem.Snippet.DefaultLanguage != "" {
-								video.Language = videoItem.Snippet.DefaultLanguage
-							} else if videoItem.Snippet.DefaultAudioLanguage != "" {
-								// Fall back to default audio language if default language is not set
-								video.Language = videoItem.Snippet.DefaultAudioLanguage
-							}
-						}
-
-						// Cache the video statistics for future use
-						c.cacheVideoStats(video)
-
-						// Add to results
-						videos = append(videos, video)
-						statsFound++
-
-						log.Debug().
-							Str("video_id", video.ID).
-							Str("title", video.Title).
-							Int64("view_count", viewCount).
-							Int64("like_count", likeCount).
-							Int64("comment_count", commentCount).
-							Bool("comments_disabled", videoItem.Statistics.CommentCount == 0 && viewCount > 1000). // Heuristic for detecting disabled comments
-							Bool("api_reports_comment_count", videoItem.Statistics.CommentCount > 0).
-							Str("duration", video.Duration).
-							Str("language", video.Language).
-							Msg("Added video with statistics")
-					} else {
-						log.Warn().
-							Str("video_id", videoItem.Id).
-							Bool("in_map", ok).
-							Int("videos_count", len(videos)).
-							Int("effective_limit", effectiveLimit).
-							Msg("Received statistics for video not in our map or limit reached")
-					}
-				}
-
-				// Count videos with zero comments for debugging purposes
-				videosWithZeroComments := 0
-				for _, videoItem := range videosResponse.Items {
-					if videoItem.Statistics.CommentCount == 0 {
-						videosWithZeroComments++
-					}
-				}
-
-				log.Info().
-					Int("total_videos_processed", len(batchVideoMap)).
-					Int("stats_found", statsFound).
-					Int("stats_missing", len(batchVideoMap)-statsFound).
-					Int("videos_with_zero_comments", videosWithZeroComments).
-					Float64("zero_comments_percentage", float64(videosWithZeroComments)/float64(len(videosResponse.Items))*100).
-					Msg("Processed video statistics for batch")
-
-				// Check for videos that didn't get statistics
-				if statsFound < len(batchVideoMap) {
-					missingStats := []string{}
-					for videoID, video := range batchVideoMap {
-						// Check if this video was not processed in the stats response
-						found := false
-						for _, processedVideo := range videos {
-							if processedVideo.ID == videoID {
-								found = true
-								break
-							}
-						}
-
-						if !found && len(videos) < effectiveLimit {
-							// This video didn't get stats, add it anyway
+					// Even without statistics, add the videos to the results to avoid losing them
+					for _, video := range batchVideoMap {
+						if len(videos) < effectiveLimit {
 							videos = append(videos, video)
-							missingStats = append(missingStats, videoID)
+						}
+					}
+
+					log.Warn().
+						Int("videos_added_without_stats", len(batchVideoMap)).
+						Msg("Added batch videos without statistics due to API error")
+				} else {
+					log.Debug().
+						Int("stats_response_items", len(videosResponse.Items)).
+						Int("expected_items", len(batchVideoIDs)).
+						Msg("Retrieved video statistics for batch")
+
+					// Track stats retrieval success rate
+					statsFound := 0
+
+					// Update videos with statistics
+					for _, videoItem := range videosResponse.Items {
+						if video, ok := batchVideoMap[videoItem.Id]; ok && len(videos) < effectiveLimit {
+							// Parse statistics
+							viewCount := int64(videoItem.Statistics.ViewCount)
+							likeCount := int64(videoItem.Statistics.LikeCount)
+							commentCount := int64(videoItem.Statistics.CommentCount)
+
+							video.ViewCount = viewCount
+							video.LikeCount = likeCount
+							video.CommentCount = commentCount
+							video.Duration = videoItem.ContentDetails.Duration
+
+							// Get language from snippet if available
+							if videoItem.Snippet != nil {
+								if videoItem.Snippet.DefaultLanguage != "" {
+									video.Language = videoItem.Snippet.DefaultLanguage
+								} else if videoItem.Snippet.DefaultAudioLanguage != "" {
+									// Fall back to default audio language if default language is not set
+									video.Language = videoItem.Snippet.DefaultAudioLanguage
+								}
+							}
+
+							// Cache the video statistics for future use
+							c.cacheVideoStats(video)
+
+							// Add to results
+							videos = append(videos, video)
+							statsFound++
 
 							log.Debug().
 								Str("video_id", video.ID).
 								Str("title", video.Title).
-								Msg("Added video without statistics")
+								Int64("view_count", viewCount).
+								Int64("like_count", likeCount).
+								Int64("comment_count", commentCount).
+								Bool("comments_disabled", videoItem.Statistics.CommentCount == 0 && viewCount > 1000). // Heuristic for detecting disabled comments
+								Bool("api_reports_comment_count", videoItem.Statistics.CommentCount > 0).
+								Str("duration", video.Duration).
+								Str("language", video.Language).
+								Msg("Added video with statistics")
+						} else {
+							log.Warn().
+								Str("video_id", videoItem.Id).
+								Bool("in_map", ok).
+								Int("videos_count", len(videos)).
+								Int("effective_limit", effectiveLimit).
+								Msg("Received statistics for video not in our map or limit reached")
 						}
 					}
 
-					if len(missingStats) > 0 {
-						log.Warn().
-							Strs("video_ids_missing_stats", missingStats).
-							Msg("Some videos were added without statistics")
+					// Count videos with zero comments for debugging purposes
+					videosWithZeroComments := 0
+					for _, videoItem := range videosResponse.Items {
+						if videoItem.Statistics.CommentCount == 0 {
+							videosWithZeroComments++
+						}
 					}
-				}
+
+					log.Info().
+						Int("total_videos_processed", len(batchVideoMap)).
+						Int("stats_found", statsFound).
+						Int("stats_missing", len(batchVideoMap)-statsFound).
+						Int("videos_with_zero_comments", videosWithZeroComments).
+						Float64("zero_comments_percentage", float64(videosWithZeroComments)/float64(len(videosResponse.Items))*100).
+						Msg("Processed video statistics for batch")
+
+					// Check for videos that didn't get statistics
+					if statsFound < len(batchVideoMap) {
+						missingStats := []string{}
+						for videoID, video := range batchVideoMap {
+							// Check if this video was not processed in the stats response
+							found := false
+							for _, processedVideo := range videos {
+								if processedVideo.ID == videoID {
+									found = true
+									break
+								}
+							}
+
+							if !found && len(videos) < effectiveLimit {
+								// This video didn't get stats, add it anyway
+								videos = append(videos, video)
+								missingStats = append(missingStats, videoID)
+
+								log.Debug().
+									Str("video_id", video.ID).
+									Str("title", video.Title).
+									Msg("Added video without statistics")
+							}
+						}
+
+						if len(missingStats) > 0 {
+							log.Warn().
+								Strs("video_ids_missing_stats", missingStats).
+								Msg("Some videos were added without statistics")
+						}
+					}
 				} // End of uncached videos API call
 			} // End of uncached videos check
 
@@ -797,18 +795,19 @@ func min(a, b int) int {
 // generateRandomPrefix generates a random prefix for YouTube search queries
 // Similar to the Python example: watch?v=<random_chars>-
 func (c *YouTubeDataClient) generateRandomPrefix(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789_-"
 	watchPrefix := "watch?v="
-	
+
 	c.rngMu.Lock()
 	defer c.rngMu.Unlock()
-	
+
 	b := make([]byte, length)
 	for i := range b {
 		b[i] = charset[c.rng.Intn(len(charset))]
 	}
-	
-	return watchPrefix + string(b) + "-"
+
+	// return watchPrefix + string(b) + "-"
+	return watchPrefix + string(b)
 }
 
 // YouTubeClientAdapter adapts YouTubeDataClient to the Client interface
@@ -874,7 +873,7 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 			ID:           video.ID,
 			ChannelID:    video.ChannelID,
 			SenderID:     video.ChannelID,
-			SenderName:   "YouTube Channel", // This would ideally be populated with the actual channel name
+			SenderName:   "YouTube Channel",                        // This would ideally be populated with the actual channel name
 			Text:         video.Title + "\n\n" + video.Description, // Keep for backward compatibility
 			Title:        video.Title,
 			Description:  video.Description,
@@ -890,6 +889,105 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 	}
 
 	return messages, nil
+}
+
+func (c *YouTubeDataClient) GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*youtubemodel.YouTubeVideo, error) {
+	if c.service == nil {
+		return nil, fmt.Errorf("YouTube client not connected")
+	}
+	videos := make([]*youtubemodel.YouTubeVideo, 0)
+
+	videosCall := c.service.Videos.List([]string{"snippet", "statistics", "contentDetails"}).
+		Id(videoIDs...).
+		Context(ctx)
+
+	videosResponse, err := videosCall.Do()
+
+	if err != nil {
+		log.Error().Err(err).Strs("video_ids", videoIDs).Msg("Failed to get video statistics for video ids")
+	} else {
+		log.Debug().
+			Int("stats_response_items", len(videosResponse.Items)).
+			Int("expected_items", len(videoIDs)).
+			Msg("Retrieved video statistics for batch")
+		for _, videoItem := range videosResponse.Items {
+			// Parse published date
+			publishedAt, err := time.Parse(time.RFC3339, videoItem.Snippet.PublishedAt)
+			if err != nil {
+				log.Warn().Err(err).Str("date", videoItem.Snippet.PublishedAt).Msg("Failed to parse video published date")
+				continue
+			}
+
+			// Extract thumbnails
+			thumbnails := make(map[string]string)
+			if videoItem.Snippet.Thumbnails != nil {
+				if videoItem.Snippet.Thumbnails.Default != nil {
+					thumbnails["default"] = videoItem.Snippet.Thumbnails.Default.Url
+				}
+				if videoItem.Snippet.Thumbnails.Medium != nil {
+					thumbnails["medium"] = videoItem.Snippet.Thumbnails.Medium.Url
+				}
+				if videoItem.Snippet.Thumbnails.High != nil {
+					thumbnails["high"] = videoItem.Snippet.Thumbnails.High.Url
+				}
+				if videoItem.Snippet.Thumbnails.Standard != nil {
+					thumbnails["standard"] = videoItem.Snippet.Thumbnails.Standard.Url
+				}
+				if videoItem.Snippet.Thumbnails.Maxres != nil {
+					thumbnails["maxres"] = videoItem.Snippet.Thumbnails.Maxres.Url
+				}
+			}
+
+			video := &youtubemodel.YouTubeVideo{
+				ID:           videoItem.Id,
+				ChannelID:    videoItem.Snippet.ChannelId,
+				Title:        videoItem.Snippet.Title,
+				Description:  videoItem.Snippet.Description,
+				PublishedAt:  publishedAt,
+				Thumbnails:   thumbnails,
+				Language:     "", // Will be populated later from videos API
+				ViewCount:    int64(videoItem.Statistics.ViewCount),
+				LikeCount:    int64(videoItem.Statistics.LikeCount),
+				CommentCount: int64(videoItem.Statistics.CommentCount),
+				Duration:     videoItem.ContentDetails.Duration,
+			}
+
+			// Get language from snippet if available
+			if videoItem.Snippet != nil {
+				if videoItem.Snippet.DefaultLanguage != "" {
+					video.Language = videoItem.Snippet.DefaultLanguage
+				} else if videoItem.Snippet.DefaultAudioLanguage != "" {
+					// Fall back to default audio language if default language is not set
+					video.Language = videoItem.Snippet.DefaultAudioLanguage
+				}
+			}
+			videos = append(videos, video)
+		}
+	}
+	return videos, nil
+}
+
+func ShouldProcessRandomBatch(unverifiedRandomVideosCount int, queuedRandomVideosCount int, videosCount int, effectiveLimit int) bool {
+	shouldProcessBatch := queuedRandomVideosCount >= 50 ||
+		(queuedRandomVideosCount+videosCount >= effectiveLimit && unverifiedRandomVideosCount == 0)
+	log.Info().Bool("should_process", shouldProcessBatch).Int("queued_random_count", queuedRandomVideosCount).Int("video_count", videosCount).Int("unverified_random_video_count", unverifiedRandomVideosCount).Msg("PLSDELETE")
+	return shouldProcessBatch
+}
+
+func (c *YouTubeDataClient) ProcessRandomBatch(ctxWithCancel context.Context, videosToQuery []string, resultsChan chan<- []*youtubemodel.YouTubeVideo) {
+	retrievedVideos, err := c.GetVideosByIDs(ctxWithCancel, videosToQuery)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Msg("Failed to get random videos")
+		log.Warn().Msgf("Failed to query following video ids %v\n", videosToQuery)
+		return
+	}
+	// Send results to collector
+	resultsChan <- retrievedVideos
+	log.Debug().
+		Int("videos_found", len(retrievedVideos)).
+		Msg("Sent random videos to result collector")
 }
 
 // GetRandomVideos retrieves videos using random sampling with the prefix generator
@@ -917,16 +1015,27 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 		effectiveLimit = 1000
 	}
 
+	log.Info().Int("effective_limit", effectiveLimit).Msg("PLSDELETE")
+
 	// Define concurrency limits
-	const maxWorkers = 5 // Maximum number of parallel workers
-	const maxAttempts = 50 // Maximum number of search attempts with random prefixes
+	const maxWorkers = 5            // Maximum number of parallel workers
+	const maxAttempts = 50          // Maximum number of search attempts with random prefixes
 	const maxChannelsPerSearch = 10 // Maximum channels to process from each search
 
 	// Shared data with mutex protection
 	var mu sync.Mutex
-	videos := make([]*youtubemodel.YouTubeVideo, 0, effectiveLimit)
+	videos := make([]*youtubemodel.YouTubeVideo, 0, effectiveLimit*2)
+
+	// TODO: package these into a random crawl struct
 	processedChannels := make(map[string]bool)
 	channelsWithMinVideos := make(map[string]bool)
+	unverifiedRandomVideosMap := make(map[string][]string)
+	// TODO: replace with queue structure instead if possible
+	queuedRandomVideos := make([]string, 0, effectiveLimit*2)
+	skipChannels := make(map[string]bool)
+	var prefixMismatchCount int
+	var prefixMatchCount int
+	// var verifiedRandomVideos int
 
 	// Channel for discovered channel IDs to process
 	channelQueue := make(chan string, 1000) // Buffer to prevent blocking
@@ -953,7 +1062,9 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 		defer close(channelQueue) // Close channel when done searching
 
 		// Generate random prefixes and search for videos
-		for attempt := 0; attempt < maxAttempts; attempt++ {
+		var attempt int
+		var stopPrefixSearch bool
+		for {
 			// Check if context is done
 			select {
 			case <-ctxWithCancel.Done():
@@ -963,22 +1074,40 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				// Continue with search
 			}
 
+			if stopPrefixSearch {
+				for {
+					mu.Lock()
+					queuedRandomVideosCount := len(queuedRandomVideos)
+					unverifiedRandomVideosCount := len(unverifiedRandomVideosMap)
+					mu.Unlock()
+					if (queuedRandomVideosCount + unverifiedRandomVideosCount) > 0 {
+						log.Info().Int("queued_random_videos", queuedRandomVideosCount).Int("unverified_random_videos", unverifiedRandomVideosCount).
+							Msg("Waiting for prefix matches to finish processing")
+						time.Sleep(100 * time.Millisecond)
+					} else {
+						log.Info().Int("queued_random_videos", queuedRandomVideosCount).Int("unverified_random_videos", unverifiedRandomVideosCount).
+							Msg("Prefix matches completed processing")
+						break
+					}
+				}
+				log.Info().Int("total_attempts", attempt).Msg("Completed all random prefix searches")
+				return
+			}
 			// Get unique prefixes using mutex-protected rng
 			prefix := c.generateRandomPrefix(5)
-
-			log.Debug().
-				Str("prefix", prefix).
-				Int("attempt", attempt+1).
-				Int("max_attempts", maxAttempts).
+			// watch?v=id7nj ->id7nj
+			videoIdPrefix := prefix[8:]
+			log.Debug().Str("prefix", prefix).Str("videoIdPrefix", videoIdPrefix).Int("attempt", attempt+1).
 				Msg("Searching with random prefix")
-
+			attempt++
 			// Search for videos with this prefix
 			searchCall := c.service.Search.List([]string{"id", "snippet"}).
 				Q(prefix).
 				MaxResults(50). // Max allowed by API
 				Context(ctxWithCancel).
 				Type("video").
-				Order("date") // Sort by date
+				Order("relevance")
+				// Order("date") // Sort by date
 
 			// Add time restrictions if provided
 			if !fromTime.IsZero() {
@@ -994,9 +1123,8 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				continue // Try another prefix
 			}
 
-			log.Debug().
-				Str("prefix", prefix).
-				Int("results", len(searchResponse.Items)).
+			log.Debug().Str("prefix", prefix).Int("results", len(searchResponse.Items)).
+				Int64("total_results", searchResponse.PageInfo.TotalResults).
 				Msg("Search results received")
 
 			// Process search results - collect unique channel IDs
@@ -1005,16 +1133,36 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 
 			for _, item := range searchResponse.Items {
 				channelID := item.Snippet.ChannelId
-
+				videoID := item.Id.VideoId
+				if strings.ToLower(videoID[0:5]) != videoIdPrefix {
+					mu.Lock()
+					prefixMismatchCount++
+					mu.Unlock()
+					log.Warn().Str("video_id", videoID).Str("prefix", prefix).Str("videoIdPrefix", videoIdPrefix).Int("prefix_mismatch_count", prefixMismatchCount).Int("prefix_match_count", prefixMatchCount).Msg("Video id does not match prefix. Skipping")
+					continue
+				}
+				log.Info().Str("video_id", videoID).Msg("PLSDELETE")
 				mu.Lock()
+				prefixMatchCount++
 				alreadyProcessed := processedChannels[channelID]
 				if !alreadyProcessed {
 					processedChannels[channelID] = true
 					channelIDs[channelID] = true
 				}
+
+				if channelsWithMinVideos[channelID] {
+					log.Info().Str("video_id", videoID).Msg("Adding video id to queuedRandomVideos")
+					queuedRandomVideos = append(queuedRandomVideos, videoID)
+				} else if skipChannels[channelID] {
+					log.Info().Str("video_id", videoID).Msg("Video_id for channel below minumum total video threshold")
+				} else {
+					log.Info().Str("video_id", videoID).Msg("Adding video id to unverifiedRandomVideosMap")
+					unverifiedRandomVideosMap[channelID] = append(unverifiedRandomVideosMap[channelID], videoID)
+				}
 				mu.Unlock()
 
 				if len(channelIDs) >= maxChannelsPerSearch {
+					// TODO: record number of skipped video items
 					break // Limit channels per search
 				}
 			}
@@ -1055,18 +1203,20 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 			// Check if we should continue searching
 			mu.Lock()
 			videoCount := len(videos)
-			mu.Unlock()
+			queuedRandomVideosCount := len(queuedRandomVideos)
+			validPrefixesIdentified := videoCount + queuedRandomVideosCount
 
-			if videoCount >= effectiveLimit {
+			if validPrefixesIdentified >= effectiveLimit {
 				log.Debug().
-					Int("videos_collected", videoCount).
+					Int("videos_processed", videoCount).
+					Int("queued_random_videos", queuedRandomVideosCount).
+					Int("valid_prefixes_identified", validPrefixesIdentified).
 					Int("limit", effectiveLimit).
 					Msg("Reached video limit, stopping prefix search")
-				return
+				stopPrefixSearch = true
 			}
+			mu.Unlock()
 		}
-
-		log.Info().Int("total_attempts", maxAttempts).Msg("Completed all random prefix searches")
 	}()
 
 	// Worker function for processing channels
@@ -1090,52 +1240,39 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				// Acquire semaphore slot
 				sem <- struct{}{}
 
-				log.Debug().
-					Int("worker_id", workerID).
-					Str("channel_id", channelID).
+				log.Debug().Int("worker_id", workerID).Str("channel_id", channelID).
 					Msg("Worker processing channel")
 
 				// Check if this channel has more than minimum required videos
 				channel, err := c.GetChannelInfo(ctxWithCancel, channelID)
 				if err != nil {
-					log.Warn().
-						Err(err).
-						Int("worker_id", workerID).
-						Str("channel_id", channelID).
+					log.Warn().Err(err).Int("worker_id", workerID).Str("channel_id", channelID).
 						Msg("Failed to get channel info")
+					mu.Lock()
+					skipChannels[channelID] = true
+					delete(unverifiedRandomVideosMap, channelID)
+					mu.Unlock()
 					<-sem // Release semaphore
 					continue
 				}
 
 				// Only include channels with > minimum videos
+				mu.Lock()
 				if channel.VideoCount > 10 {
-					mu.Lock()
+					log.Info().Str("channel_id", channelID).Msg("Adding channel id to queuedRandomVideos")
 					channelsWithMinVideos[channelID] = true
-					mu.Unlock()
-
-					// Get videos from this channel
-					channelVideos, err := c.GetVideosFromChannel(ctxWithCancel, channelID, fromTime, effectiveToTime, 50)
-					if err != nil {
-						log.Warn().
-							Err(err).
-							Int("worker_id", workerID).
-							Str("channel_id", channelID).
-							Msg("Failed to get videos from channel")
-						<-sem // Release semaphore
-						continue
-					}
-
-					// Send results to collector
-					resultsChan <- channelVideos
-
+					// move items from unverified to queued
+					queuedRandomVideos = append(queuedRandomVideos, unverifiedRandomVideosMap[channelID]...)
+					delete(unverifiedRandomVideosMap, channelID)
+				} else {
+					skipChannels[channelID] = true
+					delete(unverifiedRandomVideosMap, channelID)
 					log.Debug().
 						Int("worker_id", workerID).
 						Str("channel_id", channelID).
-						Str("channel_title", channel.Title).
-						Int("videos_found", len(channelVideos)).
-						Msg("Sent channel videos to result collector")
+						Msg("Skipping channel. Does not meet minimum required video count")
 				}
-
+				mu.Unlock()
 				// Release semaphore
 				<-sem
 			}
@@ -1150,33 +1287,21 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 
 	// Collector goroutine to process results
 	go func() {
-		for channelVideos := range resultsChan {
+		for randomVideos := range resultsChan {
 			mu.Lock()
 
 			// Check if we've reached the limit
-			if len(videos) >= effectiveLimit {
+			if len(videos) >= effectiveLimit && (len(queuedRandomVideos)+len(unverifiedRandomVideosMap)) == 0 {
 				mu.Unlock()
 				continue // Skip but keep collecting to prevent blocking
 			}
 
-			// Add videos up to the limit
-			remaining := effectiveLimit - len(videos)
-			if remaining > 0 {
-				toAdd := min(remaining, len(channelVideos))
-				videos = append(videos, channelVideos[:toAdd]...)
+			toAdd := len(randomVideos)
+			videos = append(videos, randomVideos...)
 
-				log.Debug().
-					Int("videos_added", toAdd).
-					Int("total_videos", len(videos)).
-					Int("effective_limit", effectiveLimit).
-					Msg("Added videos from channel result")
+			log.Debug().Int("videos_added", toAdd).Int("total_videos", len(videos)).
+				Int("effective_limit", effectiveLimit).Msg("Added videos from channel result")
 
-				// If we've reached the limit, cancel context to signal workers to stop
-				if len(videos) >= effectiveLimit {
-					log.Info().Int("total_videos", len(videos)).Msg("Reached video limit, cancelling remaining work")
-					cancel()
-				}
-			}
 			mu.Unlock()
 		}
 	}()
@@ -1197,9 +1322,19 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 			videosCount := len(videos)
 			channelsMu := len(processedChannels)
 			qualifiedMu := len(channelsWithMinVideos)
+			queuedRandomVideosCount := len(queuedRandomVideos)
+			unverifiedRandomVideosCount := len(unverifiedRandomVideosMap)
 			mu.Unlock()
-
-			if videosCount >= effectiveLimit {
+			if ShouldProcessRandomBatch(unverifiedRandomVideosCount, queuedRandomVideosCount, videosCount, effectiveLimit) {
+				mu.Lock()
+				toAdd := min(50, len(queuedRandomVideos))
+				videosToQuery := queuedRandomVideos[:toAdd]
+				queuedRandomVideos = queuedRandomVideos[toAdd:]
+				newQueuedCount := len(queuedRandomVideos)
+				mu.Unlock()
+				log.Info().Int("num_videos_to_process", toAdd).Int("updated_queued_random_videos", newQueuedCount).Msg("Processing batch")
+				c.ProcessRandomBatch(ctxWithCancel, videosToQuery, resultsChan)
+			} else if videosCount >= effectiveLimit && (queuedRandomVideosCount+unverifiedRandomVideosCount) == 0 {
 				log.Debug().Int("videos_count", videosCount).Msg("Video limit reached in main loop, stopping processing")
 				cancel() // Cancel context to signal workers to stop
 				goto Wait
@@ -1241,10 +1376,10 @@ Wait:
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Ensure we don't exceed the limit
-	if len(videos) > effectiveLimit {
-		videos = videos[:effectiveLimit]
-	}
+	// // Ensure we don't exceed the limit
+	// if len(videos) > effectiveLimit {
+	// 	videos = videos[:effectiveLimit]
+	// }
 
 	log.Info().
 		Int("final_video_count", len(videos)).
@@ -1568,7 +1703,7 @@ Wait:
 // - "youtube.com/@..."
 func extractChannelIDsFromText(text string) []string {
 	channelIDs := make([]string, 0)
-	
+
 	// Look for standard channel IDs (UCxxxx)
 	ucPattern := regexp.MustCompile(`youtube\.com/channel/([a-zA-Z0-9_-]+)`)
 	ucMatches := ucPattern.FindAllStringSubmatch(text, -1)
@@ -1577,7 +1712,7 @@ func extractChannelIDsFromText(text string) []string {
 			channelIDs = append(channelIDs, match[1])
 		}
 	}
-	
+
 	// Look for handle-based channels (@xxxx)
 	handlePattern := regexp.MustCompile(`youtube\.com/@([a-zA-Z0-9_.-]+)`)
 	handleMatches := handlePattern.FindAllStringSubmatch(text, -1)
@@ -1587,24 +1722,24 @@ func extractChannelIDsFromText(text string) []string {
 			channelIDs = append(channelIDs, "@"+match[1])
 		}
 	}
-	
+
 	return channelIDs
 }
 
 // getDynamicBatchSize returns optimal batch size based on current progress
 func (c *YouTubeDataClient) getDynamicBatchSize(currentVideos, targetLimit int) int {
 	remaining := targetLimit - currentVideos
-	
+
 	// If we're close to the limit, use smaller batches
 	if remaining <= c.batchConfig.MinBatchSize {
 		return c.batchConfig.MinBatchSize
 	}
-	
+
 	// Use optimal batch size for normal operation
 	if remaining >= c.batchConfig.OptimalBatchSize {
 		return c.batchConfig.OptimalBatchSize
 	}
-	
+
 	// Use remaining count if it's between min and optimal
 	return remaining
 }
@@ -1632,6 +1767,11 @@ func (a *YouTubeClientAdapter) GetChannelType() string {
 // GetRandomVideos retrieves videos using random sampling - delegates to the wrapped YouTubeDataClient
 func (a *YouTubeClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	return a.client.GetRandomVideos(ctx, fromTime, toTime, limit)
+}
+
+// GetVideosByIDs retrieves videos by videoIDs - delegates to the wrapped YouTubeDataClient
+func (a *YouTubeClientAdapter) GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*youtubemodel.YouTubeVideo, error) {
+	return a.client.GetVideosByIDs(ctx, videoIDs)
 }
 
 // GetSnowballVideos retrieves videos using snowball sampling - delegates to the wrapped YouTubeDataClient
