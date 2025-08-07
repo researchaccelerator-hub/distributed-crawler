@@ -52,6 +52,10 @@ func (m *MockConcurrentClient) GetSnowballVideos(ctx context.Context, seedChanne
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 
+func (m *MockConcurrentClient) GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*youtubemodel.YouTubeVideo, error) {
+	return []*youtubemodel.YouTubeVideo{}, nil
+}
+
 func (m *MockConcurrentClient) Disconnect(ctx context.Context) error { return nil }
 
 func TestConcurrentMapAccess(t *testing.T) {
