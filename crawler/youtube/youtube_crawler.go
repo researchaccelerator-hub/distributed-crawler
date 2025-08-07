@@ -296,15 +296,15 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 
 	case SamplingMethodRandom:
 		// Random sampling using prefix generator with parallel processing
-		videos, err = c.client.GetRandomVideos(ctxWithTimeout, job.FromTime, job.ToTime, job.Limit)
+		sampleTargetSize := min(50, job.SamplesRemaining) //rough limit so all video id prefix matches are processed
+		videos, err = c.client.GetRandomVideos(ctxWithTimeout, job.FromTime, job.ToTime, sampleTargetSize)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get videos using random sampling")
 			return crawler.CrawlResult{}, err
 		}
-
 		log.Info().
 			Int("video_count", len(videos)).
-			Msg("Retrieved videos using parallel random sampling")
+			Msg("Retrieved batch of random videos using parallel random sampling")
 
 	case SamplingMethodSnowball:
 		// Snowball sampling based on seed channels with parallel processing
@@ -448,7 +448,6 @@ func (c *YouTubeCrawler) Close() error {
 	}
 	return nil
 }
-
 
 // parseISO8601Duration parses YouTube's ISO 8601 duration format to seconds
 // Example: PT1H2M3S = 1 hour, 2 minutes, 3 seconds = 3723 seconds
