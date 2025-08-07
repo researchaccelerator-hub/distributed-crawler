@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
-	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
+	"github.com/researchaccelerator-hub/telegram-scraper/state"
 )
 
 // MockYouTubeClient implements youtubemodel.YouTubeClient for testing
@@ -44,33 +44,45 @@ func (m *MockYouTubeClient) GetSnowballVideos(ctx context.Context, seedChannelID
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 
+func (m *MockYouTubeClient) GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*youtubemodel.YouTubeVideo, error) {
+	return []*youtubemodel.YouTubeVideo{}, nil
+}
+
 // MockYouTubeStateManager implements state.StateManagementInterface for testing
 type MockYouTubeStateManager struct{}
 
-func (m *MockYouTubeStateManager) Initialize(urls []string) error { return nil }
+func (m *MockYouTubeStateManager) Initialize(urls []string) error        { return nil }
 func (m *MockYouTubeStateManager) GetPage(id string) (state.Page, error) { return state.Page{}, nil }
-func (m *MockYouTubeStateManager) UpdatePage(page state.Page) error { return nil }
-func (m *MockYouTubeStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error { return nil }
-func (m *MockYouTubeStateManager) AddLayer(pages []state.Page) error { return nil }
-func (m *MockYouTubeStateManager) GetLayerByDepth(depth int) ([]state.Page, error) { return nil, nil }
-func (m *MockYouTubeStateManager) GetMaxDepth() (int, error) { return 0, nil }
-func (m *MockYouTubeStateManager) SaveState() error { return nil }
-func (m *MockYouTubeStateManager) ExportPagesToBinding(crawlID string) error { return nil }
+func (m *MockYouTubeStateManager) UpdatePage(page state.Page) error      { return nil }
+func (m *MockYouTubeStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error {
+	return nil
+}
+func (m *MockYouTubeStateManager) AddLayer(pages []state.Page) error                 { return nil }
+func (m *MockYouTubeStateManager) GetLayerByDepth(depth int) ([]state.Page, error)   { return nil, nil }
+func (m *MockYouTubeStateManager) GetMaxDepth() (int, error)                         { return 0, nil }
+func (m *MockYouTubeStateManager) SaveState() error                                  { return nil }
+func (m *MockYouTubeStateManager) ExportPagesToBinding(crawlID string) error         { return nil }
 func (m *MockYouTubeStateManager) StorePost(channelID string, post model.Post) error { return nil }
-func (m *MockYouTubeStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) { return "", "", nil }
+func (m *MockYouTubeStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) {
+	return "", "", nil
+}
 func (m *MockYouTubeStateManager) GetPreviousCrawls() ([]string, error) { return nil, nil }
-func (m *MockYouTubeStateManager) UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error { return nil }
-func (m *MockYouTubeStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) { return "", false, nil }
+func (m *MockYouTubeStateManager) UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error {
+	return nil
+}
+func (m *MockYouTubeStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) {
+	return "", false, nil
+}
 func (m *MockYouTubeStateManager) HasProcessedMedia(mediaID string) (bool, error) { return false, nil }
-func (m *MockYouTubeStateManager) MarkMediaAsProcessed(mediaID string) error { return nil }
-func (m *MockYouTubeStateManager) Close() error { return nil }
+func (m *MockYouTubeStateManager) MarkMediaAsProcessed(mediaID string) error      { return nil }
+func (m *MockYouTubeStateManager) Close() error                                   { return nil }
 
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {
-		name            string
-		config          map[string]interface{}
-		expectError     bool
-		expectedMethod  SamplingMethod
+		name              string
+		config            map[string]interface{}
+		expectError       bool
+		expectedMethod    SamplingMethod
 		expectedMinVideos int64
 	}{
 		{
@@ -175,30 +187,30 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			crawler := NewYouTubeCrawler().(*YouTubeCrawler)
-			
+
 			err := crawler.Initialize(context.Background(), tt.config)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error but got none")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Expected no error but got: %s", err.Error())
 				return
 			}
-			
+
 			// Verify configuration was applied correctly
 			if crawler.config.SamplingMethod != tt.expectedMethod {
 				t.Errorf("Expected sampling method %s, got %s", tt.expectedMethod, crawler.config.SamplingMethod)
 			}
-			
+
 			if crawler.config.MinChannelVideos != tt.expectedMinVideos {
 				t.Errorf("Expected min channel videos %d, got %d", tt.expectedMinVideos, crawler.config.MinChannelVideos)
 			}
-			
+
 			// Verify initialization state
 			if !crawler.initialized {
 				t.Errorf("Expected crawler to be initialized")
@@ -209,10 +221,10 @@ func TestYouTubeCrawlerInitialize(t *testing.T) {
 
 func TestYouTubeCrawlerSnowballValidation(t *testing.T) {
 	tests := []struct {
-		name            string
-		config          map[string]interface{}
-		expectedMethod  SamplingMethod
-		expectWarning   bool
+		name           string
+		config         map[string]interface{}
+		expectedMethod SamplingMethod
+		expectWarning  bool
 	}{
 		{
 			name: "snowball with seed channels",
@@ -244,13 +256,13 @@ func TestYouTubeCrawlerSnowballValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			crawler := NewYouTubeCrawler().(*YouTubeCrawler)
-			
+
 			err := crawler.Initialize(context.Background(), tt.config)
 			if err != nil {
 				t.Errorf("Expected no error but got: %s", err.Error())
 				return
 			}
-			
+
 			if crawler.config.SamplingMethod != tt.expectedMethod {
 				t.Errorf("Expected sampling method %s, got %s", tt.expectedMethod, crawler.config.SamplingMethod)
 			}
@@ -260,9 +272,9 @@ func TestYouTubeCrawlerSnowballValidation(t *testing.T) {
 
 func TestYouTubeCrawlerSeedChannelsExtraction(t *testing.T) {
 	tests := []struct {
-		name            string
-		seedChannels    interface{}
-		expectedSeeds   []string
+		name          string
+		seedChannels  interface{}
+		expectedSeeds []string
 	}{
 		{
 			name:          "valid seed channels",
@@ -299,7 +311,7 @@ func TestYouTubeCrawlerSeedChannelsExtraction(t *testing.T) {
 
 			crawler := NewYouTubeCrawler().(*YouTubeCrawler)
 			err := crawler.Initialize(context.Background(), config)
-			
+
 			if err != nil {
 				t.Errorf("Expected no error but got: %s", err.Error())
 				return
@@ -321,25 +333,25 @@ func TestYouTubeCrawlerSeedChannelsExtraction(t *testing.T) {
 
 func TestYouTubeCrawlerDefaultConfig(t *testing.T) {
 	crawler := NewYouTubeCrawler().(*YouTubeCrawler)
-	
+
 	// Test that default configuration is set correctly
 	if crawler.defaultConfig.SamplingMethod != SamplingMethodChannel {
 		t.Errorf("Expected default sampling method to be %s, got %s", SamplingMethodChannel, crawler.defaultConfig.SamplingMethod)
 	}
-	
+
 	if crawler.defaultConfig.MinChannelVideos != 10 {
 		t.Errorf("Expected default min channel videos to be 10, got %d", crawler.defaultConfig.MinChannelVideos)
 	}
-	
+
 	// Test that config starts with default values
 	if crawler.config.SamplingMethod != SamplingMethodChannel {
 		t.Errorf("Expected initial config sampling method to be %s, got %s", SamplingMethodChannel, crawler.config.SamplingMethod)
 	}
-	
+
 	if crawler.config.MinChannelVideos != 10 {
 		t.Errorf("Expected initial config min channel videos to be 10, got %d", crawler.config.MinChannelVideos)
 	}
-	
+
 	// Test that crawler is not initialized initially
 	if crawler.initialized {
 		t.Errorf("Expected crawler to not be initialized initially")
