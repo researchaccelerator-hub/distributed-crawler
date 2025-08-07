@@ -1116,6 +1116,12 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 			}
 			// Get unique prefixes using mutex-protected rng
 			prefix := c.generateRandomPrefix(5)
+			// TODO: get crawl level map for this. only works for same sample run
+			if _, exists := prefixMap[prefix]; exists {
+				log.Error().Str("duplicated_prefix", prefix).Msg("Duplicate prefix found. Skipping")
+				continue
+			}
+
 			prefixData := RandomPrefix{
 				Prefix:           prefix,
 				ValidVideoIDs:    make([]string, 0, 50),
