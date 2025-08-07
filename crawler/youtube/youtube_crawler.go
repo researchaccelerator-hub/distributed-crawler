@@ -296,33 +296,15 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 
 	case SamplingMethodRandom:
 		// Random sampling using prefix generator with parallel processing
-
-		for len(videos) < job.SampleSize {
-			var videosBatch []*youtubemodel.YouTubeVideo
-			remaining := job.SampleSize - len(videos)
-			if remaining > 0 {
-				// TODO: update to 50 after testing
-				fetchLimit := min(50, job.SampleSize-len(videos))
-				// TODO: pass random crawl struct to track things like queuedRandomVideos so we're not losing that data
-				videosBatch, err = c.client.GetRandomVideos(ctxWithTimeout, job.FromTime, job.ToTime, fetchLimit)
-				if err != nil {
-					log.Error().Err(err).Msg("Failed to get videos using random sampling")
-					return crawler.CrawlResult{}, err
-				}
-			}
-
-			if len(videosBatch) > 0 {
-				videos = append(videos, videosBatch...)
-			}
-			log.Info().
-				Int("batch_video_count", len(videosBatch)).
-				Msg("Retrieved batch of videos using parallel random sampling")
-
-			log.Info().Msgf("Total videos retrieved: %d", len(videos))
+		sampleTargetSize := min(50, job.SamplesRemaining) //rough limit so all video id prefix matches are processed
+		videos, err = c.client.GetRandomVideos(ctxWithTimeout, job.FromTime, job.ToTime, sampleTargetSize)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get videos using random sampling")
+			return crawler.CrawlResult{}, err
 		}
 		log.Info().
 			Int("video_count", len(videos)).
-			Msg("Finished retrieving videos using parallel random sampling")
+			Msg("Retrieved batch of random videos using parallel random sampling")
 
 	case SamplingMethodSnowball:
 		// Snowball sampling based on seed channels with parallel processing
