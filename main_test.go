@@ -111,7 +111,7 @@ func TestValidateSamplingMethod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSamplingMethod(tt.platform, tt.samplingMethod, tt.urlList, tt.urlFile)
+			err := validateSamplingMethod(tt.platform, tt.samplingMethod, tt.urlList, tt.urlFile, "")
 			
 			if tt.expectError {
 				if err == nil {
@@ -137,7 +137,7 @@ func TestValidateSamplingMethodSupportedMethods(t *testing.T) {
 	
 	// Test Telegram supported methods
 	for _, method := range telegramMethods {
-		err := validateSamplingMethod("telegram", method, []string{"https://t.me/test"}, "")
+		err := validateSamplingMethod("telegram", method, []string{"https://t.me/test"}, "", "")
 		if err != nil {
 			t.Errorf("Telegram should support method '%s', but got error: %s", method, err.Error())
 		}
@@ -149,10 +149,31 @@ func TestValidateSamplingMethodSupportedMethods(t *testing.T) {
 		if method != "random" {
 			urlList = []string{"https://youtube.com/c/test"}
 		}
-		err := validateSamplingMethod("youtube", method, urlList, "")
+		err := validateSamplingMethod("youtube", method, urlList, "", "")
 		if err != nil {
 			t.Errorf("YouTube should support method '%s', but got error: %s", method, err.Error())
 		}
+	}
+}
+
+// TestValidateSamplingMethodDaprJobMode tests that URL validation is skipped in dapr-job mode
+func TestValidateSamplingMethodDaprJobMode(t *testing.T) {
+	// Test that channel sampling without URLs is allowed in dapr-job mode
+	err := validateSamplingMethod("telegram", "channel", []string{}, "", "dapr-job")
+	if err != nil {
+		t.Errorf("Expected no error for channel sampling without URLs in dapr-job mode, got: %s", err.Error())
+	}
+
+	// Test that snowball sampling without URLs is allowed in dapr-job mode
+	err = validateSamplingMethod("youtube", "snowball", []string{}, "", "dapr-job")
+	if err != nil {
+		t.Errorf("Expected no error for snowball sampling without URLs in dapr-job mode, got: %s", err.Error())
+	}
+
+	// Test that other modes still require URLs
+	err = validateSamplingMethod("telegram", "channel", []string{}, "", "standalone")
+	if err == nil {
+		t.Errorf("Expected error for channel sampling without URLs in standalone mode")
 	}
 }
 

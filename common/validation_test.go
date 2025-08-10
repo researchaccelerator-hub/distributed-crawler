@@ -8,7 +8,7 @@ import (
 
 // validateSamplingMethod is a copy of the validation function for testing
 // This allows us to test the logic without TDLib dependencies
-func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string) error {
+func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string, mode string) error {
 	// Valid sampling methods per platform
 	validMethods := map[string][]string{
 		"telegram": {"channel", "snowball"},
@@ -41,11 +41,39 @@ func validateSamplingMethod(platform, samplingMethod string, urlList []string, u
 	}
 
 	// For channel and snowball sampling, validate that URLs are provided
-	if (samplingMethod == "channel" || samplingMethod == "snowball") && len(urlList) == 0 && urlFile == "" {
+	// Skip URL validation for dapr-job mode since jobs provide URLs through job data
+	if (samplingMethod == "channel" || samplingMethod == "snowball") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
 		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
 	}
 
 	return nil
+}
+
+// TestValidateSamplingMethodDaprJobMode tests that URL validation is skipped in dapr-job mode
+func TestValidateSamplingMethodDaprJobMode(t *testing.T) {
+	// Test that channel sampling without URLs is allowed in dapr-job mode
+	err := validateSamplingMethod("telegram", "channel", []string{}, "", "dapr-job")
+	if err != nil {
+		t.Errorf("Expected no error for channel sampling without URLs in dapr-job mode, got: %s", err.Error())
+	}
+
+	// Test that snowball sampling without URLs is allowed in dapr-job mode
+	err = validateSamplingMethod("youtube", "snowball", []string{}, "", "dapr-job")
+	if err != nil {
+		t.Errorf("Expected no error for snowball sampling without URLs in dapr-job mode, got: %s", err.Error())
+	}
+
+	// Test that other modes still require URLs
+	err = validateSamplingMethod("telegram", "channel", []string{}, "", "standalone")
+	if err == nil {
+		t.Errorf("Expected error for channel sampling without URLs in standalone mode")
+	}
+
+	// Test that an empty mode still requires URLs (backwards compatibility)
+	err = validateSamplingMethod("telegram", "channel", []string{}, "", "")
+	if err == nil {
+		t.Errorf("Expected error for channel sampling without URLs in empty mode")
+	}
 }
 
 func TestValidateSamplingMethodComprehensive(t *testing.T) {
@@ -261,7 +289,7 @@ func TestValidateSamplingMethodComprehensive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSamplingMethod(tt.platform, tt.samplingMethod, tt.urlList, tt.urlFile)
+			err := validateSamplingMethod(tt.platform, tt.samplingMethod, tt.urlList, tt.urlFile, "")
 			
 			if tt.expectError {
 				if err == nil {
@@ -295,7 +323,7 @@ func TestValidateSamplingMethodSupportedMethods(t *testing.T) {
 					urlList = []string{"https://example.com/test"}
 				}
 				
-				err := validateSamplingMethod(platform, method, urlList, "")
+				err := validateSamplingMethod(platform, method, urlList, "", "")
 				if err != nil {
 					t.Errorf("Platform '%s' should support method '%s', but got error: %s", platform, method, err.Error())
 				}
@@ -349,7 +377,7 @@ func TestValidateSamplingMethodErrorMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSamplingMethod(tt.platform, tt.samplingMethod, tt.urlList, tt.urlFile)
+			err := validateSamplingMethod(tt.platform, tt.samplingMethod, tt.urlList, tt.urlFile, "")
 			
 			if err == nil {
 				t.Errorf("Expected error but got none")
@@ -394,7 +422,7 @@ func TestValidateSamplingMethodRandomSpecialCase(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateSamplingMethod("youtube", "random", tc.urlList, tc.urlFile)
+			err := validateSamplingMethod("youtube", "random", tc.urlList, tc.urlFile, "")
 			if err != nil {
 				t.Errorf("Random sampling should work with any URL configuration, but got error: %s", err.Error())
 			}
@@ -405,10 +433,10 @@ func TestValidateSamplingMethodRandomSpecialCase(t *testing.T) {
 func TestValidateSamplingMethodBoundaryConditions(t *testing.T) {
 	t.Run("empty URL list vs nil URL list", func(t *testing.T) {
 		// Test with empty slice
-		err1 := validateSamplingMethod("youtube", "channel", []string{}, "")
+		err1 := validateSamplingMethod("youtube", "channel", []string{}, "", "")
 		
 		// Test with nil slice  
-		err2 := validateSamplingMethod("youtube", "channel", nil, "")
+		err2 := validateSamplingMethod("youtube", "channel", nil, "", "")
 		
 		// Both should produce the same error
 		if (err1 == nil) != (err2 == nil) {
@@ -427,7 +455,7 @@ func TestValidateSamplingMethodBoundaryConditions(t *testing.T) {
 			urlList[i] = fmt.Sprintf("https://example.com/channel%d", i)
 		}
 		
-		err := validateSamplingMethod("youtube", "channel", urlList, "")
+		err := validateSamplingMethod("youtube", "channel", urlList, "", "")
 		if err != nil {
 			t.Errorf("Large URL list should be accepted, but got error: %s", err.Error())
 		}
@@ -444,7 +472,7 @@ func TestValidateSamplingMethodBoundaryConditions(t *testing.T) {
 		}
 		
 		for _, path := range specialPaths {
-			err := validateSamplingMethod("youtube", "channel", []string{}, path)
+			err := validateSamplingMethod("youtube", "channel", []string{}, path, "")
 			if err != nil {
 				t.Errorf("File path with special characters should be accepted: %s, but got error: %s", path, err.Error())
 			}

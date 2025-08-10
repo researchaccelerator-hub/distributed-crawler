@@ -10,24 +10,28 @@ import (
 	"github.com/dapr/go-sdk/service/common"
 	daprs "github.com/dapr/go-sdk/service/grpc"
 	common2 "github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
+	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/types/known/anypb"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 // StartDaprMode initializes and starts a Dapr service in job mode using the provided
-// crawler configuration. 
+// crawler configuration.
 //
 // This function:
 // 1. Initializes a Dapr client for interacting with the Dapr runtime
 // 2. Creates a gRPC service that listens on the configured port
 // 3. Registers service invocation handlers for:
-//    - scheduleJob: For scheduling new crawling jobs
-//    - getJob: For retrieving information about existing jobs
+//   - scheduleJob: For scheduling new crawling jobs
+//   - getJob: For retrieving information about existing jobs
+//
 // 4. Registers job event handlers for predefined job names
 // 5. Starts the service and keeps it running until terminated
 //
@@ -53,6 +57,7 @@ func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 
 	app = App{
 		daprClient: daprClient,
+		baseConfig: crawlerCfg, // Store CLI configuration
 	}
 
 	// Create a new Dapr service
@@ -91,6 +96,7 @@ func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 
 type App struct {
 	daprClient daprc.Client
+	baseConfig common2.CrawlerConfig // Store CLI configuration for job handlers
 }
 
 var app App
@@ -232,17 +238,88 @@ func getJob(ctx context.Context, in *common.InvocationEvent) (out *common.Conten
 //	return nil
 //}
 
-// Modified JobData structure to include crawler-specific fields
+// mergeConfigWithJobData merges CLI configuration with job data, 
+// giving precedence to job data when provided, but falling back to CLI values
+func mergeConfigWithJobData(baseConfig common2.CrawlerConfig, jobData JobData) common2.CrawlerConfig {
+	mergedConfig := baseConfig // Start with CLI configuration
+	
+	// Override with job data if provided (non-zero/non-empty values)
+	if jobData.MaxDepth != 0 {
+		mergedConfig.MaxDepth = jobData.MaxDepth
+	}
+	if jobData.Concurrency != 0 {
+		mergedConfig.Concurrency = jobData.Concurrency
+	}
+	if jobData.CrawlID != "" {
+		mergedConfig.CrawlID = jobData.CrawlID
+	}
+	if jobData.Platform != "" {
+		mergedConfig.Platform = jobData.Platform
+	}
+	if jobData.YouTubeAPIKey != "" {
+		mergedConfig.YouTubeAPIKey = jobData.YouTubeAPIKey
+	}
+	if jobData.SamplingMethod != "" {
+		mergedConfig.SamplingMethod = jobData.SamplingMethod
+	}
+	if jobData.MinChannelVideos != 0 {
+		mergedConfig.MinChannelVideos = jobData.MinChannelVideos
+	}
+	if jobData.MaxPosts != 0 {
+		mergedConfig.MaxPosts = jobData.MaxPosts
+	}
+	if jobData.SampleSize != 0 {
+		mergedConfig.SampleSize = jobData.SampleSize
+	}
+	if !jobData.MinPostDate.IsZero() {
+		mergedConfig.MinPostDate = jobData.MinPostDate
+	}
+	if !jobData.DateBetweenMin.IsZero() {
+		mergedConfig.DateBetweenMin = jobData.DateBetweenMin
+	}
+	if !jobData.DateBetweenMax.IsZero() {
+		mergedConfig.DateBetweenMax = jobData.DateBetweenMax
+	}
+	if len(jobData.TDLibDatabaseURLs) > 0 {
+		mergedConfig.TDLibDatabaseURLs = jobData.TDLibDatabaseURLs
+	}
+	if jobData.MaxPages != 0 {
+		mergedConfig.MaxPages = jobData.MaxPages
+	}
+
+	log.Debug().
+		Str("merged_platform", mergedConfig.Platform).
+		Str("merged_sampling", mergedConfig.SamplingMethod).
+		Int("merged_concurrency", mergedConfig.Concurrency).
+		Int("merged_max_depth", mergedConfig.MaxDepth).
+		Int("merged_max_posts", mergedConfig.MaxPosts).
+		Int("merged_max_pages", mergedConfig.MaxPages).
+		Msg("Merged CLI configuration with job data")
+
+	return mergedConfig
+}
+
+// JobData structure includes crawler-specific fields for job configuration
 type JobData struct {
-	DueTime     string   `json:"dueTime"`
-	Droid       string   `json:"droid"`
-	Task        string   `json:"task"`
-	URLs        []string `json:"urls,omitempty"`
-	URLFile     string   `json:"urlFile,omitempty"`
-	CrawlID     string   `json:"crawlId,omitempty"`
-	MaxDepth    int      `json:"maxDepth,omitempty"`
-	Concurrency int      `json:"concurrency,omitempty"`
-	Platform    string   `json:"platform,omitempty"` // Platform to crawl: "telegram", "youtube", etc.
+	DueTime           string    `json:"dueTime"`
+	Droid             string    `json:"droid"`
+	Task              string    `json:"task"`
+	URLs              []string  `json:"urls,omitempty"`
+	URLFile           string    `json:"urlFile,omitempty"`
+	CrawlID           string    `json:"crawlId,omitempty"`
+	MaxDepth          int       `json:"maxDepth,omitempty"`
+	Concurrency       int       `json:"concurrency,omitempty"`
+	Platform          string    `json:"platform,omitempty"`          // Platform to crawl: "telegram", "youtube", etc.
+	YouTubeAPIKey     string    `json:"youtubeApiKey,omitempty"`     // YouTube API key for YouTube platform
+	SamplingMethod    string    `json:"samplingMethod,omitempty"`    // Sampling method: "random", etc.
+	MinChannelVideos  int64     `json:"minChannelVideos,omitempty"`  // Minimum videos for YouTube channels
+	MaxPosts          int       `json:"maxPosts,omitempty"`          // Maximum posts to fetch
+	SampleSize        int       `json:"sampleSize,omitempty"`        // Sample size for random sampling
+	MinPostDate       time.Time `json:"minPostDate,omitempty"`       // Minimum post date for filtering
+	DateBetweenMin    time.Time `json:"dateBetweenMin,omitempty"`    // Date range minimum
+	DateBetweenMax    time.Time `json:"dateBetweenMax,omitempty"`    // Date range maximum
+	TDLibDatabaseURLs []string  `json:"tdlibDatabaseUrls,omitempty"` // TDLib database URLs for connection pooling
+	MaxPages          int       `json:"maxPages,omitempty"`          // Maximum pages to process
 }
 
 // handleJob processes a job event by unmarshaling the job data and payload,
@@ -269,13 +346,12 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 
 	// Check if this is a crawling job
 	if strings.Contains(strings.ToLower(jobData.Task), "crawl") {
-		// Set up crawler configuration using job data
-		crawlerCfg := common2.CrawlerConfig{
-			StorageRoot: os.Getenv("STORAGE_ROOT"), // Get from environment or job data
-			MaxDepth:    jobData.MaxDepth,
-			Concurrency: jobData.Concurrency,
-			CrawlID:     jobData.CrawlID,
-			Platform:    jobData.Platform, // Set platform from job data
+		// Merge CLI configuration with job data, giving precedence to job data
+		crawlerCfg := mergeConfigWithJobData(app.baseConfig, jobData)
+		
+		// Override storage root from environment if set (for containerized deployments)
+		if envStorageRoot := os.Getenv("STORAGE_ROOT"); envStorageRoot != "" {
+			crawlerCfg.StorageRoot = envStorageRoot
 		}
 
 		// If CrawlID not provided, generate one
@@ -299,13 +375,63 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 			urls = append(urls, fileURLs...)
 		}
 
-		if len(urls) == 0 {
+		// For random sampling, URLs are not required since we discover content randomly
+		if len(urls) == 0 && !(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") {
 			err := fmt.Errorf("no URLs provided in job data")
 			log.Error().Err(err).Msg("Failed to start crawl")
 			return err
 		}
 
 		log.Info().Msgf("Starting crawl of %d URLs with concurrency %d", len(urls), crawlerCfg.Concurrency)
+
+		// Platform-specific initialization
+		if crawlerCfg.Platform == "youtube" {
+			// For YouTube platform, we need to validate the API key
+			if crawlerCfg.YouTubeAPIKey == "" {
+				log.Error().Msg("YouTube API key is required for YouTube platform. Please provide it with --youtube-api-key flag")
+				return fmt.Errorf("YouTube API key is required for YouTube platform")
+			}
+
+			log.Info().Msg("Using YouTube platform with the provided API key")
+		} else {
+			// Default Telegram platform initialization
+			baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
+			cleaner := telegramhelper.NewFileCleaner(
+				baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
+				[]string{
+					".tdlib/files/videos",    // Videos directory to clean up
+					".tdlib/files/photos",    // Database directory to clean up
+					".tdlib/files/documents", // General files directory
+				},
+				5,  // cleanup interval minutes
+				15, // file age threshold minutes
+			)
+
+			if err := cleaner.Start(); err != nil {
+				log.Error().Err(err).Msg("Failed to start file cleaner")
+				return err
+			}
+
+			// Initialize connection pool with an appropriate size
+			poolSize := crawlerCfg.Concurrency
+			if poolSize < 1 {
+				poolSize = 1
+			}
+
+			// If we have database URLs, use those to determine pool size
+			if len(crawlerCfg.TDLibDatabaseURLs) > 0 {
+				log.Info().Msgf("Found %d TDLib database URLs for connection pooling", len(crawlerCfg.TDLibDatabaseURLs))
+				// Use the smaller of concurrency or number of database URLs
+				if len(crawlerCfg.TDLibDatabaseURLs) < poolSize {
+					poolSize = len(crawlerCfg.TDLibDatabaseURLs)
+					log.Info().Msgf("Adjusting pool size to %d to match available database URLs", poolSize)
+				}
+			}
+
+			// Initialize the connection pool
+			crawl.InitConnectionPool(poolSize, crawlerCfg.StorageRoot, crawlerCfg)
+			defer crawl.CloseConnectionPool()
+		}
 
 		// Launch the crawler with the provided configuration
 		err := launchCrawl(urls, crawlerCfg)
@@ -474,4 +600,5 @@ func scheduleJob(ctx context.Context, in *common.InvocationEvent) (out *common.C
 	return out, err
 }
 
+// Note: processLayerInParallel function is shared with standalone.go
 // Note: readURLsFromFile function removed as we're now using the common implementation

@@ -124,11 +124,18 @@ Distributed modes (Phase 2+):
 Direct execution modes:
   --mode=standalone      - Single process crawling without Dapr
   --mode=dapr-standalone - Single process crawling with Dapr state management
+  --mode=dapr-job        - Dapr job mode for scheduled crawling tasks (uses CLI config + job data)
 
 Legacy modes (for backward compatibility):
   --dapr --dapr-mode=job - Traditional Dapr job mode
   --dapr                 - Traditional Dapr standalone mode
   (no flags)             - Traditional standalone mode
+
+Configuration Priority:
+  - All CLI arguments are accepted and used as defaults
+  - dapr-job mode: job data overrides CLI arguments when provided
+  - URLs: job data takes precedence, CLI URLs used if job has none
+  - YouTube random sampling doesn't require URLs (discovers content randomly)
 
 Examples:
   # Distributed orchestrator (Phase 2+)
@@ -139,6 +146,9 @@ Examples:
   
   # Explicit standalone
   crawler --mode=standalone --urls="url1,url2"
+  
+  # DAPR job mode (all CLI args accepted, job data can override)
+  crawler --mode=dapr-job --dapr-port=6481 --platform=youtube --max-posts=1000
   
   # Legacy compatibility
   crawler --urls="url1,url2"`,
@@ -169,8 +179,8 @@ Examples:
 			}
 		}
 
-		// Validate sampling method combinations
-		if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile); err != nil {
+		// Validate sampling method combinations (skip URL validation for dapr-job mode)
+		if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
 			return err
 		}
 
@@ -420,6 +430,7 @@ Examples:
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// If no specific subcommand is invoked, show help
+		// Skip URL requirement check for dapr-job mode since URLs come from job data
 		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" && urlFileURL == "" && mode == "" {
 			log.Info().Msg("No arguments provided, showing help")
 			cmd.Help()
@@ -476,6 +487,10 @@ Examples:
 		case "dapr-standalone":
 			log.Info().Str("mode", mode).Msg("Starting in explicit DAPR standalone mode")
 			dapr.StartDaprStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
+		case "dapr-job":
+			log.Info().Str("mode", mode).Msg("Starting in DAPR job mode")
+			// URLs not required for dapr-job mode as they come from job data
+			dapr.StartDaprMode(crawlerCfg)
 		case "":
 			// Legacy mode detection for backward compatibility
 			if crawlerCfg.DaprMode {
@@ -613,7 +628,7 @@ func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
 }
 
 // validateSamplingMethod validates that the platform supports the specified sampling method
-func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string) error {
+func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string, mode string) error {
 	// Valid sampling methods per platform
 	validMethods := map[string][]string{
 		"telegram": {"channel", "snowball"},
@@ -646,7 +661,8 @@ func validateSamplingMethod(platform, samplingMethod string, urlList []string, u
 	}
 
 	// For channel and snowball sampling, validate that URLs are provided
-	if (samplingMethod == "channel" || samplingMethod == "snowball") && len(urlList) == 0 && urlFile == "" {
+	// Skip URL validation for dapr-job mode since jobs provide URLs through job data
+	if (samplingMethod == "channel" || samplingMethod == "snowball") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
 		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
 	}
 
