@@ -12,7 +12,7 @@ func TestJobHandling(t *testing.T) {
 	t.Run("Valid Job Data", func(t *testing.T) {
 		jobData := JobData{
 			DueTime:     "1h",
-			Droid:       "R2-D2",
+			JobName:     "telegram-crawl",
 			Task:        "crawl",
 			URLs:        []string{"https://t.me/channel1"},
 			CrawlID:     "test-crawl-id",
@@ -31,7 +31,7 @@ func TestJobHandling(t *testing.T) {
 		
 		// Verify all fields are preserved
 		assert.Equal(t, jobData.DueTime, parsedJobData.DueTime)
-		assert.Equal(t, jobData.Droid, parsedJobData.Droid)
+		assert.Equal(t, jobData.JobName, parsedJobData.JobName)
 		assert.Equal(t, jobData.Task, parsedJobData.Task)
 		assert.Equal(t, jobData.URLs, parsedJobData.URLs)
 		assert.Equal(t, jobData.CrawlID, parsedJobData.CrawlID)
@@ -43,7 +43,7 @@ func TestJobHandling(t *testing.T) {
 	t.Run("With URL File", func(t *testing.T) {
 		jobData := JobData{
 			DueTime:     "1h", 
-			Droid:       "R2-D2",
+			JobName:     "youtube-crawl",
 			Task:        "crawl",
 			URLFile:     "/tmp/test-urls.txt",
 			CrawlID:     "test-crawl-id",

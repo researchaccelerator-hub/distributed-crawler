@@ -169,14 +169,17 @@ Examples:
 		zerolog.SetGlobalLevel(level)
 		log.Info().Str("log_level", level.String()).Msg("Logger initialized")
 
-		// Check YouTube API key if platform is YouTube
-		if crawlerCfg.Platform == "youtube" {
+		// Check YouTube API key if platform is YouTube (skip for dapr-job mode as API key may come from job data)
+		if crawlerCfg.Platform == "youtube" && mode != "dapr-job" {
 			if crawlerCfg.YouTubeAPIKey == "" {
 				fmt.Println("Error: When using --platform youtube, you must provide a valid YouTube API key with --youtube-api-key")
 				log.Error().Msg("YouTube API key is required but was not provided")
+				return fmt.Errorf("YouTube API key is required for YouTube platform")
 			} else {
 				log.Info().Str("api_key_status", "provided").Str("api_key_length", fmt.Sprintf("%d chars", len(crawlerCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
 			}
+		} else if crawlerCfg.Platform == "youtube" && mode == "dapr-job" {
+			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
 		}
 
 		// Validate sampling method combinations (skip URL validation for dapr-job mode)
