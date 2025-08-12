@@ -4,6 +4,12 @@ package dapr
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
@@ -14,11 +20,6 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +145,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		defer crawl.CloseConnectionPool()
 	}
 
+	// TODO: use completely different launch for random sampling
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
@@ -163,160 +165,41 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 //   - stringList: A slice of strings representing the items to be processed.
 //   - crawlCfg: A CrawlerConfig struct containing configuration settings for the crawler.
 func launch(stringList []string, crawlCfg common.CrawlerConfig) {
-	// Create a global map to track all URLs we've seen across all layers
-	seenURLs := make(map[string]bool)
-
-	// Initialize seenURLs with the seed URLs
-	for _, url := range stringList {
-		seenURLs[url] = true
-	}
 
 	// Initialize state manager factory
 	log.Info().Msgf("Starting scraper for crawl ID: %s", crawlCfg.CrawlID)
 	smfact := state.DefaultStateManagerFactory{}
 
 	// Create a temporary state manager to check for incomplete crawls
-	tempCfg := state.Config{
-		StorageRoot: crawlCfg.StorageRoot,
-		CrawlID:     crawlCfg.CrawlID,
-		Platform:    crawlCfg.Platform, // Pass the platform information
-	}
+	tempSM, _, err := CreateStateManager(&smfact, crawlCfg, "")
 
-	tempSM, err := smfact.Create(tempCfg)
+	// Check for crawl id or create new one
+	crawlexecid, isResumingSameCrawlExecution := DetermineCrawlID(tempSM, crawlCfg)
+
+	sm, cfg, err := CreateStateManager(&smfact, crawlCfg, crawlexecid)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to create temporary state manager")
-	}
-
-	// Check for an existing incomplete crawl
-	var crawlexecid string
-	if tempSM != nil {
-		existingExecID, exists, err := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
-		if err != nil {
-			log.Warn().Err(err).Msg("Error checking for existing crawls, starting fresh")
-		} else if exists {
-			// Use existing execution ID
-			crawlexecid = existingExecID
-			log.Info().Msgf("Resuming existing crawl: %s (execution: %s)",
-				crawlCfg.CrawlID, crawlexecid)
-		}
-
-		// Close the temporary state manager to free up resources
-		_ = tempSM.Close()
-	}
-
-	// If no existing crawl was found, generate a new execution ID
-	if crawlexecid == "" {
-		crawlexecid = common.GenerateCrawlID()
-		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
-	}
-
-	// Track whether we're resuming the same execution ID or starting a new one
-	var isResumingSameCrawlExecution bool
-	if tempSM != nil {
-		existingExecID, exists, _ := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
-		isResumingSameCrawlExecution = exists && existingExecID != "" && crawlexecid == existingExecID
-	}
-	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Crawl execution mode")
-
-	// Create the actual state manager with the determined execution ID
-	cfg := state.Config{
-		StorageRoot:      crawlCfg.StorageRoot,
-		CrawlID:          crawlCfg.CrawlID,
-		CrawlExecutionID: crawlexecid,
-		Platform:         crawlCfg.Platform, // Pass the platform information
-
-		// Add the MaxPages config
-		MaxPagesConfig: &state.MaxPagesConfig{
-			MaxPages: crawlCfg.MaxPages,
-		},
-	}
-
-	sm, err := smfact.Create(cfg)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to initialize state manager")
 		return
 	}
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
-	// Get the existing layers or seed a new crawl
-	err = sm.Initialize(stringList)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to set up seed URLs")
-		return
-	}
+	if crawlCfg.SamplingMethod == "random" && crawlCfg.Platform == "youtube" {
+		RunRandomYoutubeSample(sm, crawlCfg)
+	} else {
+		// Create a global map to track all URLs we've seen across all layers
+		seenURLs := make(map[string]bool)
 
-	// Process layers iteratively, with potential for new layers to be added during execution
-	depth := 0
-	for {
-		log.Info().Msgf("Starting loop for depth: %v", depth)
-		// Check current maximum depth at the beginning of each iteration
-		maxDepth, err := sm.GetMaxDepth()
+		// Initialize seenURLs with the seed URLs
+		for _, url := range stringList {
+			seenURLs[url] = true
+		}
+		// Get the existing layers or seed a new crawl
+		err = sm.Initialize(stringList)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to get maximum depth, using 0")
-			maxDepth = 0
+			log.Error().Err(err).Msg("Failed to set up seed URLs")
+			return
 		}
-
-		// If we've processed all layers up to the current maximum depth, we're done
-		if depth > maxDepth {
-			log.Info().Msgf("Processed all layers up to maximum depth %d", maxDepth)
-			break
-		}
-
-		// Get the current layer to process
-		pages, err := sm.GetLayerByDepth(depth)
-		if err != nil {
-			log.Error().Err(err).Msgf("Failed to get layer at depth %d", depth)
-			depth++
-			continue
-		}
-
-		// Print all page statuses before processing
-		log.Info().Int("page_count", len(pages)).Int("depth", depth).Msg("Page status summary before processing")
-		pageStatusCount := make(map[string]int)
-		for _, page := range pages {
-			pageStatusCount[page.Status]++
-			log.Debug().
-				Str("url", page.URL).
-				Str("status", page.Status).
-				Str("id", page.ID).
-				Int("message_count", len(page.Messages)).
-				Time("timestamp", page.Timestamp).
-				Bool("resuming_execution", isResumingSameCrawlExecution).
-				Msg("Page status before processing in Dapr mode")
-		}
-		// Log the counts of pages by status
-		for status, count := range pageStatusCount {
-			log.Info().Str("status", status).Int("count", count).Int("depth", depth).Msg("Page status count")
-		}
-
-		// Skip if there are no pages at this depth
-		if len(pages) == 0 {
-			log.Info().Msgf("No pages found at depth %d, skipping", depth)
-			depth++
-			continue
-		}
-
-		if depth > crawlCfg.MaxDepth {
-			log.Info().Msgf("Processed all layers up to max depth %d", maxDepth)
-			break
-		}
-		log.Info().Msgf("Processing layer at depth %d with %d pages", depth, len(pages))
-
-		// Create a Layer object
-		layer := &state.Layer{
-			Depth: depth,
-			Pages: pages,
-		}
-
-		// Process pages in current layer in parallel
-		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg)
-
-		// Log progress after completing a layer
-		log.Info().Msgf("Completed layer at depth %d", depth)
-
-		// Move to the next depth
-		depth++
+		ProcessLayersIteratively(sm, crawlCfg, isResumingSameCrawlExecution)
 	}
 
 	// Explicitly save any pending media cache data before completing the crawl
@@ -458,134 +341,14 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			if crawlCfg.Platform == "youtube" {
 				// YouTube platform processing
 				log.Info().Msgf("Processing YouTube channel: %s", page.URL)
-
-				// Initialize YouTube components
-				clientCtx := context.Background()
-				clientFactory := clientpkg.NewDefaultClientFactory()
-
-				// Debug API key passing
-				if crawlCfg.YouTubeAPIKey == "" {
-					log.Error().Msg("YouTube API key is empty - make sure you provided it with --youtube-api-key")
+				ytCrawler, ytClient, clientCtx, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+				if ytInitErr != nil {
+					err = ytInitErr
 				} else {
-					log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(crawlCfg.YouTubeAPIKey))).Msg("Using YouTube API key in DAPR mode")
+					discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler, crawlCfg, page, ctx)
 				}
-
-				config := map[string]interface{}{
-					"api_key": crawlCfg.YouTubeAPIKey,
-				}
-
-				// Create YouTube client
-				ytClient, ytErr := clientFactory.CreateClient(clientCtx, "youtube", config)
-				if ytErr != nil {
-					err = fmt.Errorf("failed to create YouTube client: %w", ytErr)
-					log.Error().Err(err).Msg("YouTube client creation failed")
-				} else {
-					// Connect to YouTube API
-					if ytErr = ytClient.Connect(clientCtx); ytErr != nil {
-						err = fmt.Errorf("failed to connect to YouTube API: %w", ytErr)
-						log.Error().Err(err).Msg("YouTube API connection failed")
-					} else {
-						// Create crawler factory and register crawlers
-						factory := crawler.NewCrawlerFactory()
-						if ytErr = crawlercommon.RegisterAllCrawlers(factory); ytErr != nil {
-							err = fmt.Errorf("failed to register crawlers: %w", ytErr)
-							log.Error().Err(err).Msg("Failed to register YouTube crawler")
-						} else {
-							// Create YouTube crawler
-							ytCrawler, ytErr := factory.GetCrawler(crawler.PlatformYouTube)
-							if ytErr != nil {
-								err = fmt.Errorf("failed to create YouTube crawler: %w", ytErr)
-								log.Error().Err(err).Msg("Failed to create YouTube crawler")
-							} else {
-								// Create YouTubeClient adapter
-								ytAdapter, adapterErr := youtube.NewClientAdapter(ytClient)
-								if adapterErr != nil {
-									err = fmt.Errorf("failed to create YouTube client adapter: %w", adapterErr)
-									log.Error().Err(err).Msg("YouTube client adapter creation failed")
-								} else {
-									// Initialize YouTube crawler with the adapter
-									crawlerConfig := map[string]interface{}{
-										"client":        ytAdapter,
-										"state_manager": sm,
-										"crawler_config": map[string]interface{}{
-											"sampling_method":    crawlCfg.SamplingMethod,
-											"min_channel_videos": crawlCfg.MinChannelVideos,
-										},
-									}
-
-									if ytErr = ytCrawler.Initialize(clientCtx, crawlerConfig); ytErr != nil {
-										err = fmt.Errorf("failed to initialize YouTube crawler: %w", ytErr)
-										log.Error().Err(err).Msg("Failed to initialize YouTube crawler")
-									} else {
-										// Create a crawl target for the YouTube channel
-										target := crawler.CrawlTarget{
-											Type: crawler.PlatformYouTube,
-											ID:   page.URL, // YouTube channel ID/handle
-										}
-
-										// Fetch channel info and videos
-										_, ytErr := ytCrawler.GetChannelInfo(ctx, target)
-										if ytErr != nil {
-											err = fmt.Errorf("failed to get YouTube channel info: %w", ytErr)
-											log.Error().Err(err).Msg("Failed to get YouTube channel info")
-										} else {
-											// Execute the crawl job with date filtering
-											var fromTime, toTime time.Time
-											if !crawlCfg.DateBetweenMin.IsZero() && !crawlCfg.DateBetweenMax.IsZero() {
-												// Use date-between range
-												fromTime = crawlCfg.DateBetweenMin
-												toTime = crawlCfg.DateBetweenMax
-												log.Info().
-													Time("date_between_min", fromTime).
-													Time("date_between_max", toTime).
-													Msg("Using date-between filter for YouTube crawl in DAPR mode")
-											} else {
-												// Use traditional min post date with current time as upper bound
-												fromTime = crawlCfg.MinPostDate
-												toTime = time.Now()
-											}
-
-											job := crawler.CrawlJob{
-												Target:     target,
-												FromTime:   fromTime,
-												ToTime:     toTime,
-												Limit:      crawlCfg.MaxPosts,
-												SampleSize: crawlCfg.SampleSize,
-											}
-
-											// Log job details
-											log.Debug().
-												Time("from_time", fromTime).
-												Time("to_time", toTime).
-												Int("limit", job.Limit).
-												Msg("YouTube crawl job configured in DAPR mode")
-
-											result, ytErr := ytCrawler.FetchMessages(ctx, job)
-											if ytErr != nil {
-												err = fmt.Errorf("failed to fetch YouTube videos: %w", ytErr)
-												log.Error().Err(err).Msg("Failed to fetch YouTube videos")
-											} else {
-												log.Info().
-													Int("video_count", len(result.Posts)).
-													Str("channel", page.URL).
-													Msg("Successfully crawled YouTube channel")
-
-												// For now, we don't discover channels from YouTube
-												discoveredChannels = []*state.Page{}
-											}
-										}
-
-										// Cleanup YouTube crawler resources
-										if closeErr := ytCrawler.Close(); closeErr != nil {
-											log.Warn().Err(closeErr).Msg("Error closing YouTube crawler")
-										}
-									}
-								}
-							}
-						}
-					}
-
-					// Disconnect YouTube client
+				// Disconnect YouTube client
+				if ytClient != nil {
 					if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
 						log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
 					}
@@ -702,4 +465,339 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			}
 		}
 	}
+}
+
+func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.CrawlerConfig, crawlexecid string) (state.StateManagementInterface, state.Config, error) {
+	var cfg state.Config
+	if crawlexecid == "" {
+		// Create a temporary state manager to check for incomplete crawls
+		cfg = state.Config{
+			StorageRoot: crawlCfg.StorageRoot,
+			CrawlID:     crawlCfg.CrawlID,
+			Platform:    crawlCfg.Platform, // Pass the platform information
+		}
+	} else {
+		cfg = state.Config{
+			StorageRoot:      crawlCfg.StorageRoot,
+			CrawlID:          crawlCfg.CrawlID,
+			CrawlExecutionID: crawlexecid,
+			Platform:         crawlCfg.Platform, // Pass the platform information
+
+			// Add the MaxPages config
+			MaxPagesConfig: &state.MaxPagesConfig{
+				MaxPages: crawlCfg.MaxPages,
+			},
+		}
+	}
+	sm, err := smfact.Create(cfg)
+	if err != nil {
+		if crawlexecid == "" {
+			log.Error().Err(err).Msg("Failed to create temporary state manager")
+			return nil, state.Config{}, err
+		} else {
+			log.Error().Err(err).Msg("Failed to initialize state manager")
+			return nil, state.Config{}, err
+		}
+	}
+	return sm, cfg, nil
+}
+
+func DetermineCrawlID(tempSM state.StateManagementInterface, crawlCfg common.CrawlerConfig) (string, bool) {
+	var crawlexecid string
+	if tempSM != nil {
+		existingExecID, exists, err := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
+		if err != nil {
+			log.Warn().Err(err).Msg("Error checking for existing crawls, starting fresh")
+		} else if exists {
+			// Use existing execution ID
+			crawlexecid = existingExecID
+			log.Info().Msgf("Resuming existing crawl: %s (execution: %s)",
+				crawlCfg.CrawlID, crawlexecid)
+		}
+
+		// Close the temporary state manager to free up resources
+		_ = tempSM.Close()
+	}
+
+	// If no existing crawl was found, generate a new execution ID
+	if crawlexecid == "" {
+		crawlexecid = common.GenerateCrawlID()
+		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
+	}
+
+	// Track whether we're resuming the same execution ID or starting a new one
+	var isResumingSameCrawlExecution bool
+	if tempSM != nil {
+		existingExecID, exists, _ := tempSM.FindIncompleteCrawl(crawlCfg.CrawlID)
+		isResumingSameCrawlExecution = exists && existingExecID != "" && crawlexecid == existingExecID
+	}
+	log.Info().Bool("is_resuming_same_execution", isResumingSameCrawlExecution).Msg("Crawl execution mode")
+	return crawlexecid, isResumingSameCrawlExecution
+}
+
+func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, isResumingSameCrawlExecution bool) {
+	depth := 0
+	for {
+		log.Info().Msgf("Starting loop for depth: %v", depth)
+		// Check current maximum depth at the beginning of each iteration
+		maxDepth, err := sm.GetMaxDepth()
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to get maximum depth, using 0")
+			maxDepth = 0
+		}
+
+		// If we've processed all layers up to the current maximum depth, we're done
+		if depth > maxDepth {
+			log.Info().Msgf("Processed all layers up to maximum depth %d", maxDepth)
+			break
+		}
+
+		// Get the current layer to process
+		pages, err := sm.GetLayerByDepth(depth)
+		if err != nil {
+			log.Error().Err(err).Msgf("Failed to get layer at depth %d", depth)
+			depth++
+			continue
+		}
+
+		// Print all page statuses before processing
+		log.Info().Int("page_count", len(pages)).Int("depth", depth).Msg("Page status summary before processing")
+		pageStatusCount := make(map[string]int)
+		for _, page := range pages {
+			pageStatusCount[page.Status]++
+			log.Debug().
+				Str("url", page.URL).
+				Str("status", page.Status).
+				Str("id", page.ID).
+				Int("message_count", len(page.Messages)).
+				Time("timestamp", page.Timestamp).
+				Bool("resuming_execution", isResumingSameCrawlExecution).
+				Msg("Page status before processing in Dapr mode")
+		}
+		// Log the counts of pages by status
+		for status, count := range pageStatusCount {
+			log.Info().Str("status", status).Int("count", count).Int("depth", depth).Msg("Page status count")
+		}
+
+		// Skip if there are no pages at this depth
+		if len(pages) == 0 {
+			log.Info().Msgf("No pages found at depth %d, skipping", depth)
+			depth++
+			continue
+		}
+
+		if depth > crawlCfg.MaxDepth {
+			log.Info().Msgf("Processed all layers up to max depth %d", maxDepth)
+			break
+		}
+		log.Info().Msgf("Processing layer at depth %d with %d pages", depth, len(pages))
+
+		// Create a Layer object
+		layer := &state.Layer{
+			Depth: depth,
+			Pages: pages,
+		}
+
+		// Process pages in current layer in parallel
+		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg)
+
+		// Log progress after completing a layer
+		log.Info().Msgf("Completed layer at depth %d", depth)
+
+		// Move to the next depth
+		depth++
+	}
+}
+
+func InitializeYoutubeCrawlerComponents(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (crawler.Crawler, clientpkg.Client, context.Context, error) {
+	// Initialize YouTube components
+	var err error
+	clientCtx := context.Background()
+	clientFactory := clientpkg.NewDefaultClientFactory()
+
+	// Debug API key passing
+	if crawlCfg.YouTubeAPIKey == "" {
+		log.Error().Msg("YouTube API key is empty - make sure you provided it with --youtube-api-key")
+	} else {
+		log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(crawlCfg.YouTubeAPIKey))).Msg("Using YouTube API key in DAPR mode")
+	}
+
+	config := map[string]interface{}{
+		"api_key": crawlCfg.YouTubeAPIKey,
+	}
+
+	// Create YouTube client
+	ytClient, ytErr := clientFactory.CreateClient(clientCtx, "youtube", config)
+	if ytErr != nil {
+		err = fmt.Errorf("failed to create YouTube client: %w", ytErr)
+		log.Error().Err(err).Msg("YouTube client creation failed")
+		return nil, nil, clientCtx, err
+	}
+	// Connect to YouTube API
+	if ytErr = ytClient.Connect(clientCtx); ytErr != nil {
+		err = fmt.Errorf("failed to connect to YouTube API: %w", ytErr)
+		log.Error().Err(err).Msg("YouTube API connection failed")
+		return nil, ytClient, clientCtx, err
+	}
+	// Create crawler factory and register crawlers
+	factory := crawler.NewCrawlerFactory()
+	if ytErr = crawlercommon.RegisterAllCrawlers(factory); ytErr != nil {
+		err = fmt.Errorf("failed to register crawlers: %w", ytErr)
+		log.Error().Err(err).Msg("Failed to register YouTube crawler")
+		return nil, ytClient, clientCtx, err
+	}
+	// Create YouTube crawler
+	ytCrawler, ytErr := factory.GetCrawler(crawler.PlatformYouTube)
+	if ytErr != nil {
+		err = fmt.Errorf("failed to create YouTube crawler: %w", ytErr)
+		log.Error().Err(err).Msg("Failed to create YouTube crawler")
+		return nil, ytClient, clientCtx, err
+	}
+	// Create YouTubeClient adapter
+	ytAdapter, adapterErr := youtube.NewClientAdapter(ytClient)
+	if adapterErr != nil {
+		err = fmt.Errorf("failed to create YouTube client adapter: %w", adapterErr)
+		log.Error().Err(err).Msg("YouTube client adapter creation failed")
+		return nil, ytClient, clientCtx, err
+	}
+	// Initialize YouTube crawler with the adapter
+	crawlerConfig := map[string]interface{}{
+		"client":        ytAdapter,
+		"state_manager": sm,
+		"crawler_config": map[string]interface{}{
+			"sampling_method":    crawlCfg.SamplingMethod,
+			"min_channel_videos": crawlCfg.MinChannelVideos,
+		},
+	}
+	if ytErr = ytCrawler.Initialize(clientCtx, crawlerConfig); ytErr != nil {
+		err = fmt.Errorf("failed to initialize YouTube crawler: %w", ytErr)
+		log.Error().Err(err).Msg("Failed to initialize YouTube crawler")
+		return ytCrawler, ytClient, clientCtx, err
+	}
+	return ytCrawler, ytClient, clientCtx, nil
+}
+
+func CalculateDateFilters(crawlCfg common.CrawlerConfig) (time.Time, time.Time) {
+	// Execute the crawl job with date filtering
+	var fromTime, toTime time.Time
+	if !crawlCfg.DateBetweenMin.IsZero() && !crawlCfg.DateBetweenMax.IsZero() {
+		// Use date-between range
+		fromTime = crawlCfg.DateBetweenMin
+		toTime = crawlCfg.DateBetweenMax
+		log.Info().
+			Time("date_between_min", fromTime).
+			Time("date_between_max", toTime).
+			Msg("Using date-between filter for YouTube crawl in DAPR mode")
+	} else if !crawlCfg.PostRecency.IsZero() {
+		// Use PostRecency var to generate time between
+		fromTime = crawlCfg.PostRecency
+		toTime = time.Now()
+		log.Debug().
+			Time("date_between_min", fromTime).
+			Time("date_between_max", toTime).
+			Msg("Using time-ago filter for YouTube crawl in DAPR mode")
+	} else {
+		// Use traditional min post date with current time as upper bound
+		fromTime = crawlCfg.MinPostDate
+		toTime = time.Now()
+	}
+	return fromTime, toTime
+}
+
+func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common.CrawlerConfig, page state.Page, ctx context.Context) ([]*state.Page, error) {
+	var err error
+	var discoveredChannels []*state.Page
+
+	// Create a crawl target for the YouTube channel
+	target := crawler.CrawlTarget{
+		Type: crawler.PlatformYouTube,
+		ID:   page.URL, // YouTube channel ID/handle
+	}
+
+	// Fetch channel info and videos
+	_, ytErr := ytCrawler.GetChannelInfo(ctx, target)
+	if ytErr != nil {
+		err = fmt.Errorf("failed to get YouTube channel info: %w", ytErr)
+		log.Error().Err(err).Msg("Failed to get YouTube channel info")
+		return []*state.Page{}, err
+	}
+	fromTime, toTime := CalculateDateFilters(crawlCfg)
+	job := crawler.CrawlJob{
+		Target:     target,
+		FromTime:   fromTime,
+		ToTime:     toTime,
+		Limit:      crawlCfg.MaxPosts,
+		SampleSize: crawlCfg.SampleSize,
+	}
+
+	// Log job details
+	log.Debug().Time("from_time", fromTime).Time("to_time", toTime).Int("limit", job.Limit).
+		Msg("YouTube crawl job configured in DAPR mode")
+
+	result, ytErr := ytCrawler.FetchMessages(ctx, job)
+	if ytErr != nil {
+		err = fmt.Errorf("failed to fetch YouTube videos: %w", ytErr)
+		log.Error().Err(err).Msg("Failed to fetch YouTube videos")
+		return []*state.Page{}, err
+	} else {
+		log.Info().
+			Int("video_count", len(result.Posts)).
+			Str("channel", page.URL).
+			Msg("Successfully crawled YouTube channel")
+
+		// For now, we don't discover channels from YouTube
+		discoveredChannels = []*state.Page{}
+	}
+
+	// Cleanup YouTube crawler resources
+	if closeErr := ytCrawler.Close(); closeErr != nil {
+		log.Warn().Err(closeErr).Msg("Error closing YouTube crawler")
+	}
+	return discoveredChannels, nil
+}
+
+func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	fromTime, toTime := CalculateDateFilters(crawlCfg)
+	target := crawler.CrawlTarget{
+		Type: crawler.PlatformYouTube,
+		ID:   crawlCfg.CrawlID,
+	}
+	job := crawler.CrawlJob{
+		Target:           target,
+		FromTime:         fromTime,
+		ToTime:           toTime,
+		Limit:            crawlCfg.MaxPosts,
+		SampleSize:       crawlCfg.SampleSize,
+		SamplesRemaining: crawlCfg.SampleSize,
+	}
+
+	ytCrawler, ytClient, clientCtx, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+	if ytInitErr != nil {
+		return
+	} else {
+		for {
+			result, ytErr := ytCrawler.FetchMessages(ctx, job)
+			if ytErr != nil {
+				log.Error().Err(ytErr).Msg("Failed to fetch messages for random sample")
+				break
+			}
+			resultsCount := len(result.Posts)
+			job.SamplesRemaining = job.SamplesRemaining - resultsCount
+			log.Info().Int("new_videos_processed", resultsCount).Int("samples_left", job.SamplesRemaining)
+			if job.SamplesRemaining <= 0 {
+				log.Info().Int("samples_left", job.SamplesRemaining).Msg("Finished fetching random samples")
+				break
+			}
+		}
+	}
+	// Disconnect YouTube client
+	if ytClient != nil {
+		if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
+			log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
+		}
+	}
+	return
 }
