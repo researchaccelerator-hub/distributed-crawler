@@ -801,7 +801,7 @@ func min(a, b int) int {
 }
 
 // generateRandomPrefix generates a random prefix for YouTube search queries
-// Similar to the Python example: watch?v=<random_chars>-
+// Similar to the Python example: watch?v=<random_chars> except removes the trailing - which was effectively increasing prefix length by 1
 func (c *YouTubeDataClient) generateRandomPrefix(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789_-"
 	watchPrefix := "watch?v="
@@ -814,7 +814,6 @@ func (c *YouTubeDataClient) generateRandomPrefix(length int) string {
 		b[i] = charset[c.rng.Intn(len(charset))]
 	}
 
-	// return watchPrefix + string(b) + "-"
 	return watchPrefix + string(b)
 }
 
