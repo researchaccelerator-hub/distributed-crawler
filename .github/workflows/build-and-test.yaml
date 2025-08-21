@@ -15,21 +15,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y make git zlib1g-dev libssl-dev gperf php-cli cmake g++ ninja-build
-          git clone --depth=1 https://github.com/tdlib/td.git td
+          git clone https://github.com/tdlib/td.git td
           cd td
+          git checkout 971684a3dcc7bdf99eec024e1c4f57ae729d6d53
           rm -rf build
           mkdir build
           cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local -G Ninja ..
           sudo cmake --build . --target install
+          sudo ldconfig
+          echo "Installed TDLib files:"
+          ls -la /usr/local/lib/ | grep -E "(td|TD)" || echo "No TDLib libraries found"
+          ls -la /usr/local/include/ | grep -E "(td|TD)" || echo "No TDLib headers found"
       - uses: actions/checkout@v4
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21.x'
+          go-version: '1.23.x'
       - name: Install dependencies
         run: go get .
       - name: Build
-        run: go build -v ./...
+        run: |
+          export CGO_CFLAGS="-I/usr/local/include"
+          export CGO_LDFLAGS="-L/usr/local/lib -ltdjson"
+          go build -v ./...
       - name: Test with the Go CLI
-        run: go test
+        run: |
+          export CGO_CFLAGS="-I/usr/local/include"
+          export CGO_LDFLAGS="-L/usr/local/lib -ltdjson"
+          go test ./...
