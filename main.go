@@ -635,7 +635,7 @@ func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
 func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string, mode string) error {
 	// Valid sampling methods per platform
 	validMethods := map[string][]string{
-		"telegram": {"channel", "snowball"},
+		"telegram": {"channel", "snowball", "random-walk"},
 		"youtube":  {"channel", "random", "snowball"},
 	}
 
@@ -666,7 +666,7 @@ func validateSamplingMethod(platform, samplingMethod string, urlList []string, u
 
 	// For channel and snowball sampling, validate that URLs are provided
 	// Skip URL validation for dapr-job mode since jobs provide URLs through job data
-	if (samplingMethod == "channel" || samplingMethod == "snowball") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
+	if (samplingMethod == "channel" || samplingMethod == "snowball" || samplingMethod == "random-walk") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
 		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
 	}
 
@@ -703,7 +703,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
-	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, snowball")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, random-walk, snowball")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.WalkbackRate, "walkback-rate", 15, "The rate at which to perform walkbacks when using random-walk sampling")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 
 	// New distributed mode flags
@@ -744,6 +745,7 @@ func init() {
 	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
 	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
 	viper.BindPFlag("crawler.sampling", rootCmd.PersistentFlags().Lookup("sampling"))
+	viper.BindPFlag("crawler.walkback_rate", rootCmd.PersistentFlags().Lookup("walkback-rate"))
 	viper.BindPFlag("crawler.min_channel_videos", rootCmd.PersistentFlags().Lookup("min-channel-videos"))
 	viper.BindPFlag("distributed.mode", rootCmd.PersistentFlags().Lookup("mode"))
 	viper.BindPFlag("distributed.worker_id", rootCmd.PersistentFlags().Lookup("worker-id"))

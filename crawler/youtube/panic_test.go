@@ -78,6 +78,12 @@ func (m *MockStateManager) HasProcessedMedia(mediaID string) (bool, error) { ret
 func (m *MockStateManager) MarkMediaAsProcessed(mediaID string) error      { return nil }
 func (m *MockStateManager) Close() error                                   { return nil }
 
+// Used for random-walk sampling
+func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error)    { return "", nil }
+func (m *MockStateManager) IsDiscoveredChannel(channelID string) bool      { return true }
+func (m *MockStateManager) AddDiscoveredChannel(channelID string) error    { return nil }
+func (m *MockStateManager) AddEdgeRecords(edges []*state.EdgeRecord) error { return nil }
+
 func TestPanicRecovery(t *testing.T) {
 	// Create a YouTube crawler with a mock client that will panic
 	c := &YouTubeCrawler{

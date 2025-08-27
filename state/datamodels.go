@@ -1,6 +1,8 @@
 package state
 
 import (
+	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -59,6 +61,56 @@ type Message struct {
 	Platform  string `json:"platform,omitempty"` // Added for multi-platform support
 }
 
+type EdgeRecord struct {
+	DiscoveryTime      time.Time `json:"discoveryTime"`
+	SourceChannel      string    `json:"sourceChannel"`
+	DestinationChannel string    `json:"destinationChannel"`
+	NewChannel         bool      `json:"newChannel"`
+	Walkback           bool      `json:"walkback"`
+}
+
+type DiscoveredChannels struct {
+	items map[string]bool
+	keys  []string
+	mutex sync.RWMutex
+}
+
+func NewDiscoveredChannels() *DiscoveredChannels {
+	return &DiscoveredChannels{
+		items: make(map[string]bool),
+		keys:  make([]string, 0),
+		mutex: sync.RWMutex{},
+	}
+}
+
+func (d *DiscoveredChannels) Add(item string) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	if _, exists := d.items[item]; !exists {
+		d.items[item] = true
+		d.keys = append(d.keys, item)
+		return nil
+	}
+	return fmt.Errorf("%s already exists", item)
+}
+
+func (d *DiscoveredChannels) Contains(item string) bool {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	_, exists := d.items[item]
+	return exists
+}
+
+func (d *DiscoveredChannels) Random() (string, error) {
+	d.mutex.RLock()
+	defer d.mutex.RUnlock()
+	if len(d.keys) == 0 {
+		return "", fmt.Errorf("No discovered channels to pull from at random")
+	}
+	index := rand.Intn(len(d.keys))
+	return d.keys[index], nil
+}
+
 // Layer represents a collection of pages at the same depth level
 type Layer struct {
 	Depth int    `json:"depth"`
@@ -74,10 +126,10 @@ type CrawlMetadata struct {
 	EndTime         time.Time `json:"endTime,omitempty"`
 	Status          string    `json:"status"` // "running", "completed", "failed"
 	PreviousCrawlID []string  `json:"previousCrawlId,omitempty"`
-	Platform        string    `json:"platform,omitempty"` // Added for multi-platform support
+	Platform        string    `json:"platform,omitempty"`       // Added for multi-platform support
 	TargetChannels  []string  `json:"targetChannels,omitempty"` // Target channels for this crawl
-	MessagesCount   int       `json:"messagesCount,omitempty"` // Number of messages retrieved
-	ErrorsCount     int       `json:"errorsCount,omitempty"` // Number of errors encountered
+	MessagesCount   int       `json:"messagesCount,omitempty"`  // Number of messages retrieved
+	ErrorsCount     int       `json:"errorsCount,omitempty"`    // Number of errors encountered
 }
 
 // MediaCacheItem represents an item in the media cache

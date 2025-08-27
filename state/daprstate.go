@@ -6,15 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	daprc "github.com/dapr/go-sdk/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
@@ -2816,4 +2817,41 @@ func (dsm *DaprStateManager) GetLayerByDepth(depth int) ([]Page, error) {
 	}
 
 	return pages, nil
+}
+
+func (dsm *DaprStateManager) GetRandomDiscoveredChannel() (string, error) {
+	return dsm.BaseStateManager.GetRandomDiscoveredChannel()
+}
+
+func (dsm *DaprStateManager) IsDiscoveredChannel(channelID string) bool {
+	return dsm.BaseStateManager.IsDiscoveredChannel(channelID)
+}
+
+func (dsm *DaprStateManager) AddDiscoveredChannel(channelID string) error {
+	return dsm.BaseStateManager.AddDiscoveredChannel(channelID)
+}
+
+func (dsm *DaprStateManager) AddEdgeRecords(edges []*EdgeRecord) error {
+	// Create a context with timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// Add Edges in Memory
+	baseErr := dsm.BaseStateManager.AddEdgeRecords(edges)
+	if baseErr != nil {
+		log.Error().Err(baseErr).Msg("Failed to add edge records")
+		return baseErr
+	}
+	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Msg("Adding new edges")
+	edgeData, err := json.MarshalIndent(dsm.BaseStateManager.edgeRecords, "", "  ")
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to marshall edge data")
+		return err
+	}
+	edgeKey := fmt.Sprintf("%s/discoveredEdges", dsm.config.CrawlID)
+	err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeData, nil)
+	if err != nil {
+		log.Warn().Err(err).Str("key", edgeKey).Msg("Failed to save edge data")
+		return err
+	}
+	return nil
 }

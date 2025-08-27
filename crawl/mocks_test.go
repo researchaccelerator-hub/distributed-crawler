@@ -153,7 +153,7 @@ func (m *MockTDLibClient) GetRepliedMessage(req *client.GetRepliedMessageRequest
 }
 
 type GetChatMessagesRequest struct {
-	ChatId  int64
+	ChatId     int64
 	MessageIds []int64
 }
 
@@ -337,6 +337,26 @@ func (m *MockStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 // MarkMediaAsProcessed marks media as processed
 func (m *MockStateManager) MarkMediaAsProcessed(mediaID string) error {
 	args := m.Called(mediaID)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error) {
+	args := m.Called()
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockStateManager) IsDiscoveredChannel(channelID string) bool {
+	args := m.Called(channelID)
+	return args.Bool(0)
+}
+
+func (m *MockStateManager) AddDiscoveredChannel(channelID string) error {
+	args := m.Called(channelID)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) AddEdgeRecords(edges []*state.EdgeRecord) error {
+	args := m.Called(edges)
 	return args.Error(0)
 }
 

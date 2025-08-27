@@ -73,6 +73,12 @@ type StateManagementInterface interface {
 	// MarkMediaAsProcessed marks a media item as processed in the cache
 	MarkMediaAsProcessed(mediaID string) error
 
+	// Used for random-walk sampling
+	GetRandomDiscoveredChannel() (string, error)
+	IsDiscoveredChannel(channelID string) bool
+	AddDiscoveredChannel(channelID string) error
+	AddEdgeRecords(edges []*EdgeRecord) error
+
 	// Cleanup
 	// Close performs cleanup operations when shutting down
 	Close() error
@@ -115,7 +121,7 @@ type Config struct {
 	// CrawlExecutionID identifies a specific execution instance
 	// This allows for multiple executions of the same logical crawl
 	CrawlExecutionID string
-	
+
 	// Platform identifies which platform we're crawling
 	// This affects storage binding selection
 	// Values can be "telegram", "youtube", etc.

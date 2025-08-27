@@ -6,6 +6,10 @@ package crawl
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
+	"sync"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
@@ -13,8 +17,6 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"sync"
-	"time"
 )
 
 // Global connection pool
@@ -658,6 +660,7 @@ func processAllMessagesWithProcessor(
 
 	discoveredChannels := make([]*state.Page, 0)
 	discoveredMessages := make([]state.Message, 0)
+	discoveredEdges := make([]*state.EdgeRecord, 0)
 
 	// Process messages
 	for _, message := range messages {
@@ -754,11 +757,47 @@ func processAllMessagesWithProcessor(
 						}
 
 						page := &state.Page{
-							URL:      o,
 							Status:   "unfetched",
 							ParentID: owner.ID,
 							ID:       uuid.New().String(),
 							Depth:    owner.Depth + 1,
+						}
+
+						if cfg.SamplingMethod == "random-walk" {
+							link := &state.EdgeRecord{
+								DiscoveryTime: time.Now(),
+								SourceChannel: currentChannelURL,
+							}
+							rndNum := rand.IntN(100) + 1
+							log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Msg("Determining walkback")
+							//  ex: walkback rate of 15 1-15/16-100
+							if cfg.WalkbackRate >= rndNum {
+								walkbackURL, randomErr := sm.GetRandomDiscoveredChannel()
+								if randomErr != nil {
+									log.Error().Err(err).Msg("Unable to get url for walkback. Skipping")
+									continue
+								}
+								page.URL = walkbackURL
+								link.NewChannel = false
+								link.Walkback = true
+							} else {
+								// non-walkback
+								link.NewChannel = !sm.IsDiscoveredChannel(o)
+								if link.NewChannel {
+									sm.AddDiscoveredChannel(o)
+								}
+								link.Walkback = false
+								page.URL = o
+							}
+							// update link
+							link.DestinationChannel = page.URL
+							log.Info().Time("discovery_time", link.DiscoveryTime).Str("source_channel", link.SourceChannel).
+								Str("destination_channel", link.DestinationChannel).Bool("is_new_channel", link.NewChannel).
+								Bool("is_walkback", link.Walkback).Str("original_outlink", o).Msg("Adding newly discovered edge")
+							discoveredEdges = append(discoveredEdges, link)
+						} else {
+							page.URL = o
+
 						}
 						discoveredChannels = append(discoveredChannels, page)
 					}
@@ -778,11 +817,21 @@ func processAllMessagesWithProcessor(
 		Str("page_id", owner.ID).
 		Msg("Message processing summary")
 
+	// update discovered links here with new sm function
+	if cfg.SamplingMethod == "random-walk" && len(discoveredEdges) > 0 {
+		// err = sm.AddEdgeRecords()
+		err = sm.AddEdgeRecords(discoveredEdges)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	owner.Status = "fetched"
 	err = sm.UpdatePage(*owner)
 	if err != nil {
 		return nil, err
 	}
+
 	return discoveredChannels, nil
 }
 
