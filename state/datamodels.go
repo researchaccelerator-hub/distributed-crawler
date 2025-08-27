@@ -105,7 +105,7 @@ func (d *DiscoveredChannels) Random() (string, error) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 	if len(d.keys) == 0 {
-		return "", fmt.Errorf("No discovered channels to pull from at random")
+		return "", fmt.Errorf("no discovered channels to pull from at random")
 	}
 	index := rand.Intn(len(d.keys))
 	return d.keys[index], nil
