@@ -772,12 +772,12 @@ func processAllMessagesWithProcessor(
 						} else {
 							// check if in newChannels, skip if true
 							if _, ok := newChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("Channel already found as part of new channels. Skipping")
+								log.Info().Str("channel", o).Msg("random-walk: Channel already found as part of new channels. Skipping")
 								continue
 							}
 							// check if in oldChannels, skip if true
 							if _, ok := oldChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("Channel already found as part of old channels. Skipping")
+								log.Info().Str("channel", o).Msg("random-walk: Channel already found as part of old channels. Skipping")
 								continue
 							}
 							// determine if a previously discovered channel and act accordingly
@@ -824,19 +824,19 @@ func processAllMessagesWithProcessor(
 		newChannelCount := len(newChannels)
 		if newChannelCount == 0 {
 			walkback = true
-			log.Info().Msg("No new channels discovered. Automaticaly walking back")
+			log.Info().Msg("random-walk: No new channels discovered. Automaticaly walking back")
 		} else {
 			rndNum = rand.IntN(100) + 1
 		}
 
 		log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
-			Int("new_channels", newChannelCount).Msg("Walkback decision data")
+			Int("new_channels", newChannelCount).Msg("random-walk: Walkback decision data")
 		if walkback || cfg.WalkbackRate >= rndNum {
 			linkToFollow.Walkback = true
 
 			walkbackURL, randomErr := sm.GetRandomDiscoveredChannel()
 			if randomErr != nil {
-				return nil, fmt.Errorf("Unable to get url for walkback. Processing channel %s", owner.URL)
+				return nil, fmt.Errorf("random-walk: Unable to get url for walkback. Processing channel %s", owner.URL)
 			}
 			page.URL = walkbackURL
 		} else {
@@ -852,12 +852,12 @@ func processAllMessagesWithProcessor(
 		linkToFollow.DestinationChannel = page.URL
 		log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
 			Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
-			Msg("Adding edge to follow in next layer")
+			Msg("random-walk: Adding edge to follow in next layer")
 		discoveredEdges = append(discoveredEdges, linkToFollow)
 		discoveredChannels = append(discoveredChannels, page)
 
 		if len(newChannels) > 0 {
-			log.Info().Int("new_channels", len(newChannels)).Msg("New channels found that will be skipped. Adding edge records")
+			log.Info().Int("new_channels", len(newChannels)).Msg("random-walk: New channels found that will be skipped. Adding edge records")
 			for channel := range newChannels {
 				skippedLink := &state.EdgeRecord{
 					DestinationChannel: channel,
@@ -868,7 +868,7 @@ func processAllMessagesWithProcessor(
 				}
 				log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
 					Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).
-					Msg("Adding skipped edge")
+					Msg("random-walk: Adding skipped edge")
 				discoveredEdges = append(discoveredEdges, skippedLink)
 			}
 		}
