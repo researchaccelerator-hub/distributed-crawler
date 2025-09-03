@@ -833,10 +833,19 @@ func processAllMessagesWithProcessor(
 			Int("new_channels", newChannelCount).Msg("random-walk: Walkback decision data")
 		if walkback || cfg.WalkbackRate >= rndNum {
 			linkToFollow.Walkback = true
-
-			walkbackURL, randomErr := sm.GetRandomDiscoveredChannel()
-			if randomErr != nil {
-				return nil, fmt.Errorf("random-walk: Unable to get url for walkback. Processing channel %s", owner.URL)
+			// get walkback channel, skipping new channels discovered on this page
+			var walkbackURL string
+			var randomErr error
+			for {
+				walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
+				if randomErr != nil {
+					return nil, fmt.Errorf("random-walk: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
+				}
+				if _, ok := newChannels[walkbackURL]; ok {
+					log.Info().Str("channel", walkbackURL).Msg("random-walk: Invalid walkback. Pulling another channel")
+				} else {
+					break
+				}
 			}
 			page.URL = walkbackURL
 		} else {
