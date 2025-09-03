@@ -62,11 +62,11 @@ type Message struct {
 }
 
 type EdgeRecord struct {
+	DestinationChannel string    `json:"destinationChannel"`
 	DiscoveryTime      time.Time `json:"discoveryTime"`
 	SourceChannel      string    `json:"sourceChannel"`
-	DestinationChannel string    `json:"destinationChannel"`
-	NewChannel         bool      `json:"newChannel"`
 	Walkback           bool      `json:"walkback"`
+	Skipped            bool      `json:"skipped"`
 }
 
 type DiscoveredChannels struct {

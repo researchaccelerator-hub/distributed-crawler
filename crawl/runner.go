@@ -660,7 +660,11 @@ func processAllMessagesWithProcessor(
 
 	discoveredChannels := make([]*state.Page, 0)
 	discoveredMessages := make([]state.Message, 0)
+
+	// random-walk structs
 	discoveredEdges := make([]*state.EdgeRecord, 0)
+	var newChannels map[string]bool
+	var oldChannels map[string]bool
 
 	// Process messages
 	for _, message := range messages {
@@ -756,50 +760,34 @@ func processAllMessagesWithProcessor(
 							continue
 						}
 
-						page := &state.Page{
-							Status:   "unfetched",
-							ParentID: owner.ID,
-							ID:       uuid.New().String(),
-							Depth:    owner.Depth + 1,
-						}
-
-						if cfg.SamplingMethod == "random-walk" {
-							link := &state.EdgeRecord{
-								DiscoveryTime: time.Now(),
-								SourceChannel: currentChannelURL,
+						if cfg.SamplingMethod != "random-walk" {
+							page := &state.Page{
+								URL:      o,
+								Status:   "unfetched",
+								ParentID: owner.ID,
+								ID:       uuid.New().String(),
+								Depth:    owner.Depth + 1,
 							}
-							rndNum := rand.IntN(100) + 1
-							log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Msg("Determining walkback")
-							//  ex: walkback rate of 15 1-15/16-100
-							if cfg.WalkbackRate >= rndNum {
-								walkbackURL, randomErr := sm.GetRandomDiscoveredChannel()
-								if randomErr != nil {
-									log.Error().Err(err).Msg("Unable to get url for walkback. Skipping")
-									continue
-								}
-								page.URL = walkbackURL
-								link.NewChannel = false
-								link.Walkback = true
-							} else {
-								// non-walkback
-								link.NewChannel = !sm.IsDiscoveredChannel(o)
-								if link.NewChannel {
-									sm.AddDiscoveredChannel(o)
-								}
-								link.Walkback = false
-								page.URL = o
-							}
-							// update link
-							link.DestinationChannel = page.URL
-							log.Info().Time("discovery_time", link.DiscoveryTime).Str("source_channel", link.SourceChannel).
-								Str("destination_channel", link.DestinationChannel).Bool("is_new_channel", link.NewChannel).
-								Bool("is_walkback", link.Walkback).Str("original_outlink", o).Msg("Adding newly discovered edge")
-							discoveredEdges = append(discoveredEdges, link)
+							discoveredChannels = append(discoveredChannels, page)
 						} else {
-							page.URL = o
-
+							// check if in newChannels, skip if true
+							if _, ok := newChannels[o]; ok {
+								log.Info().Str("channel", o).Msg("Channel already found as part of new channels. Skipping")
+								continue
+							}
+							// check if in oldChannels, skip if true
+							if _, ok := oldChannels[o]; ok {
+								log.Info().Str("channel", o).Msg("Channel already found as part of old channels. Skipping")
+								continue
+							}
+							// determine if a previously discovered channel and act accordingly
+							if sm.IsDiscoveredChannel(o) {
+								oldChannels[o] = true
+							} else {
+								sm.AddDiscoveredChannel(o)
+								newChannels[o] = true
+							}
 						}
-						discoveredChannels = append(discoveredChannels, page)
 					}
 				}
 			}
@@ -817,9 +805,73 @@ func processAllMessagesWithProcessor(
 		Str("page_id", owner.ID).
 		Msg("Message processing summary")
 
-	// update discovered links here with new sm function
-	if cfg.SamplingMethod == "random-walk" && len(discoveredEdges) > 0 {
-		// err = sm.AddEdgeRecords()
+	// handle choosing a page for the next layer
+	if cfg.SamplingMethod == "random-walk" {
+		page := &state.Page{
+			Status:   "unfetched",
+			ParentID: owner.ID,
+			ID:       uuid.New().String(),
+			Depth:    owner.Depth + 1,
+		}
+		linkToFollow := &state.EdgeRecord{
+			DiscoveryTime: time.Now(),
+			SourceChannel: owner.URL,
+			Skipped:       false,
+		}
+
+		walkback := false
+		rndNum := -1
+		newChannelCount := len(newChannels)
+		if newChannelCount == 0 {
+			walkback = true
+			log.Info().Msg("No new channels discovered. Automaticaly walking back")
+		} else {
+			rndNum = rand.IntN(100) + 1
+		}
+
+		log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
+			Int("new_channels", newChannelCount).Msg("Walkback decision data")
+		if walkback || cfg.WalkbackRate >= rndNum {
+			linkToFollow.Walkback = true
+
+			walkbackURL, randomErr := sm.GetRandomDiscoveredChannel()
+			if randomErr != nil {
+				return nil, fmt.Errorf("Unable to get url for walkback. Processing channel %s", owner.URL)
+			}
+			page.URL = walkbackURL
+		} else {
+			linkToFollow.Walkback = false
+
+			newChannelSlice := make([]string, 0, len(newChannels))
+			for channel := range newChannels {
+				newChannelSlice = append(newChannelSlice, channel)
+			}
+			page.URL = newChannelSlice[rand.IntN(len(newChannelSlice))]
+			delete(newChannels, page.URL) // remaining items in map will be used to create skipped edges
+		}
+		linkToFollow.DestinationChannel = page.URL
+		log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
+			Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
+			Msg("Adding edge to follow in next layer")
+		discoveredEdges = append(discoveredEdges, linkToFollow)
+		discoveredChannels = append(discoveredChannels, page)
+
+		if len(newChannels) > 0 {
+			log.Info().Int("new_channels", len(newChannels)).Msg("New channels found that will be skipped. Adding edge records")
+			for channel := range newChannels {
+				skippedLink := &state.EdgeRecord{
+					DestinationChannel: channel,
+					DiscoveryTime:      time.Now(),
+					Skipped:            true,
+					SourceChannel:      owner.URL,
+					Walkback:           false,
+				}
+				log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
+					Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).
+					Msg("Adding skipped edge")
+				discoveredEdges = append(discoveredEdges, skippedLink)
+			}
+		}
 		err = sm.AddEdgeRecords(discoveredEdges)
 		if err != nil {
 			return nil, err
