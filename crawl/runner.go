@@ -835,9 +835,10 @@ func processAllMessagesWithProcessor(
 			linkToFollow.Walkback = true
 			// get walkback channel, skipping new channels discovered on this page
 			var walkbackURL string
-			var randomErr error
 			for {
+				var randomErr error
 				walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
+				log.Info().Str("walkback_url", walkbackURL).Err(randomErr).Msg("random-walk: Random Walkback channel error and url")
 				if randomErr != nil {
 					return nil, fmt.Errorf("random-walk: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
 				}

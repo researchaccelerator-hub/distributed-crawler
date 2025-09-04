@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
+	"github.com/rs/zerolog/log"
 )
 
 // StateManager extends StateManagementInterface with additional methods
@@ -104,8 +105,9 @@ func (d *DiscoveredChannels) Contains(item string) bool {
 func (d *DiscoveredChannels) Random() (string, error) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
+	log.Info().Int("discovered_channels_count", len(d.keys)).Msg("random-walk: random discovered channels count before selection")
 	if len(d.keys) == 0 {
-		return "", fmt.Errorf("no discovered channels to pull from at random")
+		return "", fmt.Errorf("random-walk: no discovered channels to pull from at random")
 	}
 	index := rand.Intn(len(d.keys))
 	return d.keys[index], nil
