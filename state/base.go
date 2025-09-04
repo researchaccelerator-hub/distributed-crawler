@@ -45,6 +45,7 @@ func NewBaseStateManager(config Config) *BaseStateManager {
 		layerMap:           make(map[int][]string),
 		pageMap:            make(map[string]Page),
 		discoveredChannels: NewDiscoveredChannels(),
+		edgeRecords:        make([]*EdgeRecord, 0),
 	}
 }
 
@@ -508,7 +509,10 @@ func (bsm *BaseStateManager) AddDiscoveredChannel(channelID string) error {
 func (bsm *BaseStateManager) AddEdgeRecords(edges []*EdgeRecord) error {
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
+	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Int("new_edge_count", len(edges)).
+		Msg("random-walk: Adding new edges in base manager")
 	bsm.edgeRecords = append(bsm.edgeRecords, edges...)
+	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Msg("random-walk: New edges added")
 	return nil
 }
 

@@ -2841,16 +2841,19 @@ func (dsm *DaprStateManager) AddEdgeRecords(edges []*EdgeRecord) error {
 	// Add Edges in Memory
 	baseErr := dsm.BaseStateManager.AddEdgeRecords(edges)
 	if baseErr != nil {
-		log.Error().Err(baseErr).Msg("Failed to add edge records")
+		log.Error().Err(baseErr).Msg("random-walk: Failed to add edge records")
 		return baseErr
 	}
-	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Msg("Adding new edges")
+	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).
+		Msg("random-walk: Adding new edges")
 	edgeData, err := json.MarshalIndent(dsm.BaseStateManager.edgeRecords, "", "  ")
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to marshall edge data")
+		log.Error().Err(err).Msg("random-walk: Failed to marshall edge data")
 		return err
 	}
 	edgeKey := fmt.Sprintf("%s/discoveredEdges", dsm.config.CrawlID)
+	log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeData)).
+		Msg("random-walk: Saving edges to dapr now")
 	err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeData, nil)
 	if err != nil {
 		log.Warn().Err(err).Str("key", edgeKey).Msg("Failed to save edge data")
