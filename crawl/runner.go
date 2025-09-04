@@ -663,8 +663,8 @@ func processAllMessagesWithProcessor(
 
 	// random-walk structs
 	discoveredEdges := make([]*state.EdgeRecord, 0)
-	var newChannels map[string]bool
-	var oldChannels map[string]bool
+	newChannels := make(map[string]bool, 0)
+	oldChannels := make(map[string]bool, 0)
 
 	// Process messages
 	for _, message := range messages {
@@ -784,6 +784,7 @@ func processAllMessagesWithProcessor(
 							if sm.IsDiscoveredChannel(o) {
 								oldChannels[o] = true
 							} else {
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk: Adding channel to discovered channels")
 								sm.AddDiscoveredChannel(o)
 								newChannels[o] = true
 							}
@@ -824,13 +825,12 @@ func processAllMessagesWithProcessor(
 		newChannelCount := len(newChannels)
 		if newChannelCount == 0 {
 			walkback = true
-			log.Info().Msg("random-walk: No new channels discovered. Automaticaly walking back")
 		} else {
 			rndNum = rand.IntN(100) + 1
 		}
 
 		log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
-			Int("new_channels", newChannelCount).Msg("random-walk: Walkback decision data")
+			Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("random-walk: Walkback decision data")
 		if walkback || cfg.WalkbackRate >= rndNum {
 			linkToFollow.Walkback = true
 			// get walkback channel, skipping new channels discovered on this page
@@ -838,7 +838,7 @@ func processAllMessagesWithProcessor(
 			for {
 				var randomErr error
 				walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
-				log.Info().Str("walkback_url", walkbackURL).Err(randomErr).Msg("random-walk: Random Walkback channel error and url")
+				log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk: Random Walkback channel")
 				if randomErr != nil {
 					return nil, fmt.Errorf("random-walk: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
 				}
