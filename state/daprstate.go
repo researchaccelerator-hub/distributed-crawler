@@ -448,6 +448,9 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	dsm.urlCacheMutex.RLock()
 	uniqueSeedURLs := make([]string, 0)
 	for _, url := range seedURLs {
+		// random-walk stuff
+		// TODO: figure out best way to get crawl type in here
+		dsm.BaseStateManager.AddDiscoveredChannel(url)
 		if _, exists := dsm.urlCache[url]; !exists {
 			uniqueSeedURLs = append(uniqueSeedURLs, url)
 		} else {
