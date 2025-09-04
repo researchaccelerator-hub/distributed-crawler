@@ -843,7 +843,9 @@ func processAllMessagesWithProcessor(
 					return nil, fmt.Errorf("random-walk: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
 				}
 				if _, ok := newChannels[walkbackURL]; ok {
-					log.Info().Str("channel", walkbackURL).Msg("random-walk: Invalid walkback. Pulling another channel")
+					log.Info().Str("channel", walkbackURL).Msg("random-walk: Invalid walkback. Part of new channels. Pulling another channel")
+				} else if walkbackURL == owner.URL {
+					log.Info().Str("channel", walkbackURL).Msg("random-walk: Invalid walkback. Same as source channel. Pulling another channel")
 				} else {
 					break
 				}
@@ -882,6 +884,7 @@ func processAllMessagesWithProcessor(
 				discoveredEdges = append(discoveredEdges, skippedLink)
 			}
 		}
+		log.Info().Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("random-walk: Saving discovered edges")
 		err = sm.AddEdgeRecords(discoveredEdges)
 		if err != nil {
 			return nil, err
