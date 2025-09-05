@@ -885,7 +885,7 @@ func processAllMessagesWithProcessor(
 			}
 		}
 		log.Info().Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("random-walk: Saving discovered edges")
-		err = sm.AddEdgeRecords(discoveredEdges)
+		err = sm.SaveEdgeRecords(discoveredEdges)
 		if err != nil {
 			log.Err(err).Str("source_channel", owner.URL).Msg("random-walk: Error saving discovered edges")
 			return nil, err

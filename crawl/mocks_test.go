@@ -355,7 +355,7 @@ func (m *MockStateManager) AddDiscoveredChannel(channelID string) error {
 	return args.Error(0)
 }
 
-func (m *MockStateManager) AddEdgeRecords(edges []*state.EdgeRecord) error {
+func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
 	args := m.Called(edges)
 	return args.Error(0)
 }

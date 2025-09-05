@@ -197,10 +197,10 @@ func (m *MockDaprStateManager) UpdateMessage(pageID string, chatID int64, messag
 }
 
 // For random-walk sample
-func (m *MockDaprStateManager) GetRandomDiscoveredChannel() (string, error)    { return "", nil }
-func (m *MockDaprStateManager) IsDiscoveredChannel(channelID string) bool      { return true }
-func (m *MockDaprStateManager) AddDiscoveredChannel(channelID string) error    { return nil }
-func (m *MockDaprStateManager) AddEdgeRecords(edges []*state.EdgeRecord) error { return nil }
+func (m *MockDaprStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }
+func (m *MockDaprStateManager) IsDiscoveredChannel(channelID string) bool       { return true }
+func (m *MockDaprStateManager) AddDiscoveredChannel(channelID string) error     { return nil }
+func (m *MockDaprStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
 
 // MockDaprStateManagerFactory creates our mock Dapr state manager
 type MockDaprStateManagerFactory struct {

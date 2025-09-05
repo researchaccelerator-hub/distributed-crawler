@@ -472,9 +472,10 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 	if crawlexecid == "" {
 		// Create a temporary state manager to check for incomplete crawls
 		cfg = state.Config{
-			StorageRoot: crawlCfg.StorageRoot,
-			CrawlID:     crawlCfg.CrawlID,
-			Platform:    crawlCfg.Platform, // Pass the platform information
+			StorageRoot:    crawlCfg.StorageRoot,
+			CrawlID:        crawlCfg.CrawlID,
+			Platform:       crawlCfg.Platform, // Pass the platform information
+			SamplingMethod: crawlCfg.SamplingMethod,
 		}
 	} else {
 		cfg = state.Config{
@@ -482,7 +483,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CrawlID:          crawlCfg.CrawlID,
 			CrawlExecutionID: crawlexecid,
 			Platform:         crawlCfg.Platform, // Pass the platform information
-
+			SamplingMethod:   crawlCfg.SamplingMethod,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
 				MaxPages: crawlCfg.MaxPages,

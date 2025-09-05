@@ -506,7 +506,7 @@ func (bsm *BaseStateManager) AddDiscoveredChannel(channelID string) error {
 	return bsm.discoveredChannels.Add(channelID)
 }
 
-func (bsm *BaseStateManager) AddEdgeRecords(edges []*EdgeRecord) error {
+func (bsm *BaseStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
 	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Int("new_edge_count", len(edges)).

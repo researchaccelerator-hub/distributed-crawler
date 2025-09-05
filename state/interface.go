@@ -77,7 +77,7 @@ type StateManagementInterface interface {
 	GetRandomDiscoveredChannel() (string, error)
 	IsDiscoveredChannel(channelID string) bool
 	AddDiscoveredChannel(channelID string) error
-	AddEdgeRecords(edges []*EdgeRecord) error
+	SaveEdgeRecords(edges []*EdgeRecord) error
 
 	// Cleanup
 	// Close performs cleanup operations when shutting down
@@ -126,6 +126,11 @@ type Config struct {
 	// This affects storage binding selection
 	// Values can be "telegram", "youtube", etc.
 	Platform string
+
+	// SamplingMethod identifies which sampling method is being used
+	// This affects certain behavior involving duplicate pages and random-walk related structs
+	// Values can be "channel", "random", "snowball", "random-walk"
+	SamplingMethod string
 
 	// Specific configuration options for different backends
 	// Only one of these should typically be set, based on the

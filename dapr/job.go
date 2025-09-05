@@ -6,6 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
 	daprc "github.com/dapr/go-sdk/client"
 	"github.com/dapr/go-sdk/service/common"
 	daprs "github.com/dapr/go-sdk/service/grpc"
@@ -16,10 +21,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/protobuf/types/known/anypb"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
 
 // StartDaprMode initializes and starts a Dapr service in job mode using the provided
@@ -47,7 +48,7 @@ import (
 func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 	log.Info().Msg("🚀 Starting crawler in DAPR job mode")
 	log.Info().Msgf("📡 Listening on port %d for DAPR requests", crawlerCfg.DaprPort)
-	log.Info().Msgf("🔧 Base configuration: platform=%s, concurrency=%d, storage=%s", 
+	log.Info().Msgf("🔧 Base configuration: platform=%s, concurrency=%d, storage=%s",
 		crawlerCfg.Platform, crawlerCfg.Concurrency, crawlerCfg.StorageRoot)
 
 	//Create new Dapr client
@@ -100,7 +101,7 @@ func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 		}
 		log.Info().Msgf("✅ Registered job handler for: %s", jobName)
 	}
-	
+
 	// Dynamic job name patterns are supported through the extractBaseJobType function
 	// which matches job names like "youtube-crawl-1234567" to base type "youtube-crawl"
 	log.Info().Msg("🔧 Job handlers registered for base patterns. Dynamic job names will be matched by prefix.")
@@ -109,7 +110,7 @@ func StartDaprMode(crawlerCfg common2.CrawlerConfig) {
 	log.Info().Msgf("🚀 Starting DAPR server on port: %s", port)
 	log.Info().Msg("🎉 DAPR job service fully initialized and ready to receive jobs!")
 	log.Info().Msg("⏳ Waiting for job events from DAPR runtime...")
-	
+
 	if err = server.Start(); err != nil {
 		log.Fatal().Err(err).Msg("❌ Failed to start DAPR server")
 	}
@@ -299,11 +300,11 @@ func deleteJob(ctx context.Context, in *common.InvocationEvent) (out *common.Con
 //	return nil
 //}
 
-// mergeConfigWithJobData merges CLI configuration with job data, 
+// mergeConfigWithJobData merges CLI configuration with job data,
 // giving precedence to job data when provided, but falling back to CLI values
 func mergeConfigWithJobData(baseConfig common2.CrawlerConfig, jobData JobData) common2.CrawlerConfig {
 	mergedConfig := baseConfig // Start with CLI configuration
-	
+
 	// Override with job data if provided (non-zero/non-empty values)
 	if jobData.MaxDepth != 0 {
 		mergedConfig.MaxDepth = jobData.MaxDepth
@@ -400,7 +401,7 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 	log.Info().Msgf("🏷️  Job Type: %s", job.JobType)
 	log.Info().Msgf("📄 Raw Job Data: %s", string(job.Data))
 	log.Info().Msgf("📊 Data Size: %d bytes", len(job.Data))
-	
+
 	log.Info().Msg("🔍 Attempting to parse job data...")
 	var jobData JobData
 	if err := json.Unmarshal(job.Data, &jobData); err != nil {
@@ -408,7 +409,7 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 		log.Error().Msg("🔍 This means the job data format is invalid or incompatible")
 		return fmt.Errorf("failed to unmarshal job payload: %v", err)
 	}
-	
+
 	log.Info().Msg("✅ Job data parsed successfully!")
 	log.Info().Msgf("🏷️  Job Name: %s", jobData.JobName)
 	log.Info().Msgf("📋 Task: %s", jobData.Task)
@@ -416,7 +417,7 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 	log.Info().Msgf("📄 URLs: %v", jobData.URLs)
 	log.Info().Msgf("🔧 Concurrency: %d", jobData.Concurrency)
 	log.Info().Msgf("📊 Max Posts: %d", jobData.MaxPosts)
-	
+
 	if jobData.YouTubeAPIKey != "" {
 		log.Info().Msgf("🔑 YouTube API Key: %s...%s", jobData.YouTubeAPIKey[:8], jobData.YouTubeAPIKey[len(jobData.YouTubeAPIKey)-4:])
 	}
@@ -425,32 +426,32 @@ func handleJob(ctx context.Context, job *common.JobEvent) error {
 	log.Info().Msg("🎯 ROUTING JOB FOR EXECUTION...")
 	jobType := job.JobType
 	baseJobType := extractBaseJobType(jobType)
-	
+
 	log.Info().Msgf("🏷️  Original Job Type: %s", jobType)
 	log.Info().Msgf("🔍 Extracted Base Type: %s", baseJobType)
 	log.Info().Msgf("📋 Available Base Patterns: %v", baseJobPatterns)
-	
+
 	// Determine execution path
 	log.Info().Msg("🚦 Determining execution path...")
-	
+
 	switch baseJobType {
 	case "telegram-crawl", "youtube-crawl", "scheduled-crawl":
 		log.Info().Msgf("✅ Matched crawl job type: %s", baseJobType)
 		log.Info().Msg("🏃 Executing as CRAWL JOB...")
 		log.Info().Msg("================================================================================")
 		return executeCrawlJob(ctx, baseJobType, jobData)
-		
+
 	case "maintenance-job":
 		log.Info().Msgf("✅ Matched maintenance job type: %s", baseJobType)
 		log.Info().Msg("🔧 Executing as MAINTENANCE JOB...")
 		log.Info().Msg("================================================================================")
 		return executeMaintenanceJob(ctx, jobData)
-		
+
 	default:
 		// Fallback: check if this is a crawling job by task description
 		log.Warn().Msgf("⚠️  Unknown job type: %s", jobType)
 		log.Info().Msg("🔍 Checking if this is a crawl job based on task description...")
-		
+
 		if strings.Contains(strings.ToLower(jobData.Task), "crawl") {
 			log.Info().Msgf("✅ Task contains 'crawl': treating '%s' as crawl job", jobType)
 			log.Info().Msg("🏃 Executing as FALLBACK CRAWL JOB...")
@@ -484,23 +485,23 @@ func executeCrawlJob(ctx context.Context, jobType string, jobData JobData) error
 	log.Info().Msg("🚀 STARTING CRAWL JOB EXECUTION")
 	log.Info().Msgf("🏷️  Job Type: %s", jobType)
 	log.Info().Msgf("📅 Start Time: %s", time.Now().Format(time.RFC3339))
-	
+
 	// Step 1: Merge configurations
 	log.Info().Msg("🔧 Step 1: Merging CLI configuration with job data...")
 	log.Info().Msgf("📋 Base CLI Platform: %s", app.baseConfig.Platform)
 	log.Info().Msgf("📋 Base CLI Concurrency: %d", app.baseConfig.Concurrency)
 	log.Info().Msgf("📋 Base CLI Storage: %s", app.baseConfig.StorageRoot)
-	
+
 	crawlerCfg := mergeConfigWithJobData(app.baseConfig, jobData)
 	log.Info().Msg("✅ Configuration merge completed")
-	
+
 	// Step 2: Platform detection and auto-configuration
 	log.Info().Msg("🔍 Step 2: Platform detection and auto-configuration...")
 	log.Info().Msgf("🌐 Job Data Platform: %s", jobData.Platform)
 	log.Info().Msgf("🌐 Merged Config Platform: %s", crawlerCfg.Platform)
-	
+
 	platformBeforeDetection := crawlerCfg.Platform
-	
+
 	// Set platform based on job type if not already specified in job data
 	if crawlerCfg.Platform == "" || jobData.Platform == "" {
 		log.Info().Msg("🔄 Platform not specified, attempting auto-detection...")
@@ -525,14 +526,14 @@ func executeCrawlJob(ctx context.Context, jobType string, jobData JobData) error
 	} else {
 		log.Info().Msgf("✅ Platform already specified: %s", crawlerCfg.Platform)
 	}
-	
+
 	if platformBeforeDetection != crawlerCfg.Platform {
 		log.Info().Msgf("🔄 Platform changed: %s → %s", platformBeforeDetection, crawlerCfg.Platform)
 	}
-	
+
 	// Step 3: Environment and storage configuration
 	log.Info().Msg("📁 Step 3: Storage and environment configuration...")
-	
+
 	// Override storage root from environment if set (for containerized deployments)
 	envStorageRoot := os.Getenv("STORAGE_ROOT")
 	if envStorageRoot != "" {
@@ -586,10 +587,10 @@ func executeCrawlJob(ctx context.Context, jobType string, jobData JobData) error
 
 	// Platform-specific initialization
 	log.Info().Msgf("🔧 Initializing platform: %s", crawlerCfg.Platform)
-	
+
 	if crawlerCfg.Platform == "youtube" {
 		log.Info().Msg("🎥 Setting up YouTube platform configuration")
-		
+
 		// For YouTube platform, we need to validate the API key
 		if crawlerCfg.YouTubeAPIKey == "" {
 			err := fmt.Errorf("YouTube API key is required for YouTube platform")
@@ -599,19 +600,19 @@ func executeCrawlJob(ctx context.Context, jobType string, jobData JobData) error
 
 		log.Info().Msg("✅ YouTube API key validated successfully")
 		log.Info().Msgf("🔍 Sampling method: %s", crawlerCfg.SamplingMethod)
-		
+
 		if crawlerCfg.SamplingMethod == "random" {
 			log.Info().Msgf("🎲 Random sampling configured - will discover content dynamically")
 			log.Info().Msgf("📊 Target sample size: %d", crawlerCfg.SampleSize)
 		}
-		
+
 	} else {
 		// Default Telegram platform initialization
 		log.Info().Msg("📱 Setting up Telegram platform configuration")
-		
+
 		baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
 		log.Info().Msgf("📁 Base directory for state: %s", baseDir)
-		
+
 		cleaner := telegramhelper.NewFileCleaner(
 			baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
 			[]string{
@@ -669,7 +670,7 @@ func executeCrawlJob(ctx context.Context, jobType string, jobData JobData) error
 	if crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random" {
 		log.Info().Msgf("   • Sample size: %d", crawlerCfg.SampleSize)
 	}
-	
+
 	err := launchCrawl(urls, crawlerCfg)
 	if err != nil {
 		log.Error().Err(err).Msg("❌ Crawling execution failed")
@@ -685,31 +686,31 @@ func executeCrawlJob(ctx context.Context, jobType string, jobData JobData) error
 // executeMaintenanceJob handles maintenance tasks
 func executeMaintenanceJob(ctx context.Context, jobData JobData) error {
 	log.Info().Msgf("🔧 Executing maintenance job: %s", jobData.Task)
-	
+
 	// Validate task type
 	if jobData.Task == "" {
 		err := fmt.Errorf("maintenance task type cannot be empty")
 		log.Error().Err(err).Msg("❌ Maintenance job validation failed")
 		return err
 	}
-	
+
 	// Add maintenance logic here based on task type
 	taskType := strings.ToLower(jobData.Task)
 	log.Info().Msgf("🎯 Processing maintenance task type: %s", taskType)
-	
+
 	switch taskType {
 	case "cleanup", "clean":
 		log.Info().Msg("🧹 Performing cleanup maintenance")
 		// Add cleanup logic here
 		log.Info().Msg("✅ Cleanup maintenance completed successfully")
 		return nil
-		
+
 	case "health check", "healthcheck":
 		log.Info().Msg("🏥 Performing health check")
 		// Add health check logic here
 		log.Info().Msg("✅ Health check completed successfully")
 		return nil
-		
+
 	default:
 		log.Info().Msgf("⚙️  Performing generic maintenance task: %s", jobData.Task)
 		// Add generic maintenance logic here
@@ -721,24 +722,23 @@ func executeMaintenanceJob(ctx context.Context, jobData JobData) error {
 // executeGenericJob handles generic/unknown job types
 func executeGenericJob(ctx context.Context, jobData JobData) error {
 	log.Info().Msgf("❓ Executing generic job: %s", jobData.Task)
-	
+
 	// Validate job data
 	if jobData.Task == "" {
 		err := fmt.Errorf("generic job task type cannot be empty")
 		log.Error().Err(err).Msg("❌ Generic job validation failed")
 		return err
 	}
-	
+
 	log.Info().Msgf("📋 Job details: %+v", jobData)
 	log.Warn().Msgf("⚠️  No specific handler for job type '%s', executing as generic job", jobData.JobName)
-	
+
 	// For now, just log the job completion
 	// This can be extended to handle custom job types in the future
 	log.Info().Msg("✅ Generic job completed successfully")
-	
+
 	return nil
 }
-
 
 // launchCrawl initializes and runs the scraping process for a given list of strings using the specified crawler configuration.
 // Returns an error if any critical process fails.
@@ -758,6 +758,7 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 		CrawlID:          crawlCfg.CrawlID,
 		CrawlExecutionID: crawlexecid,
 		Platform:         crawlCfg.Platform, // Pass the platform information
+		SamplingMethod:   crawlCfg.SamplingMethod,
 	}
 
 	smfact := state.DefaultStateManagerFactory{}

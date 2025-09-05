@@ -598,16 +598,18 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 	var pagesToAdd []Page
 	duplicateCount := 0
 
-	// Check for duplicates using read lock on URL cache
 	for i := range pages {
-		dsm.urlCacheMutex.RLock()
-		existingID, exists := dsm.urlCache[pages[i].URL]
-		dsm.urlCacheMutex.RUnlock()
+		if dsm.BaseStateManager.config.SamplingMethod != "random-walk" {
+			// Check for duplicates using read lock on URL cache
+			dsm.urlCacheMutex.RLock()
+			existingID, exists := dsm.urlCache[pages[i].URL]
+			dsm.urlCacheMutex.RUnlock()
 
-		if exists {
-			log.Debug().Msgf("Skipping duplicate URL: %s (already exists with ID: %s)", pages[i].URL, existingID)
-			duplicateCount++
-			continue
+			if exists {
+				log.Debug().Msgf("Skipping duplicate URL: %s (already exists with ID: %s)", pages[i].URL, existingID)
+				duplicateCount++
+				continue
+			}
 		}
 
 		// Ensure the page has an ID
@@ -2834,27 +2836,36 @@ func (dsm *DaprStateManager) AddDiscoveredChannel(channelID string) error {
 	return dsm.BaseStateManager.AddDiscoveredChannel(channelID)
 }
 
-func (dsm *DaprStateManager) AddEdgeRecords(edges []*EdgeRecord) error {
+func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	// Create a context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	// Add Edges in Memory
-	baseErr := dsm.BaseStateManager.AddEdgeRecords(edges)
+	baseErr := dsm.BaseStateManager.SaveEdgeRecords(edges)
 	if baseErr != nil {
 		log.Error().Err(baseErr).Msg("random-walk: Failed to add edge records")
 		return baseErr
 	}
 	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).
 		Msg("random-walk: Adding new edges")
-	edgeData, err := json.MarshalIndent(dsm.BaseStateManager.edgeRecords, "", "  ")
+	// use mutex to avoid writes to edge records during marshalling
+	dsm.BaseStateManager.mutex.Lock()
+	edgeData := map[string]any{
+		"edgeRecords": dsm.BaseStateManager.edgeRecords,
+	}
+	edgeByteData, err := json.MarshalIndent(edgeData, "", "  ")
+	dsm.BaseStateManager.mutex.Unlock()
+	// edgeData, err := json.MarshalIndent(dsm.BaseStateManager.edgeRecords, "", "  ")
 	if err != nil {
 		log.Error().Err(err).Msg("random-walk: Failed to marshall edge data")
 		return err
 	}
 	edgeKey := fmt.Sprintf("%s/discoveredEdges", dsm.config.CrawlID)
-	log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeData)).
+	// log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeData)).
+	log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeByteData)).
 		Msg("random-walk: Saving edges to dapr now")
-	err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeData, nil)
+	// err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeData, nil)
+	err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeByteData, nil)
 	if err != nil {
 		log.Warn().Err(err).Str("key", edgeKey).Msg("Failed to save edge data")
 		return err
