@@ -71,10 +71,12 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 		bsm.pageMap[page.ID] = page
 
 		// Store Seed Urls as discovered Channel
-		log.Info().Str("url", url).Msg("random-walk: Adding seed url")
-		err := bsm.discoveredChannels.Add(url)
-		if err != nil {
-			log.Error().Str("url", url).Msg("random-walk: Unable to add seed url as discovered channel")
+		if bsm.config.SamplingMethod == "random-walk" {
+			log.Info().Str("url", url).Msg("random-walk: Adding seed url in Base SM Initialize")
+			err := bsm.discoveredChannels.Add(url)
+			if err != nil {
+				log.Error().Str("url", url).Msg("random-walk: Unable to add seed url as discovered channel")
+			}
 		}
 
 		// Add page ID to layer 0

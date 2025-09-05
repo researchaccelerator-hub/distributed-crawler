@@ -450,7 +450,10 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	for _, url := range seedURLs {
 		// random-walk stuff
 		// TODO: figure out best way to get crawl type in here
-		dsm.BaseStateManager.AddDiscoveredChannel(url)
+		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+			log.Info().Str("url", url).Msg("random-walk: Adding seed url in Dapr Initialize")
+			dsm.BaseStateManager.AddDiscoveredChannel(url)
+		}
 		if _, exists := dsm.urlCache[url]; !exists {
 			uniqueSeedURLs = append(uniqueSeedURLs, url)
 		} else {
