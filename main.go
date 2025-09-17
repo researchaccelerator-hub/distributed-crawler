@@ -183,8 +183,15 @@ Examples:
 			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
 		}
 
+		// TODO: update to just pass the whole crawl config to validate sampling method
 		// Validate sampling method combinations (skip URL validation for dapr-job mode)
-		if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
+		if crawlerCfg.SamplingMethod == "random-walk" {
+			// xor operation to confirm only one of the two options is provided
+			if (len(urlList) > 0) != (crawlerCfg.SeedSize > 0) {
+			} else if (len(urlList) > 0) && (crawlerCfg.SeedSize > 0) {
+				return fmt.Errorf("Cannot provide seed urls and seed size in random-walk crawl")
+			}
+		} else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
 			return err
 		}
 
@@ -660,7 +667,7 @@ func validateSamplingMethod(platform, samplingMethod string, urlList []string, u
 	}
 
 	// For random sampling, no URLs/channels are required
-	if samplingMethod == "random" {
+	if samplingMethod == "random" || samplingMethod == "random-walk" {
 		return nil
 	}
 
@@ -704,6 +711,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, random-walk, snowball")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.SeedSize, "seed-size", 0, "Number of discovered channels to randomly select as seed channels")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.WalkbackRate, "walkback-rate", 15, "The rate at which to perform walkbacks when using random-walk sampling")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 
@@ -745,6 +753,7 @@ func init() {
 	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
 	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
 	viper.BindPFlag("crawler.sampling", rootCmd.PersistentFlags().Lookup("sampling"))
+	viper.BindPFlag("crawler.seedsize", rootCmd.PersistentFlags().Lookup("seed-size"))
 	viper.BindPFlag("crawler.walkback_rate", rootCmd.PersistentFlags().Lookup("walkback-rate"))
 	viper.BindPFlag("crawler.min_channel_videos", rootCmd.PersistentFlags().Lookup("min-channel-videos"))
 	viper.BindPFlag("distributed.mode", rootCmd.PersistentFlags().Lookup("mode"))

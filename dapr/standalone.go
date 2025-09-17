@@ -195,10 +195,20 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 		// Get the existing layers or seed a new crawl
 		err = sm.Initialize(stringList)
+
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to set up seed URLs")
 			return
 		}
+		if crawlCfg.SamplingMethod == "random-walk" {
+			// pull discovered channels from database
+			sm.InitializeDiscoveredChannels()
+			if len(stringList) == 0 {
+				// initialize first layer for crawls without seed lists
+				sm.InitializeRandomWalkLayer()
+			}
+		}
+
 		ProcessLayersIteratively(sm, crawlCfg, isResumingSameCrawlExecution)
 	}
 
@@ -476,6 +486,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CrawlID:        crawlCfg.CrawlID,
 			Platform:       crawlCfg.Platform, // Pass the platform information
 			SamplingMethod: crawlCfg.SamplingMethod,
+			SeedSize:       crawlCfg.SeedSize,
 		}
 	} else {
 		cfg = state.Config{
@@ -484,6 +495,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CrawlExecutionID: crawlexecid,
 			Platform:         crawlCfg.Platform, // Pass the platform information
 			SamplingMethod:   crawlCfg.SamplingMethod,
+			SeedSize:         crawlCfg.SeedSize,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
 				MaxPages: crawlCfg.MaxPages,

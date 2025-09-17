@@ -16,6 +16,13 @@ type StateManagementInterface interface {
 	// It checks for existing state or initializes a new one with the given URLs
 	Initialize(seedURLs []string) error
 
+	// Initializes discovered channels from database
+	// Only implemented for dapr currently
+	InitializeDiscoveredChannels() error
+
+	// Initializes initial layer from randomly chosen discovered channels
+	InitializeRandomWalkLayer() error
+
 	// Core page and message operations
 	// GetPage retrieves a page by its ID from the state store
 	GetPage(id string) (Page, error)
@@ -132,6 +139,9 @@ type Config struct {
 	// Values can be "channel", "random", "snowball", "random-walk"
 	SamplingMethod string
 
+	// SeedSize indentifies the number of discovered channels to pull at random
+	SeedSize int
+
 	// Specific configuration options for different backends
 	// Only one of these should typically be set, based on the
 	// storage backend being used
@@ -165,6 +175,10 @@ type DaprConfig struct {
 	// ComponentName is the name of the DAPR binding component for file storage
 	// This refers to a configured binding component in the DAPR runtime
 	ComponentName string
+
+	// DatabaseComponentName is the name of the Dapr binding component for database storage
+	// This is used exclusively in random-walk sampling
+	DatabaseComponentName string
 }
 
 // LocalConfig contains configuration for storing crawler state and

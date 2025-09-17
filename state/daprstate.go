@@ -28,14 +28,17 @@ const (
 	defaultStateStoreName  = "statestore"
 	telegramStorageBinding = "telegramcrawlstorage"
 	youtubeStorageBinding  = "youtubecrawlstorage"
+	databaseStorageBinding = "postgres"
 )
 
 // DaprStateManager implements StateManagementInterface using Dapr
 type DaprStateManager struct {
 	*BaseStateManager
-	client         *daprc.Client
-	stateStoreName string
-	storageBinding string
+	client *daprc.Client
+	// databaseClient  *daprc.Client
+	stateStoreName  string
+	storageBinding  string
+	databaseBinding string
 
 	// For compatibility with old code during transition
 	mediaCache      map[string]MediaCacheItem
@@ -484,6 +487,12 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 		})
 	}
 
+	// In case it's a random-walk without seed urls
+	if len(pages) == 0 && dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+		log.Info().Msg("No seed urls provided for url. Creating layer from discovered channels")
+		return nil
+	}
+
 	// In case we don't have any seed URLs, don't try to create an empty layer
 	if len(pages) == 0 {
 		log.Warn().Msg("No seed URLs available - cannot initialize crawler")
@@ -613,6 +622,8 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 				duplicateCount++
 				continue
 			}
+		} else {
+			log.Info().Msgf("random-walk: Sampling Method %s allows for duplicate visits to a URL. SKipping de-duplication process", dsm.BaseStateManager.config.SamplingMethod)
 		}
 
 		// Ensure the page has an ID
@@ -2851,27 +2862,145 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	}
 	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).
 		Msg("random-walk: Adding new edges")
-	// use mutex to avoid writes to edge records during marshalling
-	dsm.BaseStateManager.mutex.Lock()
-	edgeData := map[string]any{
-		"edgeRecords": dsm.BaseStateManager.edgeRecords,
+	// // use mutex to avoid writes to edge records during marshalling
+	// dsm.BaseStateManager.mutex.Lock()
+	// edgeData := map[string]any{
+	// 	"edgeRecords": dsm.BaseStateManager.edgeRecords,
+	// }
+	// edgeByteData, err := json.MarshalIndent(edgeData, "", "  ")
+	// dsm.BaseStateManager.mutex.Unlock()
+	// if err != nil {
+	// 	log.Error().Err(err).Msg("random-walk: Failed to marshall edge data")
+	// 	return err
+	// }
+	// edgeKey := fmt.Sprintf("%s/discoveredEdges", dsm.config.CrawlID)
+	// // log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeData)).
+	// log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeByteData)).
+	// 	Msg("random-walk: Saving edges to dapr now")
+	// // err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeData, nil)
+	// err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeByteData, nil)
+	// if err != nil {
+	// 	log.Warn().Err(err).Str("key", edgeKey).Msg("Failed to save edge data")
+	// 	return err
+	// }
+
+	var (
+		queryBuilder strings.Builder
+		values       []interface{}
+		placeholder  int
+	)
+
+	queryBuilder.WriteString(`INSERT INTO edgerecords (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) VALUES `)
+
+	// Add a placeholder for each record.
+	for i, record := range edges {
+		if i > 0 {
+			queryBuilder.WriteString(", ")
+		}
+		queryBuilder.WriteString(fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
+			placeholder+1, placeholder+2, placeholder+3, placeholder+4, placeholder+5, placeholder+6))
+
+		values = append(values, record.DestinationChannel, record.SourceChannel, record.Walkback, record.Skipped, record.DiscoveryTime, dsm.config.CrawlID)
+		placeholder += 6
 	}
-	edgeByteData, err := json.MarshalIndent(edgeData, "", "  ")
-	dsm.BaseStateManager.mutex.Unlock()
-	// edgeData, err := json.MarshalIndent(dsm.BaseStateManager.edgeRecords, "", "  ")
+
+	queryBuilder.WriteString(";")
+
+	// Marshal the slice of interface{} into JSON bytes.
+	jsonData, err := json.Marshal(values)
 	if err != nil {
-		log.Error().Err(err).Msg("random-walk: Failed to marshall edge data")
-		return err
+		return fmt.Errorf("failed to marshal parameters to JSON: %w", err)
 	}
-	edgeKey := fmt.Sprintf("%s/discoveredEdges", dsm.config.CrawlID)
-	// log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeData)).
-	log.Info().Str("state_store", dsm.stateStoreName).Str("key", edgeKey).Int("bytes", len(edgeByteData)).
-		Msg("random-walk: Saving edges to dapr now")
-	// err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeData, nil)
-	err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, edgeKey, edgeByteData, nil)
+
+	log.Info().Str("sql_query", queryBuilder.String()).Msg("random-walk: Adding edges")
+
+	req := daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "exec", // The operation to execute a SQL query.
+		Metadata: map[string]string{
+			"sql": queryBuilder.String(),
+		},
+		Data: jsonData,
+	}
+	// Invoke the Dapr binding.
+	if _, err := (*dsm.client).InvokeBinding(ctx, &req); err != nil {
+		return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
+	}
+
+	return nil
+}
+
+func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
+	// TODO: add to config
+	dsm.databaseBinding = databaseStorageBinding
+
+	query := "SELECT source_channel FROM edgerecords UNION SELECT destination_channel FROM edgerecords"
+	req := daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql": query,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), &req)
 	if err != nil {
-		log.Warn().Err(err).Str("key", edgeKey).Msg("Failed to save edge data")
-		return err
+		return fmt.Errorf("random-walk: failed to query discovered channels: %w", err)
 	}
+	var discoveredChannels []string
+
+	if err := json.Unmarshal(res.Data, &discoveredChannels); err != nil {
+		return fmt.Errorf("random-walk: Failed to unmarshal response for discovered channels: %v", err)
+	}
+
+	if len(discoveredChannels) > 0 {
+		log.Printf("random-walk: Found %d previously discovered channels:\n", len(discoveredChannels))
+		for _, channel := range discoveredChannels {
+			dsm.BaseStateManager.AddDiscoveredChannel(channel)
+		}
+	} else {
+		log.Info().Msg("random-walk: No discovered channels found")
+	}
+
+	return nil
+}
+
+func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
+	if dsm.BaseStateManager.config.SeedSize <= 0 {
+		return fmt.Errorf("random-walk: must use a seed-size of 1 or larger")
+	} else if dsm.BaseStateManager.config.SeedSize > len(dsm.BaseStateManager.discoveredChannels.keys) {
+		return fmt.Errorf("random-walk: seed-size exceeds number of discovered channels")
+	}
+
+	pages := make([]Page, 0, dsm.BaseStateManager.config.SeedSize)
+
+	seedChannels := make(map[string]bool)
+	for {
+		url, err := dsm.BaseStateManager.GetRandomDiscoveredChannel()
+		if err != nil {
+			return fmt.Errorf("random-walk: unable to get random discovered channel during ")
+		}
+		if _, ok := seedChannels[url]; ok {
+			log.Info().Str("seed_url", url).Msg("random-walk: url previously selected. skipping")
+			continue
+		}
+		seedChannels[url] = true
+		pages = append(pages, Page{
+			ID:        uuid.New().String(),
+			URL:       url,
+			Depth:     0,
+			Status:    "unfetched",
+			Timestamp: time.Now(),
+		})
+		if len(seedChannels) >= dsm.BaseStateManager.config.SeedSize {
+			log.Info().Int("seed_size", dsm.BaseStateManager.config.SeedSize).Int("seed_channel_size", len(seedChannels)).Msg("random-walk: finished selecting seed channels")
+			break
+		}
+	}
+
+	if err := dsm.AddLayer(pages); err != nil {
+		return fmt.Errorf("random-walk: failed to add seed pages: %w", err)
+	}
+
 	return nil
 }

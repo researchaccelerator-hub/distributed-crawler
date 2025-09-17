@@ -239,6 +239,16 @@ func (m *MockStateManager) Initialize(seedURLs []string) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) InitializeDiscoveredChannels() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockStateManager) InitializeRandomWalkLayer() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 // GetPage retrieves a page by ID
 func (m *MockStateManager) GetPage(id string) (state.Page, error) {
 	args := m.Called(id)

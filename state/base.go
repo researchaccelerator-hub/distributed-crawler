@@ -87,6 +87,10 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 	return nil
 }
 
+func (bsm *BaseStateManager) InitializeDiscoveredChannels() error {
+	return nil
+}
+
 // GetPage retrieves a page by ID
 func (bsm *BaseStateManager) GetPage(id string) (Page, error) {
 	bsm.mutex.RLock()

@@ -52,7 +52,10 @@ func (m *MockPanicClient) Disconnect(ctx context.Context) error {
 // MockStateManager is a simple mock state manager
 type MockStateManager struct{}
 
-func (m *MockStateManager) Initialize(seedURLs []string) error    { return nil }
+func (m *MockStateManager) Initialize(seedURLs []string) error  { return nil }
+func (m *MockStateManager) InitializeDiscoveredChannels() error { return nil }
+func (m *MockStateManager) InitializeRandomWalkLayer() error    { return nil }
+
 func (m *MockStateManager) GetPage(id string) (state.Page, error) { return state.Page{}, nil }
 func (m *MockStateManager) UpdatePage(page state.Page) error      { return nil }
 func (m *MockStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error {

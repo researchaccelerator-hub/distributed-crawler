@@ -82,6 +82,8 @@ func (m *MockYouTubeStateManager) GetRandomDiscoveredChannel() (string, error)  
 func (m *MockYouTubeStateManager) IsDiscoveredChannel(channelID string) bool       { return true }
 func (m *MockYouTubeStateManager) AddDiscoveredChannel(channelID string) error     { return nil }
 func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
+func (m *MockYouTubeStateManager) InitializeRandomWalkLayer() error                { return nil }
+func (m *MockYouTubeStateManager) InitializeDiscoveredChannels() error             { return nil }
 
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {
