@@ -2890,7 +2890,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		placeholder  int
 	)
 
-	queryBuilder.WriteString(`INSERT INTO edgerecords (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) VALUES `)
+	queryBuilder.WriteString(`INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) VALUES `)
 
 	// Add a placeholder for each record.
 	for i, record := range edges {
@@ -2934,7 +2934,7 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	// TODO: add to config
 	dsm.databaseBinding = databaseStorageBinding
 
-	query := "SELECT source_channel FROM edgerecords UNION SELECT destination_channel FROM edgerecords"
+	query := "SELECT source_channel FROM edge_records UNION SELECT destination_channel FROM edge_records"
 	req := daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
