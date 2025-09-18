@@ -2964,6 +2964,9 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) 
                  VALUES ($1, $2, $3, $4, $5, $6);`
 
+	verifyQuery := `SELECT COUNT(*) FROM edge_records WHERE destination_channel = $1 AND source_channel = $2 AND walkback = $3 
+					AND skipped = $4 AND discovery_time = $5 AND crawl_id = $6`
+
 	for _, record := range edges {
 		values := []any{
 			record.DestinationChannel,
@@ -2991,6 +2994,22 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).
 			Msg("random-walk: adding edge record")
 		if _, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
+			if strings.Contains(err.Error(), "invalid header field value") {
+				verifyReq := &daprc.InvokeBindingRequest{
+					Name:      dsm.databaseBinding,
+					Operation: "query",
+					Metadata: map[string]string{
+						"sql":    verifyQuery,
+						"params": string(jsonData),
+					},
+				}
+				_, verifyErr := (*dsm.client).InvokeBinding(ctx, verifyReq)
+				if verifyErr != nil {
+					return fmt.Errorf("random-walk: verification of insert failed: %w", verifyErr)
+				} else {
+					log.Info().Msg("random-walk: verified insert occured despite false positive")
+				}
+			}
 			return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
 		}
 	}
