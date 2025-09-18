@@ -2983,9 +2983,9 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			Name:      dsm.databaseBinding,
 			Operation: "exec",
 			Metadata: map[string]string{
-				"sql": sqlQuery,
+				"sql":    sqlQuery,
+				"params": string(jsonData),
 			},
-			Data: jsonData,
 		}
 
 		log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).
