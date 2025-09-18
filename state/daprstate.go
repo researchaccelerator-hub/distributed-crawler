@@ -2995,9 +2995,10 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			Msg("random-walk: adding edge record")
 		if _, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
 			if strings.Contains(err.Error(), "invalid header field value") {
-				log.Info().Msg("random-walk: ignoring invlaid header field value error")
+				log.Info().Msg("random-walk: ignoring invalid header field value error")
+			} else {
+				return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
 			}
-			return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
 		}
 	}
 
