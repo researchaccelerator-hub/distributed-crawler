@@ -2923,45 +2923,76 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		// 	Data: jsonData,
 		// }
 
+		// sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id)
+		//              VALUES ($1, $2, $3, $4, $5, $6);`
+
+		// // Create a type to represent a single operation for Dapr's bulk format.
+		// type sqlOperation struct {
+		// 	SQL    string `json:"sql"`
+		// 	Params []any  `json:"params"`
+		// }
+
+		// // 1. Build a slice of operations, one for each record.
+		// operations := make([]sqlOperation, 0, len(edges))
+		// for _, record := range edges {
+		// 	operations = append(operations, sqlOperation{
+		// 		SQL: sqlQuery,
+		// 		Params: []any{
+		// 			record.DestinationChannel,
+		// 			record.SourceChannel,
+		// 			record.Walkback,
+		// 			record.Skipped,
+		// 			record.DiscoveryTime,
+		// 			dsm.config.CrawlID,
+		// 		},
+		// 	})
+		// }
+
+		// jsonData, err := json.Marshal(operations)
+		// if err != nil {
+		// 	return fmt.Errorf("random-walk: failed to marshal bulk operations to JSON: %w", err)
+		// }
+
+		// req := &daprc.InvokeBindingRequest{
+		// 	Name:      dsm.databaseBinding,
+		// 	Operation: "exec",
+		// 	Data:      jsonData,
+		// }
+
+		// log.Info().Int("record_count", len(edges)).Msg("random-walk: Adding edges in bulk")
+
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) 
                  VALUES ($1, $2, $3, $4, $5, $6);`
 
-	// Create a type to represent a single operation for Dapr's bulk format.
-	type sqlOperation struct {
-		SQL    string `json:"sql"`
-		Params []any  `json:"params"`
-	}
-
-	// 1. Build a slice of operations, one for each record.
-	operations := make([]sqlOperation, 0, len(edges))
 	for _, record := range edges {
-		operations = append(operations, sqlOperation{
-			SQL: sqlQuery,
-			Params: []any{
-				record.DestinationChannel,
-				record.SourceChannel,
-				record.Walkback,
-				record.Skipped,
-				record.DiscoveryTime,
-				dsm.config.CrawlID,
+		values := []any{
+			record.DestinationChannel,
+			record.SourceChannel,
+			record.Walkback,
+			record.Skipped,
+			record.DiscoveryTime,
+			dsm.config.CrawlID,
+		}
+
+		jsonData, err := json.Marshal(values)
+		if err != nil {
+			return fmt.Errorf("random-walk: failed to marshal record to JSON: %w", err)
+		}
+
+		req := &daprc.InvokeBindingRequest{
+			Name:      dsm.databaseBinding,
+			Operation: "exec",
+			Metadata: map[string]string{
+				"sql": sqlQuery,
 			},
-		})
-	}
+			Data: jsonData,
+		}
 
-	jsonData, err := json.Marshal(operations)
-	if err != nil {
-		return fmt.Errorf("random-walk: failed to marshal bulk operations to JSON: %w", err)
-	}
-
-	req := &daprc.InvokeBindingRequest{
-		Name:      dsm.databaseBinding,
-		Operation: "exec",
-		Data:      jsonData,
-	}
-
-	log.Info().Int("record_count", len(edges)).Msg("random-walk: Adding edges in bulk")
-	if _, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
-		return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
+		log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).
+			Msg("random-walk: adding edge record")
+		if _, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
+			return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
+		}
 	}
 
 	return nil
