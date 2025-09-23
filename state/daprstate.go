@@ -694,7 +694,19 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 				nil,
 			)
 			if err != nil {
-				return fmt.Errorf("failed to save page %s to Dapr: %w", pageCopy.ID, err)
+				log.Info().Str("page_id", pageCopy.ID).Msg("Encountered error saving page. Waiting 3 seconds and retrying")
+				time.Sleep(3 * time.Second)
+				err = (*dsm.client).SaveState(
+					ctx,
+					dsm.stateStoreName,
+					pageKey,
+					pageData,
+					nil,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to save page %s to Dapr: %w", pageCopy.ID, err)
+				}
+
 			}
 
 			return nil
