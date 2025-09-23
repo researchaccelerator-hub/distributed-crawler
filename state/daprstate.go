@@ -610,6 +610,10 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 	var pagesToAdd []Page
 	duplicateCount := 0
 
+	if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+		log.Info().Msgf("random-walk: Sampling Method %s allows for duplicate visits to a URL. SKipping de-duplication process", dsm.BaseStateManager.config.SamplingMethod)
+	}
+
 	for i := range pages {
 		if dsm.BaseStateManager.config.SamplingMethod != "random-walk" {
 			// Check for duplicates using read lock on URL cache
@@ -622,8 +626,6 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 				duplicateCount++
 				continue
 			}
-		} else {
-			log.Info().Msgf("random-walk: Sampling Method %s allows for duplicate visits to a URL. SKipping de-duplication process", dsm.BaseStateManager.config.SamplingMethod)
 		}
 
 		// Ensure the page has an ID
