@@ -2875,7 +2875,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		log.Error().Err(baseErr).Msg("random-walk: Failed to add edge records")
 		return baseErr
 	}
-	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).
+	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Str("source_channel", edges[0].SourceChannel).
 		Msg("random-walk: Adding new edges")
 
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) 
