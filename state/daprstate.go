@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2878,12 +2879,21 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		Msg("random-walk: Adding new edges")
 
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) 
-                 VALUES ($1, $2, $3, $4, $5, $6);`
+                 VALUES (?, ?, ?, ?, ?, ?);`
 
-	for _, record := range edges {
+	for i, record := range edges {
+
+		log.Debug().Int("index", i).Msg("random-walk: processing record")
+
+		// Check if this specific record is nil
+		if record == nil {
+			log.Error().Int("index", i).Msg("random-walk: skipping nil record")
+			continue
+		}
+
 		values := []any{
-			record.DestinationChannel,
-			record.SourceChannel,
+			strconv.Quote(record.DestinationChannel),
+			strconv.Quote(record.SourceChannel),
 			record.Walkback,
 			record.Skipped,
 			record.DiscoveryTime,
