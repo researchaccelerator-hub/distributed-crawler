@@ -2,7 +2,7 @@
 
 FROM acrnetcus.azurecr.io/tdlib:latest AS builder
 
-RUN apk add --no-cache g++ make cmake git linux-headers binutils go
+RUN apk add --no-cache g++ make cmake git linux-headers binutils go graphviz
 
 RUN ln -s /usr/include/asm-generic /usr/include/asm
 
