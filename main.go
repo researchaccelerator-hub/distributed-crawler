@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
@@ -54,17 +55,27 @@ func main() {
 
 	// TODO: Remove after identifying memory leak
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello! Visit /debug/pprof/ for profiling data.")
-	})
+	mux := http.NewServeMux()
 
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	log.Info().Msg("Starting server on :6060")
 	log.Info().Msg("Profiling endpoints are available at http://localhost:6060/debug/pprof/")
 
-	// Start the HTTP server.
-	if err := http.ListenAndServe(":6060", nil); err != nil {
-		log.Error().Msgf("Could not start server: %s\n", err)
+	server := &http.Server{
+		Addr:    ":6060",
+		Handler: mux,
 	}
+
+	// Start the HTTP server.
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			log.Error().Msgf("Could not start server: %s\n", err)
+		}
+	}()
 
 	// Initialize and execute the root command
 	if err := rootCmd.Execute(); err != nil {
