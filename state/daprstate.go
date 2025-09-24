@@ -2906,6 +2906,16 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			log.Warn().Int("record_index", i).Msg("random-walk: discovery_time is zero")
 		}
 
+		log.Info().
+			Int("record_index", i).
+			Str("destination_channel", record.DestinationChannel).
+			Str("source_channel", record.SourceChannel).
+			Bool("walkback", record.Walkback).
+			Bool("skipped", record.Skipped).
+			Time("discovery_time", record.DiscoveryTime).
+			Str("crawl_id", dsm.config.CrawlID).
+			Msg("random-walk: record data before marshaling")
+
 		values := []any{
 			// strconv.Quote(record.DestinationChannel),
 			// strconv.Quote(record.SourceChannel),
@@ -2941,6 +2951,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 				return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
 			}
 		}
+		log.Debug().Int("index", i).Msg("random-walk: finished processing record")
 	}
 
 	return nil
