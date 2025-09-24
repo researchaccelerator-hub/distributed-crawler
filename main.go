@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -49,6 +51,11 @@ func main() {
 	// The actual level will be configured in PersistentPreRunE
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
+	// TODO: Remove after identifying memory leak
+	go func() {
+		log.Print(http.ListenAndServe("localhost:8081", nil))
+	}()
 
 	// Initialize and execute the root command
 	if err := rootCmd.Execute(); err != nil {
