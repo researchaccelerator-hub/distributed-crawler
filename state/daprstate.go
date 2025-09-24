@@ -453,16 +453,31 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	dsm.urlCacheMutex.RLock()
 	uniqueSeedURLs := make([]string, 0)
 	for _, url := range seedURLs {
+
+		// TODO: break this out into a function
+		var parsedURL string
+		if url[0] == '"' && url[len(url)-1] == '"' {
+			log.Info().Str("quoted_url", url).Msg("random-walk: unquoting url before adding to discovered urls")
+			parsedURL, err = strconv.Unquote(url)
+			if err != nil {
+				log.Error().Err(err).Msg("random-walk: encounted error unquoting url")
+				continue
+			}
+		} else {
+			parsedURL = url
+		}
+
 		// random-walk stuff
 		// TODO: figure out best way to get crawl type in here
 		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-			log.Info().Str("url", url).Msg("random-walk: Adding seed url in Dapr Initialize")
-			dsm.BaseStateManager.AddDiscoveredChannel(url)
+			log.Info().Str("url", parsedURL).Msg("random-walk: Adding seed url in Dapr Initialize")
+			dsm.BaseStateManager.AddDiscoveredChannel(parsedURL)
+
 		}
-		if _, exists := dsm.urlCache[url]; !exists {
-			uniqueSeedURLs = append(uniqueSeedURLs, url)
+		if _, exists := dsm.urlCache[parsedURL]; !exists {
+			uniqueSeedURLs = append(uniqueSeedURLs, parsedURL)
 		} else {
-			log.Debug().Str("url", url).Msg("Skipping seed URL already processed in previous crawl")
+			log.Debug().Str("url", parsedURL).Msg("Skipping seed URL already processed in previous crawl")
 		}
 	}
 	dsm.urlCacheMutex.RUnlock()
