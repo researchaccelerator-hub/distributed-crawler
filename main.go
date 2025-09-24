@@ -53,9 +53,18 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 
 	// TODO: Remove after identifying memory leak
-	go func() {
-		log.Print(http.ListenAndServe("localhost:8081", nil))
-	}()
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "Hello! Visit /debug/pprof/ for profiling data.")
+	})
+
+	log.Info().Msg("Starting server on :6060")
+	log.Info().Msg("Profiling endpoints are available at http://localhost:6060/debug/pprof/")
+
+	// Start the HTTP server.
+	if err := http.ListenAndServe(":6060", nil); err != nil {
+		log.Error().Msgf("Could not start server: %s\n", err)
+	}
 
 	// Initialize and execute the root command
 	if err := rootCmd.Execute(); err != nil {
