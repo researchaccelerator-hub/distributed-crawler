@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2881,7 +2880,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		Msg("random-walk: Adding new edges")
 
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) 
-                 VALUES (?, ?, ?, ?, ?, ?);`
+                 VALUES ($1, $2, $3, $4, $5, $6);`
 
 	for i, record := range edges {
 
@@ -2893,9 +2892,25 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			continue
 		}
 
+		// Check for empty/nil values that might cause issues
+		if record.DestinationChannel == "" {
+			log.Warn().Int("record_index", i).Msg("random-walk: destination_channel is empty")
+		}
+		if record.SourceChannel == "" {
+			log.Warn().Int("record_index", i).Msg("random-walk: source_channel is empty")
+		}
+		if dsm.config.CrawlID == "" {
+			log.Warn().Int("record_index", i).Msg("random-walk: crawl_id is empty")
+		}
+		if record.DiscoveryTime.IsZero() {
+			log.Warn().Int("record_index", i).Msg("random-walk: discovery_time is zero")
+		}
+
 		values := []any{
-			strconv.Quote(record.DestinationChannel),
-			strconv.Quote(record.SourceChannel),
+			// strconv.Quote(record.DestinationChannel),
+			// strconv.Quote(record.SourceChannel),
+			record.DestinationChannel,
+			record.SourceChannel,
 			record.Walkback,
 			record.Skipped,
 			record.DiscoveryTime,
