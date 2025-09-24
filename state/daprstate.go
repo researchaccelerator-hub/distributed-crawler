@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -695,8 +696,9 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 				nil,
 			)
 			if err != nil {
-				log.Info().Str("page_id", pageCopy.ID).Msg("Encountered error saving page. Waiting 3 seconds and retrying")
-				time.Sleep(3 * time.Second)
+				sleepMilliseconds := 3000 + rand.IntN(4000)
+				log.Info().Str("page_id", pageCopy.ID).Int("sleep_milliseconds", sleepMilliseconds).Msg("Encountered error saving page. Waiting between 3 and 7 seconds and retrying")
+				time.Sleep(time.Duration(sleepMilliseconds) * time.Millisecond)
 				err = (*dsm.client).SaveState(
 					ctx,
 					dsm.stateStoreName,
