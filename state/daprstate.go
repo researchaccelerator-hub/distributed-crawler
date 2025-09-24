@@ -2871,6 +2871,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
+	log.Info().Msg("random-walk: copying records before saving")
 	edgesCopy := make([]*EdgeRecord, len(edges))
 	copy(edgesCopy, edges)
 
