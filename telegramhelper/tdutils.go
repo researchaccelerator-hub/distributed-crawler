@@ -2,17 +2,18 @@ package telegramhelper
 
 import (
 	"fmt"
+	"os"
+	"regexp"
+	"runtime/debug"
+	"strings"
+	"time"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"os"
-	"regexp"
-	"runtime/debug"
-	"strings"
-	"time"
 )
 
 //// removeMultimedia removes all files and subdirectories in the specified directory.
@@ -147,7 +148,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 		log.Debug().Msg("Empty file ID provided, nothing to fetch")
 		return "", nil
 	}
-	
+
 	// Check if media downloads should be skipped
 	if cfg.SkipMediaDownload {
 		log.Debug().
@@ -792,7 +793,10 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 	channelNamesMap := make(map[string]bool)
 
 	// Regex to identify Telegram channel links in text
-	channelLinkRegex := regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]+)`)
+	channelLinkRegex := regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{5,32})`)
+
+	// Regex to identify names that fit username requirements
+	usernameRegex := regexp.MustCompile(`(@)?([a-zA-Z0-9_]{5,32})`)
 
 	// Check if it's a text message
 	var messageText *client.MessageText
@@ -815,6 +819,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
 					// Extract just the channel name (group 2 from regex)
 					channelName := matches[2]
+					log.Info().Str("url", url).Str("channel_name", channelName).Msg("random-walk: adding TextEntityTypeTextUrl")
 					channelNamesMap[channelName] = true
 				}
 
@@ -824,9 +829,14 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				length := entity.Length
 				if int(offset+length) <= len(messageText.Text.Text) {
 					mention := messageText.Text.Text[offset : offset+length]
-					if strings.HasPrefix(mention, "@") {
-						// Remove the @ prefix
-						channelNamesMap[mention[1:]] = true
+					if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
+						if strings.HasPrefix(mention, "@") {
+							// Remove the @ prefix
+							log.Info().Str("mention", mention).Msg("random-walk: adding TextEntityTypeMention")
+							channelNamesMap[mention[1:]] = true
+						}
+					} else {
+						log.Info().Str("mention", mention).Msg("random-walk: skipping TextEntityTypeMention for not matching regex")
 					}
 				}
 
@@ -839,6 +849,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 					if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
 						// Extract just the channel name (group 2 from regex)
 						channelName := matches[2]
+						log.Info().Str("url", url).Str("channel_name", channelName).Msg("random-walk: adding TextEntityTypeUrl")
 						channelNamesMap[channelName] = true
 					}
 				}
@@ -853,6 +864,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 			if len(match) >= 3 {
 				// Extract just the channel name (group 2 from regex)
 				channelName := match[2]
+				log.Info().Str("channel_name", channelName).Msg("random-walk: adding messageText.Text.Text")
 				channelNamesMap[channelName] = true
 			}
 		}

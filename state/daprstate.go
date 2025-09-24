@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -454,31 +453,39 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	uniqueSeedURLs := make([]string, 0)
 	for _, url := range seedURLs {
 
-		// TODO: break this out into a function
-		var parsedURL string
-		log.Info().Str("first_char", string(url[0])).Str("last_char", string(url[len(url)-1])).Msg("random-walk: print first and last character before test")
-		if string(url[0]) == `"` && string(url[len(url)-1]) == `"` {
-			log.Info().Str("quoted_url", url).Msg("random-walk: unquoting url before adding to discovered urls")
-			parsedURL, err = strconv.Unquote(url)
-			if err != nil {
-				log.Error().Err(err).Msg("random-walk: encounted error unquoting url")
-				continue
-			}
-		} else {
-			parsedURL = url
-		}
+		// // TODO: break this out into a function
+		// var parsedURL string
+		// log.Info().Str("first_char", string(url[0])).Str("last_char", string(url[len(url)-1])).Msg("random-walk: print first and last character before test")
+		// if string(url[0]) == `"` && string(url[len(url)-1]) == `"` {
+		// 	log.Info().Str("quoted_url", url).Msg("random-walk: unquoting url before adding to discovered urls")
+		// 	parsedURL, err = strconv.Unquote(url)
+		// 	if err != nil {
+		// 		log.Error().Err(err).Msg("random-walk: encounted error unquoting url")
+		// 		continue
+		// 	}
+		// } else {
+		// 	parsedURL = url
+		// }
 
-		// random-walk stuff
-		// TODO: figure out best way to get crawl type in here
+		// if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+		// 	log.Info().Str("url", parsedURL).Msg("random-walk: Adding seed url in Dapr Initialize")
+		// 	dsm.BaseStateManager.AddDiscoveredChannel(parsedURL)
+
+		// }
+		// if _, exists := dsm.urlCache[parsedURL]; !exists {
+		// 	uniqueSeedURLs = append(uniqueSeedURLs, parsedURL)
+		// } else {
+		// 	log.Debug().Str("url", parsedURL).Msg("Skipping seed URL already processed in previous crawl")
+		// }
 		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-			log.Info().Str("url", parsedURL).Msg("random-walk: Adding seed url in Dapr Initialize")
-			dsm.BaseStateManager.AddDiscoveredChannel(parsedURL)
+			log.Info().Str("url", url).Msg("random-walk: Adding seed url in Dapr Initialize")
+			dsm.BaseStateManager.AddDiscoveredChannel(url)
 
 		}
-		if _, exists := dsm.urlCache[parsedURL]; !exists {
-			uniqueSeedURLs = append(uniqueSeedURLs, parsedURL)
+		if _, exists := dsm.urlCache[url]; !exists {
+			uniqueSeedURLs = append(uniqueSeedURLs, url)
 		} else {
-			log.Debug().Str("url", parsedURL).Msg("Skipping seed URL already processed in previous crawl")
+			log.Debug().Str("url", url).Msg("Skipping seed URL already processed in previous crawl")
 		}
 	}
 	dsm.urlCacheMutex.RUnlock()
@@ -2939,10 +2946,10 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			Msg("random-walk: record data before marshaling")
 
 		values := []any{
-			strconv.Quote(record.DestinationChannel),
-			strconv.Quote(record.SourceChannel),
-			// record.DestinationChannel,
-			// record.SourceChannel,
+			// strconv.Quote(record.DestinationChannel),
+			// strconv.Quote(record.SourceChannel),
+			record.DestinationChannel,
+			record.SourceChannel,
 			record.Walkback,
 			record.Skipped,
 			record.DiscoveryTime,
@@ -3015,19 +3022,20 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 		log.Printf("random-walk: Found %d previously discovered channels:\n", len(discoveredChannels))
 		for _, channel := range discoveredChannels {
 
-			var channelToAdd string
-			if string(channel[0]) == `"` && string(channel[len(channel)-1]) == `"` {
-				log.Info().Str("quoted_channel", channel).Msg("random-walk: unquoting channel before adding to discovered channels")
+			// var channelToAdd string
+			// if string(channel[0]) == `"` && string(channel[len(channel)-1]) == `"` {
+			// 	log.Info().Str("quoted_channel", channel).Msg("random-walk: unquoting channel before adding to discovered channels")
 
-				channelToAdd, err = strconv.Unquote(channel)
-				if err != nil {
-					log.Error().Err(err).Msg("random-walk: encounted error unquoting channel")
-					continue
-				}
-			} else {
-				channelToAdd = channel
-			}
-			dsm.BaseStateManager.AddDiscoveredChannel(channelToAdd)
+			// 	channelToAdd, err = strconv.Unquote(channel)
+			// 	if err != nil {
+			// 		log.Error().Err(err).Msg("random-walk: encounted error unquoting channel")
+			// 		continue
+			// 	}
+			// } else {
+			// 	channelToAdd = channel
+			// }
+			// dsm.BaseStateManager.AddDiscoveredChannel(channelToAdd)
+			dsm.BaseStateManager.AddDiscoveredChannel(channel)
 		}
 	} else {
 		log.Info().Msg("random-walk: No discovered channels found")
