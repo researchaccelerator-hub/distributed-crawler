@@ -2870,6 +2870,10 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	// Create a context with timeout to prevent hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+
+	edgesCopy := make([]*EdgeRecord, len(edges))
+	copy(edgesCopy, edges)
+
 	// Add Edges in Memory
 	baseErr := dsm.BaseStateManager.SaveEdgeRecords(edges)
 	if baseErr != nil {
@@ -2882,7 +2886,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) 
                  VALUES ($1, $2, $3, $4, $5, $6);`
 
-	for i, record := range edges {
+	for i, record := range edgesCopy {
 
 		log.Debug().Int("index", i).Msg("random-walk: processing record")
 
