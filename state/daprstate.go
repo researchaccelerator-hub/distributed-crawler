@@ -456,7 +456,8 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 
 		// TODO: break this out into a function
 		var parsedURL string
-		if url[0] == '"' && url[len(url)-1] == '"' {
+		log.Info().Str("first_char", string(url[0])).Str("last_char", string(url[len(url)-1])).Msg("random-walk: print first and last character before test")
+		if string(url[0]) == `"` && string(url[len(url)-1]) == `"` {
 			log.Info().Str("quoted_url", url).Msg("random-walk: unquoting url before adding to discovered urls")
 			parsedURL, err = strconv.Unquote(url)
 			if err != nil {
@@ -3015,7 +3016,7 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 		for _, channel := range discoveredChannels {
 
 			var channelToAdd string
-			if channel[0] == '"' && channel[len(channel)-1] == '"' {
+			if string(channel[0]) == `"` && string(channel[len(channel)-1]) == `"` {
 				log.Info().Str("quoted_channel", channel).Msg("random-walk: unquoting channel before adding to discovered channels")
 
 				channelToAdd, err = strconv.Unquote(channel)
