@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2922,10 +2923,10 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			Msg("random-walk: record data before marshaling")
 
 		values := []any{
-			// strconv.Quote(record.DestinationChannel),
-			// strconv.Quote(record.SourceChannel),
-			record.DestinationChannel,
-			record.SourceChannel,
+			strconv.Quote(record.DestinationChannel),
+			strconv.Quote(record.SourceChannel),
+			// record.DestinationChannel,
+			// record.SourceChannel,
 			record.Walkback,
 			record.Skipped,
 			record.DiscoveryTime,
@@ -2997,7 +2998,12 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	if len(discoveredChannels) > 0 {
 		log.Printf("random-walk: Found %d previously discovered channels:\n", len(discoveredChannels))
 		for _, channel := range discoveredChannels {
-			dsm.BaseStateManager.AddDiscoveredChannel(channel)
+			log.Info().Str("quoted_channel", channel).Msg("random-walk: unquoted channel before adding to discovered channels")
+			unquoted, err := strconv.Unquote(channel)
+			if err != nil {
+				log.Error().Err(err).Msg("random-walk: encounted error unquoting channel")
+			}
+			dsm.BaseStateManager.AddDiscoveredChannel(unquoted)
 		}
 	} else {
 		log.Info().Msg("random-walk: No discovered channels found")
