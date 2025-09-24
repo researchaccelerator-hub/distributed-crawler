@@ -2876,7 +2876,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	copy(edgesCopy, edges)
 
 	// Add Edges in Memory
-	baseErr := dsm.BaseStateManager.SaveEdgeRecords(edges)
+	baseErr := dsm.BaseStateManager.SaveEdgeRecords(edgesCopy)
 	if baseErr != nil {
 		log.Error().Err(baseErr).Msg("random-walk: Failed to add edge records")
 		return baseErr
@@ -2950,19 +2950,6 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			Str("sql_query", sqlQuery).Str("params", string(jsonData)).Msg("random-walk: adding edge record")
 		if resp, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
 			if strings.Contains(err.Error(), "invalid header field value") {
-				// if resp == nil {
-				// 	log.Info().Msg("random-walk: response is nil")
-				// } else {
-				// 	if resp.Metadata == nil {
-				// 		log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
-				// 	} else {
-				// 		if val, ok := resp.Metadata["sql"]; ok {
-				// 			log.Info().Str("metadata.sql", val).Msg("random-walk: metadata.sql values")
-				// 		} else {
-				// 			log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
-				// 		}
-				// 	}
-				// }
 				if resp == nil {
 					log.Info().Msg("random-walk: response is nil")
 				} else if resp.Metadata == nil {
@@ -2989,7 +2976,7 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	dsm.databaseBinding = databaseStorageBinding
 
 	query := "SELECT source_channel FROM edge_records UNION SELECT destination_channel FROM edge_records"
-	req := daprc.InvokeBindingRequest{
+	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
 		Data:      nil,
@@ -2997,7 +2984,7 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 			"sql": query,
 		},
 	}
-	res, err := (*dsm.client).InvokeBinding(context.Background(), &req)
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
 	if err != nil {
 		return fmt.Errorf("random-walk: failed to query discovered channels: %w", err)
 	}
