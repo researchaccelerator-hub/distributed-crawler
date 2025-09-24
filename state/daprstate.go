@@ -2950,7 +2950,19 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			Str("sql_query", sqlQuery).Str("params", string(jsonData)).Msg("random-walk: adding edge record")
 		if resp, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
 			if strings.Contains(err.Error(), "invalid header field value") {
-				log.Info().Str("metadata.sql", resp.Metadata["sql"]).Msg("metadata.sql values")
+				if resp == nil {
+					log.Info().Msg("random-walk: response is nil")
+				} else {
+					if resp.Metadata == nil {
+						log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
+					} else {
+						if val, ok := resp.Metadata["sql"]; ok {
+							log.Info().Str("metadata.sql", val).Msg("random-walk: metadata.sql values")
+						} else {
+							log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
+						}
+					}
+				}
 				log.Info().Msg("random-walk: ignoring invalid header field value error")
 			} else {
 				return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
