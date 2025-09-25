@@ -986,6 +986,12 @@ func (dsm *DaprStateManager) SaveState() error {
 
 // StorePost stores a post in Dapr
 func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error {
+
+	if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+		log.Info().Msg("random-walk: posts are not stored in random-walk crawls")
+		return nil
+	}
+
 	postData, err := json.Marshal(post)
 	if err != nil {
 		return fmt.Errorf("failed to marshal post: %w", err)
