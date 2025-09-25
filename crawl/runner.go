@@ -787,11 +787,17 @@ func processAllMessagesWithProcessor(
 								oldChannels[o] = true
 							} else {
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk: Checking if valid public channel")
-								_, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
 								if err != nil {
 									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk: Failed to find channel. Skipping")
+									invalidChannels[o] = true
+									continue
+								}
+								chatType := string(chat.Type.ChatTypeType())
+								if chatType != "CHANNEL" {
+									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk: Not a valid chat type. Skipping")
 									invalidChannels[o] = true
 									continue
 								}
