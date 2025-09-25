@@ -796,7 +796,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 	channelLinkRegex := regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
 
 	// Regex to identify names that fit username requirements
-	usernameRegex := regexp.MustCompile(`(@)?([a-zA-Z0-9_]{4,32})`)
+	usernameRegex := regexp.MustCompile(`(?:@)?([a-zA-Z0-9_]{4,32})`)
 
 	// Check if it's a text message
 	var messageText *client.MessageText
@@ -819,7 +819,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
 					// Extract just the channel name (group 2 from regex)
 					channelName := matches[2]
-					log.Info().Str("url", url).Str("channel_name", channelName).Msg("random-walk: adding TextEntityTypeTextUrl")
+					log.Info().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 					channelNamesMap[channelName] = true
 				}
 
@@ -830,13 +830,17 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				if int(offset+length) <= len(messageText.Text.Text) {
 					mention := messageText.Text.Text[offset : offset+length]
 					if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
-						if strings.HasPrefix(mention, "@") {
-							// Remove the @ prefix
-							log.Info().Str("mention", mention).Msg("random-walk: adding TextEntityTypeMention")
-							channelNamesMap[mention[1:]] = true
-						}
+						// if strings.HasPrefix(mention, "@") {
+						// 	// Remove the @ prefix
+						// log.Info().Str("mention", mention).Msg("random-walk-links: adding TextEntityTypeMention")
+						// 	channelNamesMap[mention[1:]] = true
+						// }
+						channelName := matches[1]
+						log.Info().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
+						channelNamesMap[channelName] = true
 					} else {
-						log.Info().Str("mention", mention).Msg("random-walk: skipping TextEntityTypeMention for not matching regex")
+						log.Info().Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
+						log.Info().Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
 					}
 				}
 
@@ -849,7 +853,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 					if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
 						// Extract just the channel name (group 2 from regex)
 						channelName := matches[2]
-						log.Info().Str("url", url).Str("channel_name", channelName).Msg("random-walk: adding TextEntityTypeUrl")
+						log.Info().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
 						channelNamesMap[channelName] = true
 					}
 				}
@@ -864,7 +868,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 			if len(match) >= 3 {
 				// Extract just the channel name (group 2 from regex)
 				channelName := match[2]
-				log.Info().Str("channel_name", channelName).Msg("random-walk: adding messageText.Text.Text")
+				log.Info().Str("channel_name", channelName).Str("entity_type", "messageText.Text.Text").Msg("random-walk-links: adding")
 				channelNamesMap[channelName] = true
 			}
 		}
