@@ -430,6 +430,12 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 				log.Warn().Msg("No layer 0 pages found in loaded state, will create from seed URLs")
 			} else {
 				log.Info().Int("pageCount", len(layerZeroPages)).Msg("Successfully loaded layer 0 pages")
+				if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+					log.Info().Msg("random-walk: Adding seed urls for in progress crawl")
+					for _, url := range seedURLs {
+						dsm.BaseStateManager.AddDiscoveredChannel(url)
+					}
+				}
 				return nil
 			}
 		}
@@ -480,7 +486,6 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
 			log.Info().Str("url", url).Msg("random-walk: Adding seed url in Dapr Initialize")
 			dsm.BaseStateManager.AddDiscoveredChannel(url)
-
 		}
 		if _, exists := dsm.urlCache[url]; !exists {
 			uniqueSeedURLs = append(uniqueSeedURLs, url)
@@ -3000,12 +3005,12 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	return nil
 }
 
-func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
+func (dsm *DaprStateManager) InitializeDiscoveredChannels(seedURLs []string) error {
 	log.Info().Msg("random-walk: initializing discovered channels DELETE")
 	// TODO: add to config
 	dsm.databaseBinding = databaseStorageBinding
 
-	query := "SELECT source_channel FROM edge_records UNION SELECT destination_channel FROM edge_records"
+	query := "SELECT source_channel FROM edge_records UNION SELECT destination_channel FROM edge_records;"
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
@@ -3027,21 +3032,10 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	if len(discoveredChannels) > 0 {
 		log.Printf("random-walk: Found %d previously discovered channels:\n", len(discoveredChannels))
 		for _, channel := range discoveredChannels {
-
-			// var channelToAdd string
-			// if string(channel[0]) == `"` && string(channel[len(channel)-1]) == `"` {
-			// 	log.Info().Str("quoted_channel", channel).Msg("random-walk: unquoting channel before adding to discovered channels")
-
-			// 	channelToAdd, err = strconv.Unquote(channel)
-			// 	if err != nil {
-			// 		log.Error().Err(err).Msg("random-walk: encounted error unquoting channel")
-			// 		continue
-			// 	}
-			// } else {
-			// 	channelToAdd = channel
-			// }
-			// dsm.BaseStateManager.AddDiscoveredChannel(channelToAdd)
-			dsm.BaseStateManager.AddDiscoveredChannel(channel)
+			err := dsm.BaseStateManager.AddDiscoveredChannel(channel)
+			if err != nil {
+				log.Info().Err(err).Msg("random-walk: error encountered adding discovered channel")
+			}
 		}
 	} else {
 		log.Info().Msg("random-walk: No discovered channels found")
