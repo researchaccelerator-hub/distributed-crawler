@@ -214,10 +214,10 @@ Examples:
 		if crawlerCfg.SamplingMethod == "random-walk" {
 			// xor operation to confirm only one of the two options is provided
 			if (len(urlList) > 0) != (crawlerCfg.SeedSize > 0) {
-			} else if (len(urlList) > 0) && (crawlerCfg.SeedSize > 0) {
-				return fmt.Errorf("Cannot provide seed urls and seed size in random-walk crawl")
+			} else if ((len(urlList) > 0) && (crawlerCfg.SeedSize > 0)) || ((len(urlList) == 0) && (crawlerCfg.SeedSize == 0)) {
+				return fmt.Errorf("Must provide either seed urls or seed size in random-walk crawl")
 			} else if len(crawlerCfg.CrawlID) > 32 {
-				fmt.Errorf("Crawl IDs cannot exceed 32 characters")
+				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
 			}
 		} else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
 			return err
