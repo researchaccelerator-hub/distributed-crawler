@@ -665,6 +665,7 @@ func processAllMessagesWithProcessor(
 	discoveredEdges := make([]*state.EdgeRecord, 0)
 	newChannels := make(map[string]bool, 0)
 	oldChannels := make(map[string]bool, 0)
+	invalidChannels := make(map[string]bool, 0)
 
 	// Process messages
 	for _, message := range messages {
@@ -770,13 +771,14 @@ func processAllMessagesWithProcessor(
 							}
 							discoveredChannels = append(discoveredChannels, page)
 						} else {
-							// check if in newChannels, skip if true
-							if _, ok := newChannels[o]; ok {
+							// check if channel already found as new, old, or invalid and skip
+							if _, ok := invalidChannels[o]; ok {
+								log.Info().Str("channel", o).Msg("random-walk: Channel already identified as invalid. Skipping")
+								continue
+							} else if _, ok := newChannels[o]; ok {
 								log.Info().Str("channel", o).Msg("random-walk: Channel already found as part of new channels. Skipping")
 								continue
-							}
-							// check if in oldChannels, skip if true
-							if _, ok := oldChannels[o]; ok {
+							} else if _, ok := oldChannels[o]; ok {
 								log.Info().Str("channel", o).Msg("random-walk: Channel already found as part of old channels. Skipping")
 								continue
 							}
@@ -784,6 +786,15 @@ func processAllMessagesWithProcessor(
 							if sm.IsDiscoveredChannel(o) {
 								oldChannels[o] = true
 							} else {
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk: Checking if valid public channel")
+								_, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+									Username: o,
+								})
+								if err != nil {
+									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk: Failed to find channel. Skipping")
+									invalidChannels[o] = true
+									continue
+								}
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk: Adding channel to discovered channels")
 								sm.AddDiscoveredChannel(o)
 								newChannels[o] = true
