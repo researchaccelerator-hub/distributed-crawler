@@ -796,7 +796,8 @@ func processAllMessagesWithProcessor(
 									continue
 								}
 								chatType := string(chat.Type.ChatTypeType())
-								if chatType != "CHANNEL" {
+
+								if chatType != "chatTypeSupergroup" {
 									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk: Not a valid chat type. Skipping")
 									invalidChannels[o] = true
 									continue
