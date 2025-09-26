@@ -3024,23 +3024,21 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 		return fmt.Errorf("random-walk: failed to query discovered channels: %w", err)
 	}
 
-	type uniqueChannel struct {
-		source_channel string
-	}
-
-	log.Info().Str("result_data", string(res.Data)).Msg("random-walk: result data")
-	var discoveredChannels []uniqueChannel
+	var discoveredChannels [][]string
 
 	if err := json.Unmarshal(res.Data, &discoveredChannels); err != nil {
+		log.Error().Str("result_data", string(res.Data)).Msg("random-walk: result data")
 		return fmt.Errorf("random-walk: Failed to unmarshal response for discovered channels: %v", err)
 	}
 
 	if len(discoveredChannels) > 0 {
 		log.Printf("random-walk: Found %d previously discovered channels:\n", len(discoveredChannels))
-		for _, channel := range discoveredChannels {
-			err := dsm.BaseStateManager.AddDiscoveredChannel(channel.source_channel)
-			if err != nil {
-				log.Info().Err(err).Msg("random-walk: error encountered adding discovered channel")
+		for _, row := range discoveredChannels {
+			for _, channel := range row {
+				err := dsm.BaseStateManager.AddDiscoveredChannel(channel)
+				if err != nil {
+					log.Info().Err(err).Msg("random-walk: error encountered adding discovered channel")
+				}
 			}
 		}
 	} else {
