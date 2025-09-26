@@ -202,7 +202,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 		if crawlCfg.SamplingMethod == "random-walk" {
 			// pull discovered channels from database
-			sm.InitializeDiscoveredChannels()
+			err := sm.InitializeDiscoveredChannels()
+			if err != nil {
+				log.Fatal().Err(err).Msg("random-walk: failed to pull discovered channels")
+			}
 			if len(stringList) == 0 {
 				// initialize first layer for crawls without seed lists
 				sm.InitializeRandomWalkLayer()
