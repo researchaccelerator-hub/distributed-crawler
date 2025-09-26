@@ -982,8 +982,8 @@ func (dsm *DaprStateManager) SaveState() error {
 // StorePost stores a post in Dapr
 func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error {
 
+	// post data is not necessary for random-walk crawls
 	if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-		log.Info().Msg("random-walk: posts are not stored in random-walk crawls")
 		return nil
 	}
 
@@ -3112,7 +3112,6 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 	if resp, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
 		if strings.Contains(err.Error(), "invalid header field value") {
 			if resp == nil {
-				log.Info().Msg("random-walk: response is nil")
 			} else if resp.Metadata == nil {
 				log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
 			} else if val, ok := resp.Metadata["sql"]; ok {
@@ -3182,7 +3181,7 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 			pages = append(pages, Page{
 				ID:        string(page[0].(string)),
 				ParentID:  string(page[1].(string)),
-				Depth:     int(page[2].(int)),
+				Depth:     int(page[2].(float64)),
 				URL:       string(page[3].(string)),
 				Status:    "unfetched",
 				Timestamp: time.Now(),
