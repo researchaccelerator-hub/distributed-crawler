@@ -3134,10 +3134,10 @@ func (dsm *DaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
 	values := []any{
 		dsm.config.CrawlID,
 	}
-	sqlQuery := `DELETE FROM edge_records WHERE crawl_id <> $1;`
+	sqlQuery := `DELETE FROM layer_buffer WHERE crawl_id <> $1;`
 
 	if includeCurrentCrawl {
-		sqlQuery = `DELETE FROM edge_records;`
+		sqlQuery = `DELETE FROM layer_buffer;`
 		values = []any{}
 	}
 
@@ -3169,7 +3169,7 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 		return pages, fmt.Errorf("random-walk: failed to pull layer pages: %w", err)
 	}
 
-	var pageResults [][]string
+	var pageResults [][]any
 
 	if err := json.Unmarshal(res.Data, &pageResults); err != nil {
 		log.Error().Str("result_data", string(res.Data)).Msg("random-walk: result data")
@@ -3178,17 +3178,15 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 
 	if len(pageResults) > 0 {
 		log.Printf("random-walk: Found %d pages in layer buffer:\n", len(pageResults))
-		for _, row := range pageResults {
-			for _, page := range row {
-				pages = append(pages, Page{
-					ID:        string(page[0]),
-					ParentID:  string(page[1]),
-					Depth:     int(page[2]),
-					URL:       string(page[3]),
-					Status:    "unfetched",
-					Timestamp: time.Now(),
-				})
-			}
+		for _, page := range pageResults {
+			pages = append(pages, Page{
+				ID:        string(page[0].(string)),
+				ParentID:  string(page[1].(string)),
+				Depth:     int(page[2].(int)),
+				URL:       string(page[3].(string)),
+				Status:    "unfetched",
+				Timestamp: time.Now(),
+			})
 		}
 		return pages, nil
 	} else {
