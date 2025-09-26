@@ -203,6 +203,14 @@ func (m *MockDaprStateManager) GetRandomDiscoveredChannel() (string, error)     
 func (m *MockDaprStateManager) IsDiscoveredChannel(channelID string) bool       { return true }
 func (m *MockDaprStateManager) AddDiscoveredChannel(channelID string) error     { return nil }
 func (m *MockDaprStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
+func (m *MockDaprStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+	return []state.Page{}, nil
+}
+func (m *MockDaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
+func (m *MockDaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	return nil
+}
+func (m *MockDaprStateManager) AddPageToLayerBuffer(page *state.Page) error { return nil }
 
 // MockDaprStateManagerFactory creates our mock Dapr state manager
 type MockDaprStateManagerFactory struct {

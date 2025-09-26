@@ -370,6 +370,26 @@ func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+	args := m.Called()
+	return args.Get(0).([]state.Page), args.Error(1)
+}
+
+func (m *MockStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
+	args := m.Called(includeCurrentCrawl)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	args := m.Called(sqlQuery, params)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error {
+	args := m.Called(page)
+	return args.Error(0)
+}
+
 // Close closes the state manager
 func (m *MockStateManager) Close() error {
 	args := m.Called()

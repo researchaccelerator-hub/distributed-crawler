@@ -424,7 +424,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			uniqueCount, duplicateCount, layer.Depth)
 
 	// After all pages in the layer are processed, append the new layer with all discovered channels
-	if len(allDiscoveredChannels) > 0 {
+	if len(allDiscoveredChannels) > 0 || crawlCfg.SamplingMethod == "random-walk" {
 		currentDepth := layer.Depth
 		newPages := make([]state.Page, 0, len(allDiscoveredChannels))
 
@@ -434,6 +434,16 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		// Count of total and unique pages for logging
 		totalDiscovered := len(allDiscoveredChannels)
 		uniqueDiscovered := 0
+
+		if crawlCfg.SamplingMethod == "random-walk" {
+			layerBufferPages, err := sm.GetPagesFromLayerBuffer()
+			if err != nil {
+				log.Error().Err(err).Msg("random-walk: Unable to get pages from layer buffer")
+			}
+			totalDiscovered = len(layerBufferPages)
+			uniqueDiscovered = len(layerBufferPages)
+			newPages = append(newPages, layerBufferPages...)
+		}
 
 		for _, channel := range allDiscoveredChannels {
 			// Skip if this URL has already been seen in the new layer
@@ -475,6 +485,11 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			// Save state after adding new pages
 			if err := sm.SaveState(); err != nil {
 				log.Error().Err(err).Msg("Failed to save state after adding new layer")
+			}
+			if crawlCfg.SamplingMethod == "random-walk" {
+				if err := sm.WipeLayerBuffer(true); err != nil {
+					log.Error().Err(err).Msg("random-walk: Failed to wipe layer buffer after adding new layer")
+				}
 			}
 		}
 	}

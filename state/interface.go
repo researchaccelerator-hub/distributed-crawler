@@ -84,8 +84,12 @@ type StateManagementInterface interface {
 	GetRandomDiscoveredChannel() (string, error)
 	IsDiscoveredChannel(channelID string) bool
 	AddDiscoveredChannel(channelID string) error
+	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
-
+	GetPagesFromLayerBuffer() ([]Page, error)
+	WipeLayerBuffer(includeCurrentCrawl bool) error
+	ExecuteDatabaseOperation(sqlQuery string, params []any) error
+	AddPageToLayerBuffer(page *Page) error
 	// Cleanup
 	// Close performs cleanup operations when shutting down
 	Close() error

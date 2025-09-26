@@ -87,6 +87,14 @@ func (m *MockStateManager) IsDiscoveredChannel(channelID string) bool       { re
 func (m *MockStateManager) AddDiscoveredChannel(channelID string) error     { return nil }
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
 
+// random-walk database operations
+func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+	return []state.Page{}, nil
+}
+func (m *MockStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error               { return nil }
+func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
+func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error                  { return nil }
+
 func TestPanicRecovery(t *testing.T) {
 	// Create a YouTube crawler with a mock client that will panic
 	c := &YouTubeCrawler{

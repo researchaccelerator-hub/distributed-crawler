@@ -142,11 +142,27 @@ func (lsm *LocalStateManager) Initialize(seedURLs []string) error {
 }
 
 func (lsm *LocalStateManager) InitializeDiscoveredChannels() error {
-	return fmt.Errorf("InitializeDiscoveredChannels not implemented for storage providers")
+	return fmt.Errorf("InitializeDiscoveredChannels not implemented for local state manager")
 }
 
 func (lsm *LocalStateManager) InitializeRandomWalkLayer() error {
-	return fmt.Errorf("InitializeRandomWalkLayer not implemented for storage providers")
+	return fmt.Errorf("InitializeRandomWalkLayer not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
+	return []Page{}, fmt.Errorf("GetPagesFromLayerBuffer not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
+	return fmt.Errorf("WipeLayerBuffer not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	return fmt.Errorf("ExecuteDatabaseOperation not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) AddPageToLayerBuffer(page *Page) error {
+	return fmt.Errorf(" not implemented for local state manager")
 }
 
 // SaveState persists the state to the filesystem

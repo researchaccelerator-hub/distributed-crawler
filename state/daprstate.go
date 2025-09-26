@@ -267,6 +267,14 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	log.Info().Str("crawlID", dsm.config.CrawlID).Str("executionID", dsm.config.CrawlExecutionID).
 		Msg("Initializing state manager")
 
+	if dsm.config.SamplingMethod == "random-walk" {
+		err := dsm.WipeLayerBuffer(false)
+		if err != nil {
+			log.Error().Err(err).Msg("random-walk: failed to wipe layer buffer")
+		}
+
+	}
+
 	// First, check if we're resuming a specific execution ID
 	// If so, try to load the layer map for this execution ID directly
 	if dsm.config.CrawlExecutionID != "" && dsm.config.CrawlExecutionID != dsm.config.CrawlID {
@@ -333,6 +341,12 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 					log.Warn().Msg("No layer 0 pages found in loaded state, will create from seed URLs")
 				} else {
 					log.Info().Int("pageCount", len(layerZeroPages)).Msg("Loaded layer 0 pages from previous execution")
+					if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+						log.Info().Msg("random-walk: Adding seed urls for in progress crawl")
+						for _, url := range seedURLs {
+							dsm.BaseStateManager.AddDiscoveredChannel(url)
+						}
+					}
 					return nil
 				}
 			}
@@ -458,31 +472,6 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	dsm.urlCacheMutex.RLock()
 	uniqueSeedURLs := make([]string, 0)
 	for _, url := range seedURLs {
-
-		// // TODO: break this out into a function
-		// var parsedURL string
-		// log.Info().Str("first_char", string(url[0])).Str("last_char", string(url[len(url)-1])).Msg("random-walk: print first and last character before test")
-		// if string(url[0]) == `"` && string(url[len(url)-1]) == `"` {
-		// 	log.Info().Str("quoted_url", url).Msg("random-walk: unquoting url before adding to discovered urls")
-		// 	parsedURL, err = strconv.Unquote(url)
-		// 	if err != nil {
-		// 		log.Error().Err(err).Msg("random-walk: encounted error unquoting url")
-		// 		continue
-		// 	}
-		// } else {
-		// 	parsedURL = url
-		// }
-
-		// if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-		// 	log.Info().Str("url", parsedURL).Msg("random-walk: Adding seed url in Dapr Initialize")
-		// 	dsm.BaseStateManager.AddDiscoveredChannel(parsedURL)
-
-		// }
-		// if _, exists := dsm.urlCache[parsedURL]; !exists {
-		// 	uniqueSeedURLs = append(uniqueSeedURLs, parsedURL)
-		// } else {
-		// 	log.Debug().Str("url", parsedURL).Msg("Skipping seed URL already processed in previous crawl")
-		// }
 		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
 			log.Info().Str("url", url).Msg("random-walk: Adding seed url in Dapr Initialize")
 			dsm.BaseStateManager.AddDiscoveredChannel(url)
@@ -2903,8 +2892,8 @@ func (dsm *DaprStateManager) AddDiscoveredChannel(channelID string) error {
 
 func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	// Create a context with timeout to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	// defer cancel()
 
 	log.Info().Msg("random-walk: copying records before saving")
 	edgesCopy := make([]*EdgeRecord, len(edges))
@@ -2932,33 +2921,17 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			continue
 		}
 
-		// Check for empty/nil values that might cause issues
-		if record.DestinationChannel == "" {
-			log.Warn().Int("record_index", i).Msg("random-walk: destination_channel is empty")
-		}
-		if record.SourceChannel == "" {
-			log.Warn().Int("record_index", i).Msg("random-walk: source_channel is empty")
-		}
-		if dsm.config.CrawlID == "" {
-			log.Warn().Int("record_index", i).Msg("random-walk: crawl_id is empty")
-		}
-		if record.DiscoveryTime.IsZero() {
-			log.Warn().Int("record_index", i).Msg("random-walk: discovery_time is zero")
-		}
-
-		log.Info().
-			Int("record_index", i).
-			Str("destination_channel", record.DestinationChannel).
-			Str("source_channel", record.SourceChannel).
-			Bool("walkback", record.Walkback).
-			Bool("skipped", record.Skipped).
-			Time("discovery_time", record.DiscoveryTime).
-			Str("crawl_id", dsm.config.CrawlID).
-			Msg("random-walk: record data before marshaling")
+		// log.Info().
+		// 	Int("record_index", i).
+		// 	Str("destination_channel", record.DestinationChannel).
+		// 	Str("source_channel", record.SourceChannel).
+		// 	Bool("walkback", record.Walkback).
+		// 	Bool("skipped", record.Skipped).
+		// 	Time("discovery_time", record.DiscoveryTime).
+		// 	Str("crawl_id", dsm.config.CrawlID).
+		// 	Msg("random-walk: record data before marshaling")
 
 		values := []any{
-			// strconv.Quote(record.DestinationChannel),
-			// strconv.Quote(record.SourceChannel),
 			record.DestinationChannel,
 			record.SourceChannel,
 			record.Walkback,
@@ -2967,38 +2940,47 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			dsm.config.CrawlID,
 		}
 
-		jsonData, err := json.Marshal(values)
+		// jsonData, err := json.Marshal(values)
+		// if err != nil {
+		// 	return fmt.Errorf("random-walk: failed to marshal record to JSON: %w", err)
+		// }
+
+		// req := &daprc.InvokeBindingRequest{
+		// 	Name:      dsm.databaseBinding,
+		// 	Operation: "exec",
+		// 	Metadata: map[string]string{
+		// 		"sql":    sqlQuery,
+		// 		"params": string(jsonData),
+		// 	},
+		// }
+
+		// log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).
+		// 	Str("sql_query", sqlQuery).Str("params", string(jsonData)).Msg("random-walk: adding edge record")
+		// if resp, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
+		// 	if strings.Contains(err.Error(), "invalid header field value") {
+		// 		if resp == nil {
+		// 			log.Info().Msg("random-walk: response is nil")
+		// 		} else if resp.Metadata == nil {
+		// 			log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
+		// 		} else if val, ok := resp.Metadata["sql"]; ok {
+		// 			log.Info().Str("metadata.sql", val).Msg("random-walk: metadata.sql values")
+		// 		} else {
+		// 			log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
+		// 		}
+		// 		log.Info().Msg("random-walk: ignoring invalid header field value error")
+		// 	} else {
+		// 		return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
+		// 	}
+		// }
+
+		log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).Msg("random-walk: adding edge record")
+
+		err := dsm.ExecuteDatabaseOperation(sqlQuery, values)
+
 		if err != nil {
-			return fmt.Errorf("random-walk: failed to marshal record to JSON: %w", err)
+			return err
 		}
 
-		req := &daprc.InvokeBindingRequest{
-			Name:      dsm.databaseBinding,
-			Operation: "exec",
-			Metadata: map[string]string{
-				"sql":    sqlQuery,
-				"params": string(jsonData),
-			},
-		}
-
-		log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).
-			Str("sql_query", sqlQuery).Str("params", string(jsonData)).Msg("random-walk: adding edge record")
-		if resp, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
-			if strings.Contains(err.Error(), "invalid header field value") {
-				if resp == nil {
-					log.Info().Msg("random-walk: response is nil")
-				} else if resp.Metadata == nil {
-					log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
-				} else if val, ok := resp.Metadata["sql"]; ok {
-					log.Info().Str("metadata.sql", val).Msg("random-walk: metadata.sql values")
-				} else {
-					log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
-				}
-				log.Info().Msg("random-walk: ignoring invalid header field value error")
-			} else {
-				return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
-			}
-		}
 		log.Debug().Int("index", i).Msg("random-walk: finished processing record")
 	}
 
@@ -3086,4 +3068,130 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 	}
 
 	return nil
+}
+
+// TODO: generalize the process of inserting records to function that takes in query and params
+func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
+
+	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id) 
+                 VALUES ($1, $2, $3, $4, $5);`
+
+	values := []any{
+		page.ID,
+		page.ParentID,
+		page.Depth,
+		page.URL,
+		dsm.config.CrawlID,
+	}
+
+	dsm.ExecuteDatabaseOperation(sqlQuery, values)
+
+	return nil
+}
+
+func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	jsonData, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("random-walk-insert: failed to marshal params to JSON: %w", err)
+	}
+
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "exec",
+		Metadata: map[string]string{
+			"sql":    sqlQuery,
+			"params": string(jsonData),
+		},
+	}
+
+	log.Info().Str("sql_query", sqlQuery).Str("params", string(jsonData)).Msg("random-walk-insert: running insert query")
+	if resp, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
+		if strings.Contains(err.Error(), "invalid header field value") {
+			if resp == nil {
+				log.Info().Msg("random-walk: response is nil")
+			} else if resp.Metadata == nil {
+				log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
+			} else if val, ok := resp.Metadata["sql"]; ok {
+				log.Info().Str("metadata.sql", val).Msg("random-walk: metadata.sql values")
+			} else {
+				log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
+			}
+			log.Info().Msg("random-walk: ignoring invalid header field value error")
+		} else {
+			return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
+		}
+	}
+	return nil
+
+}
+
+func (dsm *DaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
+
+	values := []any{
+		dsm.config.CrawlID,
+	}
+	sqlQuery := `DELETE FROM edge_records WHERE crawl_id <> $1;`
+
+	if includeCurrentCrawl {
+		sqlQuery = `DELETE FROM edge_records;`
+		values = []any{}
+	}
+
+	err := dsm.ExecuteDatabaseOperation(sqlQuery, values)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
+	log.Info().Msg("random-walk: getting pages from layer buffer")
+	pages := make([]Page, 0)
+
+	query := "SELECT page_id, parent_id, depth, url, crawl_id FROM layer_buffer;"
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql": query,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	if err != nil {
+		return pages, fmt.Errorf("random-walk: failed to pull layer pages: %w", err)
+	}
+
+	var pageResults [][]string
+
+	if err := json.Unmarshal(res.Data, &pageResults); err != nil {
+		log.Error().Str("result_data", string(res.Data)).Msg("random-walk: result data")
+		return pages, fmt.Errorf("random-walk: Failed to unmarshal response for layer buffer: %v", err)
+	}
+
+	if len(pageResults) > 0 {
+		log.Printf("random-walk: Found %d pages in layer buffer:\n", len(pageResults))
+		for _, row := range pageResults {
+			for _, page := range row {
+				pages = append(pages, Page{
+					ID:        string(page[0]),
+					ParentID:  string(page[1]),
+					Depth:     int(page[2]),
+					URL:       string(page[3]),
+					Status:    "unfetched",
+					Timestamp: time.Now(),
+				})
+			}
+		}
+		return pages, nil
+	} else {
+		log.Info().Msg("random-walk: No discovered channels found")
+		return pages, nil
+	}
 }

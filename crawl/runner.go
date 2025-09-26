@@ -884,7 +884,12 @@ func processAllMessagesWithProcessor(
 			Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
 			Msg("random-walk: Adding edge to follow in next layer")
 		discoveredEdges = append(discoveredEdges, linkToFollow)
-		discoveredChannels = append(discoveredChannels, page)
+
+		err := sm.AddPageToLayerBuffer(page)
+		if err != nil {
+			log.Error().Err(err).Msg("random-walk: failed to load page to layer buffer")
+		}
+		// discoveredChannels = append(discoveredChannels, page)
 
 		if len(newChannels) > 0 {
 			log.Info().Int("new_channels", len(newChannels)).Msg("random-walk: New channels found that will be skipped. Adding edge records")
