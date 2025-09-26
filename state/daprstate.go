@@ -2909,8 +2909,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Str("source_channel", edges[0].SourceChannel).
 		Msg("random-walk: Adding new edges")
 
-	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) 
-                 VALUES ($1, $2, $3, $4, $5, $6);`
+	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) VALUES ($1, $2, $3, $4, $5, $6);`
 
 	for i, record := range edgesCopy {
 
@@ -2989,7 +2988,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 }
 
 func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
-	log.Info().Msg("random-walk: initializing discovered channels DELETE")
+	log.Info().Msg("random-walk: initializing discovered channels")
 	// TODO: add to config
 	dsm.databaseBinding = databaseStorageBinding
 
@@ -3073,9 +3072,8 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 
 // TODO: generalize the process of inserting records to function that takes in query and params
 func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
-
-	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id) 
-                 VALUES ($1, $2, $3, $4, $5);`
+	log.Info().Str("url", page.URL).Msg("random-walk: Adding page to layer buffer")
+	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id) VALUES ($1, $2, $3, $4, $5);`
 
 	values := []any{
 		page.ID,
@@ -3129,7 +3127,7 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 }
 
 func (dsm *DaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
-
+	log.Info().Bool("wipe_current_crawl", includeCurrentCrawl).Msg("random-walk: Wiping layer buffer")
 	values := []any{
 		dsm.config.CrawlID,
 	}
