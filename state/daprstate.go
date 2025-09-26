@@ -3005,7 +3005,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	return nil
 }
 
-func (dsm *DaprStateManager) InitializeDiscoveredChannels(seedURLs []string) error {
+func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	log.Info().Msg("random-walk: initializing discovered channels DELETE")
 	// TODO: add to config
 	dsm.databaseBinding = databaseStorageBinding
