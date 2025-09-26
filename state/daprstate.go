@@ -268,6 +268,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 		Msg("Initializing state manager")
 
 	if dsm.config.SamplingMethod == "random-walk" {
+		dsm.databaseBinding = databaseStorageBinding
 		err := dsm.WipeLayerBuffer(false)
 		if err != nil {
 			log.Error().Err(err).Msg("random-walk: failed to wipe layer buffer")
