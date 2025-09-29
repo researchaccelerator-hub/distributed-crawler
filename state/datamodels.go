@@ -91,7 +91,7 @@ func (d *DiscoveredChannels) Add(item string) error {
 		d.items[item] = true
 		d.keys = append(d.keys, item)
 		log.Info().Str("added_channel", item).Int("discovered_channels_count", len(d.keys)).
-			Msg("random-walk: Added new channel to discovered channels")
+			Msg("random-walk-channels: Added new channel to discovered channels")
 		return nil
 	}
 	return fmt.Errorf("%s already exists", item)
@@ -107,12 +107,12 @@ func (d *DiscoveredChannels) Contains(item string) bool {
 func (d *DiscoveredChannels) Random() (string, error) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
-	log.Info().Int("discovered_channels_count", len(d.keys)).Msg("random-walk: random discovered channels count before selection")
+	log.Info().Int("discovered_channels_count", len(d.keys)).Msg("random-walk-channel: random discovered channels count before selection")
 	if len(d.keys) == 0 {
-		return "", fmt.Errorf("random-walk: no discovered channels to pull from at random")
+		return "", fmt.Errorf("random-walk-channel: no discovered channels to pull from at random")
 	}
 	index := rand.Intn(len(d.keys))
-	log.Info().Int("discovered_channels_count", len(d.keys)).Int("random_index", index).Msg("random-walk: selected random number")
+	log.Info().Int("discovered_channels_count", len(d.keys)).Int("random_index", index).Msg("random-walk-channel: selected random number")
 	return d.keys[index], nil
 }
 

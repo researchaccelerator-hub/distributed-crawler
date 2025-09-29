@@ -204,7 +204,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			// pull discovered channels from database
 			err := sm.InitializeDiscoveredChannels()
 			if err != nil {
-				log.Fatal().Err(err).Msg("random-walk: failed to pull discovered channels")
+				log.Fatal().Err(err).Msg("random-walk-init: failed to pull discovered channels")
 			}
 			if len(stringList) == 0 {
 				// initialize first layer for crawls without seed lists
@@ -438,7 +438,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		if crawlCfg.SamplingMethod == "random-walk" {
 			layerBufferPages, err := sm.GetPagesFromLayerBuffer()
 			if err != nil {
-				log.Error().Err(err).Msg("random-walk: Unable to get pages from layer buffer")
+				log.Error().Err(err).Msg("random-walk-layer: Unable to get pages from layer buffer")
 			}
 			totalDiscovered = len(layerBufferPages)
 			uniqueDiscovered = len(layerBufferPages)
@@ -488,7 +488,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			}
 			if crawlCfg.SamplingMethod == "random-walk" {
 				if err := sm.WipeLayerBuffer(true); err != nil {
-					log.Error().Err(err).Msg("random-walk: Failed to wipe layer buffer after adding new layer")
+					log.Error().Err(err).Msg("random-walk-layer: Failed to wipe layer buffer after adding new layer")
 				}
 			}
 		}

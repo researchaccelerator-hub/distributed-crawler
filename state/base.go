@@ -72,10 +72,10 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 
 		// Store Seed Urls as discovered Channel
 		if bsm.config.SamplingMethod == "random-walk" {
-			log.Info().Str("url", url).Msg("random-walk: Adding seed url in Base SM Initialize")
+			log.Info().Str("url", url).Msg("random-walk-seed: Adding seed url in Base SM Initialize")
 			err := bsm.discoveredChannels.Add(url)
 			if err != nil {
-				log.Error().Str("url", url).Msg("random-walk: Unable to add seed url as discovered channel")
+				log.Error().Str("url", url).Msg("random-walk-seed: Unable to add seed url as discovered channel")
 			}
 		}
 
@@ -516,9 +516,9 @@ func (bsm *BaseStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
 	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Int("new_edge_count", len(edges)).
-		Msg("random-walk: Adding new edges in base manager")
+		Msg("random-walk-edge: Adding new edges in base manager")
 	bsm.edgeRecords = append(bsm.edgeRecords, edges...)
-	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Msg("random-walk: New edges added")
+	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Msg("random-walk-edge: New edges added")
 	return nil
 }
 

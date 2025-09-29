@@ -773,36 +773,36 @@ func processAllMessagesWithProcessor(
 						} else {
 							// check if channel already found as new, old, or invalid and skip
 							if _, ok := invalidChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("random-walk: Channel already identified as invalid. Skipping")
+								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already identified as invalid. Skipping")
 								continue
 							} else if _, ok := newChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("random-walk: Channel already found as part of new channels. Skipping")
+								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already found as part of new channels. Skipping")
 								continue
 							} else if _, ok := oldChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("random-walk: Channel already found as part of old channels. Skipping")
+								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already found as part of old channels. Skipping")
 								continue
 							}
 							// determine if a previously discovered channel and act accordingly
 							if sm.IsDiscoveredChannel(o) {
 								oldChannels[o] = true
 							} else {
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk: Checking if valid public channel")
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-new-channel: Checking if valid public channel")
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
 								if err != nil {
-									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk: Failed to find channel. Skipping")
+									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-new-channel: Failed to find channel. Skipping")
 									invalidChannels[o] = true
 									continue
 								}
 								chatType := string(chat.Type.ChatTypeType())
 
 								if chatType != "chatTypeSupergroup" {
-									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk: Not a valid chat type. Skipping")
+									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk-new-channel: Not a valid chat type. Skipping")
 									invalidChannels[o] = true
 									continue
 								}
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk: Adding channel to discovered channels")
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-new-channel: Adding channel to discovered channels")
 								sm.AddDiscoveredChannel(o)
 								newChannels[o] = true
 							}
@@ -848,7 +848,7 @@ func processAllMessagesWithProcessor(
 		}
 
 		log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
-			Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("random-walk: Walkback decision data")
+			Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("random-walk-walkback: Walkback decision data")
 		if walkback || cfg.WalkbackRate >= rndNum {
 			linkToFollow.Walkback = true
 			// get walkback channel, skipping new channels discovered on this page
@@ -856,14 +856,14 @@ func processAllMessagesWithProcessor(
 			for {
 				var randomErr error
 				walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
-				log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk: Random Walkback channel")
+				log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk-walkback: Random Walkback channel")
 				if randomErr != nil {
-					return nil, fmt.Errorf("random-walk: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
+					return nil, fmt.Errorf("random-walk-walkback: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
 				}
 				if _, ok := newChannels[walkbackURL]; ok {
-					log.Info().Str("channel", walkbackURL).Msg("random-walk: Invalid walkback. Part of new channels. Pulling another channel")
+					log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Part of new channels. Pulling another channel")
 				} else if walkbackURL == owner.URL {
-					log.Info().Str("channel", walkbackURL).Msg("random-walk: Invalid walkback. Same as source channel. Pulling another channel")
+					log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Same as source channel. Pulling another channel")
 				} else {
 					break
 				}
@@ -882,17 +882,17 @@ func processAllMessagesWithProcessor(
 		linkToFollow.DestinationChannel = page.URL
 		log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
 			Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
-			Msg("random-walk: Adding edge to follow in next layer")
+			Msg("random-walk-edge: Adding edge to follow in next layer")
 		discoveredEdges = append(discoveredEdges, linkToFollow)
 
 		err := sm.AddPageToLayerBuffer(page)
 		if err != nil {
-			log.Error().Err(err).Msg("random-walk: failed to load page to layer buffer")
+			log.Error().Err(err).Msg("random-walk-layer: failed to load page to layer buffer")
 		}
 		// discoveredChannels = append(discoveredChannels, page)
 
 		if len(newChannels) > 0 {
-			log.Info().Int("new_channels", len(newChannels)).Msg("random-walk: New channels found that will be skipped. Adding edge records")
+			log.Info().Int("new_channels", len(newChannels)).Msg("random-walk-edge: New channels found that will be skipped. Adding edge records")
 			for channel := range newChannels {
 				skippedLink := &state.EdgeRecord{
 					DestinationChannel: channel,
@@ -903,14 +903,14 @@ func processAllMessagesWithProcessor(
 				}
 				log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
 					Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).
-					Msg("random-walk: Adding skipped edge")
+					Msg("random-walk-edge: Adding skipped edge")
 				discoveredEdges = append(discoveredEdges, skippedLink)
 			}
 		}
-		log.Info().Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("random-walk: Saving discovered edges")
+		log.Info().Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("random-walk-edge: Saving discovered edges")
 		err = sm.SaveEdgeRecords(discoveredEdges)
 		if err != nil {
-			log.Err(err).Str("source_channel", owner.URL).Msg("random-walk: Error saving discovered edges")
+			log.Err(err).Str("source_channel", owner.URL).Msg("random-walk-edge: Error saving discovered edges")
 			return nil, err
 		}
 	}
