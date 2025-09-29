@@ -213,8 +213,8 @@ Examples:
 		// Validate sampling method combinations (skip URL validation for dapr-job mode)
 		if crawlerCfg.SamplingMethod == "random-walk" {
 			// xor operation to confirm only one of the two options is provided
-			if (len(urlList) > 0) != (crawlerCfg.SeedSize > 0) {
-			} else if ((len(urlList) > 0) && (crawlerCfg.SeedSize > 0)) || ((len(urlList) == 0) && (crawlerCfg.SeedSize == 0)) {
+			if (len(urlList) > 0 || urlFileURL != "") != (crawlerCfg.SeedSize > 0) {
+			} else if ((len(urlList) > 0 || urlFileURL != "") && (crawlerCfg.SeedSize > 0)) || ((len(urlList) == 0 && urlFileURL == "") && (crawlerCfg.SeedSize == 0)) {
 				return fmt.Errorf("Must provide either seed urls or seed size in random-walk crawl")
 			} else if len(crawlerCfg.CrawlID) > 32 {
 				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
