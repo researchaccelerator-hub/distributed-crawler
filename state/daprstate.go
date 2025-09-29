@@ -3111,13 +3111,13 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 		if strings.Contains(err.Error(), "invalid header field value") {
 			if resp == nil {
 			} else if resp.Metadata == nil {
-				log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
+				log.Info().Msg("random-walk: response.metadata does not exist")
 			} else if val, ok := resp.Metadata["sql"]; ok {
 				log.Info().Str("metadata.sql", val).Msg("random-walk: metadata.sql values")
 			} else {
 				log.Info().Msg("random-walk: response.metadata[\"sql\"] does not exist")
 			}
-			log.Info().Msg("random-walk: ignoring invalid header field value error")
+			log.Info().Err(err).Msg("random-walk: ignoring invalid header field value error")
 		} else {
 			return fmt.Errorf("random-walk: failed to invoke Dapr binding: %w", err)
 		}
