@@ -786,7 +786,9 @@ func processAllMessagesWithProcessor(
 							if sm.IsDiscoveredChannel(o) {
 								oldChannels[o] = true
 							} else {
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-new-channel: Checking if valid public channel")
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-new-channel: Sleeping for 1 second then checking if valid public channel.")
+								// adding in an extra 50 milliseconds to make absolutely sure it doesn't reach 60/second
+								time.Sleep(1050 * time.Millisecond)
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
