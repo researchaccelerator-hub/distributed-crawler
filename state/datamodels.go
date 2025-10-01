@@ -91,7 +91,7 @@ func (d *DiscoveredChannels) Add(item string) error {
 		d.items[item] = true
 		d.keys = append(d.keys, item)
 		log.Info().Str("added_channel", item).Int("discovered_channels_count", len(d.keys)).
-			Msg("random-walk-channels: Added new channel to discovered channels")
+			Msg("random-walk-channel: Added new channel to discovered channels")
 		return nil
 	}
 	return fmt.Errorf("%s already exists", item)
