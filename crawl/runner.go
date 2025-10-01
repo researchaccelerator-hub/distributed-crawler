@@ -786,25 +786,25 @@ func processAllMessagesWithProcessor(
 							if sm.IsDiscoveredChannel(o) {
 								oldChannels[o] = true
 							} else {
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-new-channel: Sleeping for 1 second then checking if valid public channel.")
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Sleeping for 1 second then checking if valid public channel.")
 								// adding in an extra 50 milliseconds to make absolutely sure it doesn't reach 60/second
 								time.Sleep(1050 * time.Millisecond)
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
 								if err != nil {
-									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-new-channel: Failed to find channel. Skipping")
+									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
 									invalidChannels[o] = true
 									continue
 								}
 								chatType := string(chat.Type.ChatTypeType())
 
 								if chatType != "chatTypeSupergroup" {
-									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk-new-channel: Not a valid chat type. Skipping")
+									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk-channel: Not a valid chat type. Skipping")
 									invalidChannels[o] = true
 									continue
 								}
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-new-channel: Adding channel to discovered channels")
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Adding channel to discovered channels")
 								sm.AddDiscoveredChannel(o)
 								newChannels[o] = true
 							}
