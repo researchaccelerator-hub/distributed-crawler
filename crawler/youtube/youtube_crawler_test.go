@@ -89,10 +89,14 @@ func (m *MockYouTubeStateManager) StoreChannelData(channelID string, channelData
 
 // random-walk database
 func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
-func (m *MockYouTubeStateManager) GetPagesFromLayerBuffer() ([]state.Page, error)
-func (m *MockYouTubeStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error
-func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error
-func (m *MockYouTubeStateManager) AddPageToLayerBuffer(page *state.Page) error
+func (m *MockYouTubeStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+	return []state.Page{}, nil
+}
+func (m *MockYouTubeStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
+func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	return nil
+}
+func (m *MockYouTubeStateManager) AddPageToLayerBuffer(page *state.Page) error { return nil }
 
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {

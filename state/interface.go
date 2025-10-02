@@ -16,13 +16,6 @@ type StateManagementInterface interface {
 	// It checks for existing state or initializes a new one with the given URLs
 	Initialize(seedURLs []string) error
 
-	// Initializes discovered channels from database
-	// Only implemented for dapr currently
-	InitializeDiscoveredChannels() error
-
-	// Initializes initial layer from randomly chosen discovered channels
-	InitializeRandomWalkLayer() error
-
 	// Core page and message operations
 	// GetPage retrieves a page by its ID from the state store
 	GetPage(id string) (Page, error)
@@ -81,9 +74,16 @@ type StateManagementInterface interface {
 	MarkMediaAsProcessed(mediaID string) error
 
 	// Used for random-walk sampling
+
+	// Initializes discovered channels from database
+	// Only implemented for dapr currently
+	InitializeDiscoveredChannels() error
+	// Initializes initial layer from randomly chosen discovered channels
+	InitializeRandomWalkLayer() error
 	GetRandomDiscoveredChannel() (string, error)
 	IsDiscoveredChannel(channelID string) bool
 	AddDiscoveredChannel(channelID string) error
+	StoreChannelData(channelID string, channelData *model.ChannelData) error
 	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
 	GetPagesFromLayerBuffer() ([]Page, error)
