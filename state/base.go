@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -510,6 +511,10 @@ func (bsm *BaseStateManager) IsDiscoveredChannel(channelID string) bool {
 
 func (bsm *BaseStateManager) AddDiscoveredChannel(channelID string) error {
 	return bsm.discoveredChannels.Add(channelID)
+}
+
+func (bsm *BaseStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	return nil
 }
 
 func (bsm *BaseStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {

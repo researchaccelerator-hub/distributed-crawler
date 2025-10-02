@@ -52,9 +52,7 @@ func (m *MockPanicClient) Disconnect(ctx context.Context) error {
 // MockStateManager is a simple mock state manager
 type MockStateManager struct{}
 
-func (m *MockStateManager) Initialize(seedURLs []string) error  { return nil }
-func (m *MockStateManager) InitializeDiscoveredChannels() error { return nil }
-func (m *MockStateManager) InitializeRandomWalkLayer() error    { return nil }
+func (m *MockStateManager) Initialize(seedURLs []string) error { return nil }
 
 func (m *MockStateManager) GetPage(id string) (state.Page, error) { return state.Page{}, nil }
 func (m *MockStateManager) UpdatePage(page state.Page) error      { return nil }
@@ -82,10 +80,16 @@ func (m *MockStateManager) MarkMediaAsProcessed(mediaID string) error      { ret
 func (m *MockStateManager) Close() error                                   { return nil }
 
 // Used for random-walk sampling
+
+func (m *MockStateManager) InitializeDiscoveredChannels() error             { return nil }
+func (m *MockStateManager) InitializeRandomWalkLayer() error                { return nil }
 func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }
 func (m *MockStateManager) IsDiscoveredChannel(channelID string) bool       { return true }
 func (m *MockStateManager) AddDiscoveredChannel(channelID string) error     { return nil }
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
+func (m *MockStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	return nil
+}
 
 // random-walk database operations
 func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {

@@ -2891,6 +2891,51 @@ func (dsm *DaprStateManager) AddDiscoveredChannel(channelID string) error {
 	return dsm.BaseStateManager.AddDiscoveredChannel(channelID)
 }
 
+func (dsm *DaprStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	channelJSON, err := json.Marshal(channelData)
+	if err != nil {
+		return fmt.Errorf("random-walk-channel-info: failed to marshall channel data: %w", err)
+	}
+
+	channelJSON = append(channelJSON, '\n')
+
+	storagePath, err := dsm.generateCrawlExecutableStoragePath(
+		channelID,
+		"channel_data.jsonl",
+	)
+
+	if err != nil {
+		return err
+	}
+
+	encodedData := base64.StdEncoding.EncodeToString(channelJSON)
+	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
+	if err != nil {
+		return err
+	}
+
+	// Prepare metadata
+	metadata := map[string]string{
+		key:         storagePath,
+		"operation": "append",
+	}
+
+	req := daprc.InvokeBindingRequest{
+		Name:      dsm.storageBinding,
+		Operation: "create",
+		Data:      []byte(encodedData),
+		Metadata:  metadata,
+	}
+	log.Info().Str("channel", channelID).Msgf("random-walk-channel-info: Writing channel info to: %s", storagePath)
+	_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
+	if err != nil {
+		return fmt.Errorf("random-walk-channel-info: failed to store post via Dapr: %w", err)
+	}
+
+	log.Debug().Str("channel", channelID).Msg("Post stored")
+	return nil
+}
+
 func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	// Create a context with timeout to prevent hanging
 	// ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

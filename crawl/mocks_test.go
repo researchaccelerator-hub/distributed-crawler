@@ -239,16 +239,6 @@ func (m *MockStateManager) Initialize(seedURLs []string) error {
 	return args.Error(0)
 }
 
-func (m *MockStateManager) InitializeDiscoveredChannels() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-func (m *MockStateManager) InitializeRandomWalkLayer() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
 // GetPage retrieves a page by ID
 func (m *MockStateManager) GetPage(id string) (state.Page, error) {
 	args := m.Called(id)
@@ -350,6 +340,16 @@ func (m *MockStateManager) MarkMediaAsProcessed(mediaID string) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) InitializeDiscoveredChannels() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockStateManager) InitializeRandomWalkLayer() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error) {
 	args := m.Called()
 	return args.String(0), args.Error(1)
@@ -365,6 +365,12 @@ func (m *MockStateManager) AddDiscoveredChannel(channelID string) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	args := m.Called(channelID, channelData)
+	return args.Error(0)
+}
+
+// random-walk database functions
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
 	args := m.Called(edges)
 	return args.Error(0)

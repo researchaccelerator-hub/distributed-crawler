@@ -206,6 +206,10 @@ func (m *MockDaprStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error 
 func (m *MockDaprStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
 	return []state.Page{}, nil
 }
+func (m *MockDaprStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	return nil
+}
+
 func (m *MockDaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
 func (m *MockDaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil

@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
@@ -252,6 +254,22 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	if err != nil {
 		return nil, err
 	}
+	// store channel data, as posts are not saved in random-walk
+	if cfg.SamplingMethod == "random-walk" {
+		channelData := &model.ChannelData{
+			ChannelName: channelInfo.chat.Title,
+			ChannelURL:  fmt.Sprintf("https://t.me/%s", p.URL),
+			ChannelEngagementData: model.EngagementData{
+				FollowerCount: int(channelInfo.memberCount),
+			},
+		}
+
+		err := sm.StoreChannelData(p.URL, channelData)
+		if err != nil {
+			log.Error().Err(err).Msg("random-walk-channel-info: failed to store channel data")
+		}
+	}
+
 	active, err := isChannelActiveWithinPeriod(tdlibClient, channelInfo.chatDetails.Id, cfg.PostRecency)
 	if err != nil {
 		return nil, err
