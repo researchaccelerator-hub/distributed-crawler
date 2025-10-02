@@ -223,7 +223,7 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 		// Ensure we return the pooled connection when done
 		defer ReleaseConnectionToPool(connID)
 	}
-
+	log.Info().Str("connection_id", connID).Str("channel", p.URL).Msg("random-walk-connection-pool: Started connection")
 	// Continue with the regular channel processing
 	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }
@@ -786,9 +786,8 @@ func processAllMessagesWithProcessor(
 							if sm.IsDiscoveredChannel(o) {
 								oldChannels[o] = true
 							} else {
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Sleeping for 1 second then checking if valid public channel.")
-								// adding in an extra 50 milliseconds to make absolutely sure it doesn't reach 60/second
-								time.Sleep(1050 * time.Millisecond)
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Sleeping for 2 seconds then checking if valid public channel.")
+								time.Sleep(2000 * time.Millisecond)
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
