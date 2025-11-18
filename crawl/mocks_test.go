@@ -153,7 +153,7 @@ func (m *MockTDLibClient) GetRepliedMessage(req *client.GetRepliedMessageRequest
 }
 
 type GetChatMessagesRequest struct {
-	ChatId  int64
+	ChatId     int64
 	MessageIds []int64
 }
 
@@ -337,6 +337,62 @@ func (m *MockStateManager) HasProcessedMedia(mediaID string) (bool, error) {
 // MarkMediaAsProcessed marks media as processed
 func (m *MockStateManager) MarkMediaAsProcessed(mediaID string) error {
 	args := m.Called(mediaID)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) InitializeDiscoveredChannels() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockStateManager) InitializeRandomWalkLayer() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error) {
+	args := m.Called()
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockStateManager) IsDiscoveredChannel(channelID string) bool {
+	args := m.Called(channelID)
+	return args.Bool(0)
+}
+
+func (m *MockStateManager) AddDiscoveredChannel(channelID string) error {
+	args := m.Called(channelID)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	args := m.Called(channelID, channelData)
+	return args.Error(0)
+}
+
+// random-walk database functions
+func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
+	args := m.Called(edges)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+	args := m.Called()
+	return args.Get(0).([]state.Page), args.Error(1)
+}
+
+func (m *MockStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
+	args := m.Called(includeCurrentCrawl)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	args := m.Called(sqlQuery, params)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error {
+	args := m.Called(page)
 	return args.Error(0)
 }
 

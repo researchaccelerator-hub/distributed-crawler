@@ -5,10 +5,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"github.com/researchaccelerator-hub/telegram-scraper/common"
-	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
-	"github.com/rs/zerolog/log"
-	"github.com/zelenin/go-tdlib/client"
 	"hash/fnv"
 	"io"
 	"net/http"
@@ -17,6 +13,11 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
+	"github.com/rs/zerolog/log"
+	"github.com/zelenin/go-tdlib/client"
 )
 
 // TelegramService defines an interface for interacting with the Telegram client.

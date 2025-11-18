@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -49,6 +51,30 @@ func main() {
 	// The actual level will be configured in PersistentPreRunE
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
+	// TODO: Remove after identifying memory leak
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	log.Info().Msg("Starting server on :6060")
+	log.Info().Msg("Profiling endpoints are available at http://localhost:6060/debug/pprof/")
+
+	server := &http.Server{
+		Addr:    ":6060",
+		Handler: mux,
+	}
+
+	// Start the HTTP server.
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			log.Error().Msgf("Could not start server: %s\n", err)
+		}
+	}()
 
 	// Initialize and execute the root command
 	if err := rootCmd.Execute(); err != nil {
@@ -183,8 +209,17 @@ Examples:
 			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
 		}
 
+		// TODO: update to just pass the whole crawl config to validate sampling method
 		// Validate sampling method combinations (skip URL validation for dapr-job mode)
-		if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
+		if crawlerCfg.SamplingMethod == "random-walk" {
+			// xor operation to confirm only one of the two options is provided
+			if (len(urlList) > 0 || urlFileURL != "") != (crawlerCfg.SeedSize > 0) {
+			} else if ((len(urlList) > 0 || urlFileURL != "") && (crawlerCfg.SeedSize > 0)) || ((len(urlList) == 0 && urlFileURL == "") && (crawlerCfg.SeedSize == 0)) {
+				return fmt.Errorf("Must provide either seed urls or seed size in random-walk crawl")
+			} else if len(crawlerCfg.CrawlID) > 32 {
+				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
+			}
+		} else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
 			return err
 		}
 
@@ -635,7 +670,7 @@ func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
 func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string, mode string) error {
 	// Valid sampling methods per platform
 	validMethods := map[string][]string{
-		"telegram": {"channel", "snowball"},
+		"telegram": {"channel", "snowball", "random-walk"},
 		"youtube":  {"channel", "random", "snowball"},
 	}
 
@@ -660,13 +695,13 @@ func validateSamplingMethod(platform, samplingMethod string, urlList []string, u
 	}
 
 	// For random sampling, no URLs/channels are required
-	if samplingMethod == "random" {
+	if samplingMethod == "random" || samplingMethod == "random-walk" {
 		return nil
 	}
 
 	// For channel and snowball sampling, validate that URLs are provided
 	// Skip URL validation for dapr-job mode since jobs provide URLs through job data
-	if (samplingMethod == "channel" || samplingMethod == "snowball") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
+	if (samplingMethod == "channel" || samplingMethod == "snowball" || samplingMethod == "random-walk") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
 		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
 	}
 
@@ -703,7 +738,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
-	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, snowball")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, random-walk, snowball")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.SeedSize, "seed-size", 0, "Number of discovered channels to randomly select as seed channels")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.WalkbackRate, "walkback-rate", 15, "The rate at which to perform walkbacks when using random-walk sampling")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 
 	// New distributed mode flags
@@ -744,6 +781,8 @@ func init() {
 	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
 	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
 	viper.BindPFlag("crawler.sampling", rootCmd.PersistentFlags().Lookup("sampling"))
+	viper.BindPFlag("crawler.seedsize", rootCmd.PersistentFlags().Lookup("seed-size"))
+	viper.BindPFlag("crawler.walkback_rate", rootCmd.PersistentFlags().Lookup("walkback-rate"))
 	viper.BindPFlag("crawler.min_channel_videos", rootCmd.PersistentFlags().Lookup("min-channel-videos"))
 	viper.BindPFlag("distributed.mode", rootCmd.PersistentFlags().Lookup("mode"))
 	viper.BindPFlag("distributed.worker_id", rootCmd.PersistentFlags().Lookup("worker-id"))

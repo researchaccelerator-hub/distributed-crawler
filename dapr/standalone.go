@@ -195,10 +195,23 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 		// Get the existing layers or seed a new crawl
 		err = sm.Initialize(stringList)
+
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to set up seed URLs")
 			return
 		}
+		if crawlCfg.SamplingMethod == "random-walk" {
+			// pull discovered channels from database
+			err := sm.InitializeDiscoveredChannels()
+			if err != nil {
+				log.Fatal().Err(err).Msg("random-walk-init: failed to pull discovered channels")
+			}
+			if len(stringList) == 0 {
+				// initialize first layer for crawls without seed lists
+				sm.InitializeRandomWalkLayer()
+			}
+		}
+
 		ProcessLayersIteratively(sm, crawlCfg, isResumingSameCrawlExecution)
 	}
 
@@ -411,7 +424,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			uniqueCount, duplicateCount, layer.Depth)
 
 	// After all pages in the layer are processed, append the new layer with all discovered channels
-	if len(allDiscoveredChannels) > 0 {
+	if len(allDiscoveredChannels) > 0 || crawlCfg.SamplingMethod == "random-walk" {
 		currentDepth := layer.Depth
 		newPages := make([]state.Page, 0, len(allDiscoveredChannels))
 
@@ -421,6 +434,16 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		// Count of total and unique pages for logging
 		totalDiscovered := len(allDiscoveredChannels)
 		uniqueDiscovered := 0
+
+		if crawlCfg.SamplingMethod == "random-walk" {
+			layerBufferPages, err := sm.GetPagesFromLayerBuffer()
+			if err != nil {
+				log.Error().Err(err).Msg("random-walk-layer: Unable to get pages from layer buffer")
+			}
+			totalDiscovered = len(layerBufferPages)
+			uniqueDiscovered = len(layerBufferPages)
+			newPages = append(newPages, layerBufferPages...)
+		}
 
 		for _, channel := range allDiscoveredChannels {
 			// Skip if this URL has already been seen in the new layer
@@ -463,6 +486,11 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			if err := sm.SaveState(); err != nil {
 				log.Error().Err(err).Msg("Failed to save state after adding new layer")
 			}
+			if crawlCfg.SamplingMethod == "random-walk" {
+				if err := sm.WipeLayerBuffer(true); err != nil {
+					log.Error().Err(err).Msg("random-walk-layer: Failed to wipe layer buffer after adding new layer")
+				}
+			}
 		}
 	}
 }
@@ -472,9 +500,11 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 	if crawlexecid == "" {
 		// Create a temporary state manager to check for incomplete crawls
 		cfg = state.Config{
-			StorageRoot: crawlCfg.StorageRoot,
-			CrawlID:     crawlCfg.CrawlID,
-			Platform:    crawlCfg.Platform, // Pass the platform information
+			StorageRoot:    crawlCfg.StorageRoot,
+			CrawlID:        crawlCfg.CrawlID,
+			Platform:       crawlCfg.Platform, // Pass the platform information
+			SamplingMethod: crawlCfg.SamplingMethod,
+			SeedSize:       crawlCfg.SeedSize,
 		}
 	} else {
 		cfg = state.Config{
@@ -482,7 +512,8 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CrawlID:          crawlCfg.CrawlID,
 			CrawlExecutionID: crawlexecid,
 			Platform:         crawlCfg.Platform, // Pass the platform information
-
+			SamplingMethod:   crawlCfg.SamplingMethod,
+			SeedSize:         crawlCfg.SeedSize,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
 				MaxPages: crawlCfg.MaxPages,

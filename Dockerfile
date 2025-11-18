@@ -1,6 +1,8 @@
+#TODO: REVERT CHANGES BEFORE MERGE
+
 FROM acrnetcus.azurecr.io/tdlib:latest AS builder
 
-RUN apk add --no-cache g++ make cmake git linux-headers binutils go
+RUN apk add --no-cache g++ make cmake git linux-headers binutils go graphviz valgrind
 
 RUN ln -s /usr/include/asm-generic /usr/include/asm
 
@@ -19,14 +21,14 @@ COPY . .
 # Build the application
 RUN CGO_ENABLED=1 go build -o main .
 
-# Stage 2: Minimal runtime image
-FROM acrnetcus.azurecr.io/tdlib:latest
+# # Stage 2: Minimal runtime image
+# FROM acrnetcus.azurecr.io/tdlib:latest
 
-# Set the working directory
-WORKDIR /app
+# # Set the working directory
+# WORKDIR /app
 
-# Copy the binary from the builder stage
-COPY --from=builder /app/main .
+# # Copy the binary from the builder stage
+# COPY --from=builder /app/main .
 
 # Fix issue creating subdirectories on readonlyrootfs
 #RUN umask 002

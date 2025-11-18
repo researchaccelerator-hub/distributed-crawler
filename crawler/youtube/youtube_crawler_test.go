@@ -77,6 +77,27 @@ func (m *MockYouTubeStateManager) HasProcessedMedia(mediaID string) (bool, error
 func (m *MockYouTubeStateManager) MarkMediaAsProcessed(mediaID string) error      { return nil }
 func (m *MockYouTubeStateManager) Close() error                                   { return nil }
 
+// Used for random-walk sampling
+func (m *MockYouTubeStateManager) InitializeDiscoveredChannels() error         { return nil }
+func (m *MockYouTubeStateManager) InitializeRandomWalkLayer() error            { return nil }
+func (m *MockYouTubeStateManager) GetRandomDiscoveredChannel() (string, error) { return "", nil }
+func (m *MockYouTubeStateManager) IsDiscoveredChannel(channelID string) bool   { return true }
+func (m *MockYouTubeStateManager) AddDiscoveredChannel(channelID string) error { return nil }
+func (m *MockYouTubeStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	return nil
+}
+
+// random-walk database
+func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
+func (m *MockYouTubeStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+	return []state.Page{}, nil
+}
+func (m *MockYouTubeStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
+func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	return nil
+}
+func (m *MockYouTubeStateManager) AddPageToLayerBuffer(page *state.Page) error { return nil }
+
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {
 		name              string

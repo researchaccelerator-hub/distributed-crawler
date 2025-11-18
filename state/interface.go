@@ -73,6 +73,23 @@ type StateManagementInterface interface {
 	// MarkMediaAsProcessed marks a media item as processed in the cache
 	MarkMediaAsProcessed(mediaID string) error
 
+	// Used for random-walk sampling
+
+	// Initializes discovered channels from database
+	// Only implemented for dapr currently
+	InitializeDiscoveredChannels() error
+	// Initializes initial layer from randomly chosen discovered channels
+	InitializeRandomWalkLayer() error
+	GetRandomDiscoveredChannel() (string, error)
+	IsDiscoveredChannel(channelID string) bool
+	AddDiscoveredChannel(channelID string) error
+	StoreChannelData(channelID string, channelData *model.ChannelData) error
+	// random-walk database
+	SaveEdgeRecords(edges []*EdgeRecord) error
+	GetPagesFromLayerBuffer() ([]Page, error)
+	WipeLayerBuffer(includeCurrentCrawl bool) error
+	ExecuteDatabaseOperation(sqlQuery string, params []any) error
+	AddPageToLayerBuffer(page *Page) error
 	// Cleanup
 	// Close performs cleanup operations when shutting down
 	Close() error
@@ -115,11 +132,19 @@ type Config struct {
 	// CrawlExecutionID identifies a specific execution instance
 	// This allows for multiple executions of the same logical crawl
 	CrawlExecutionID string
-	
+
 	// Platform identifies which platform we're crawling
 	// This affects storage binding selection
 	// Values can be "telegram", "youtube", etc.
 	Platform string
+
+	// SamplingMethod identifies which sampling method is being used
+	// This affects certain behavior involving duplicate pages and random-walk related structs
+	// Values can be "channel", "random", "snowball", "random-walk"
+	SamplingMethod string
+
+	// SeedSize indentifies the number of discovered channels to pull at random
+	SeedSize int
 
 	// Specific configuration options for different backends
 	// Only one of these should typically be set, based on the
@@ -154,6 +179,10 @@ type DaprConfig struct {
 	// ComponentName is the name of the DAPR binding component for file storage
 	// This refers to a configured binding component in the DAPR runtime
 	ComponentName string
+
+	// DatabaseComponentName is the name of the Dapr binding component for database storage
+	// This is used exclusively in random-walk sampling
+	DatabaseComponentName string
 }
 
 // LocalConfig contains configuration for storing crawler state and
