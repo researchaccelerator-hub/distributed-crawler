@@ -9,9 +9,17 @@ import (
 	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	innertubego "github.com/nezbut/innertube-go"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 	"github.com/rs/zerolog/log"
+)
+
+// Cache size limits to prevent unbounded memory growth
+const (
+	defaultChannelCacheSize  = 1000  // ~1MB typical
+	defaultPlaylistCacheSize = 1000  // ~100KB typical
+	defaultVideoCacheSize    = 10000 // ~10MB typical
 )
 
 // YouTubeInnerTubeClient implements the YouTubeClient interface using the InnerTube API
@@ -22,11 +30,10 @@ type YouTubeInnerTubeClient struct {
 	mu        sync.RWMutex // Protects client and connected state
 	connected bool
 
-	// Caching system similar to YouTubeDataClient
-	channelCache         map[string]*youtubemodel.YouTubeChannel
-	uploadsPlaylistCache map[string]string
-	videoStatsCache      map[string]*youtubemodel.YouTubeVideo
-	cacheMutex           sync.RWMutex
+	// LRU caching system with size limits
+	channelCache         *lru.Cache[string, *youtubemodel.YouTubeChannel]
+	uploadsPlaylistCache *lru.Cache[string, string]
+	videoStatsCache      *lru.Cache[string, *youtubemodel.YouTubeVideo]
 
 	// Configuration
 	clientType    string // "WEB", "ANDROID", "IOS", etc.
@@ -62,12 +69,28 @@ func NewYouTubeInnerTubeClient(config *InnerTubeConfig) (*YouTubeInnerTubeClient
 		Str("client_version", config.ClientVersion).
 		Msg("Creating YouTube InnerTube client")
 
+	// Create LRU caches with size limits
+	channelCache, err := lru.New[string, *youtubemodel.YouTubeChannel](defaultChannelCacheSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create channel cache: %w", err)
+	}
+
+	uploadsPlaylistCache, err := lru.New[string, string](defaultPlaylistCacheSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create uploads playlist cache: %w", err)
+	}
+
+	videoStatsCache, err := lru.New[string, *youtubemodel.YouTubeVideo](defaultVideoCacheSize)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create video stats cache: %w", err)
+	}
+
 	return &YouTubeInnerTubeClient{
 		clientType:           config.ClientType,
 		clientVersion:        config.ClientVersion,
-		channelCache:         make(map[string]*youtubemodel.YouTubeChannel),
-		uploadsPlaylistCache: make(map[string]string),
-		videoStatsCache:      make(map[string]*youtubemodel.YouTubeVideo),
+		channelCache:         channelCache,
+		uploadsPlaylistCache: uploadsPlaylistCache,
+		videoStatsCache:      videoStatsCache,
 	}, nil
 }
 
@@ -148,12 +171,8 @@ func (c *YouTubeInnerTubeClient) GetChannelInfo(ctx context.Context, channelID s
 		return nil, fmt.Errorf("invalid channel ID: %w", err)
 	}
 
-	// Check cache first
-	c.cacheMutex.RLock()
-	cachedChannel, exists := c.channelCache[channelID]
-	c.cacheMutex.RUnlock()
-
-	if exists {
+	// Check cache first (LRU cache is thread-safe)
+	if cachedChannel, exists := c.channelCache.Get(channelID); exists {
 		log.Debug().
 			Str("channel_id", channelID).
 			Str("title", cachedChannel.Title).
@@ -183,19 +202,17 @@ func (c *YouTubeInnerTubeClient) GetChannelInfo(ctx context.Context, channelID s
 		return nil, fmt.Errorf("failed to parse channel data: %w", err)
 	}
 
-	// Cache the result
-	c.cacheMutex.Lock()
-	c.channelCache[channelID] = channel
+	// Cache the result (LRU cache is thread-safe)
+	c.channelCache.Add(channelID, channel)
 
 	// Cache under both input ID and actual ID if different
 	if channel.ID != channelID {
-		c.channelCache[channel.ID] = channel
+		c.channelCache.Add(channel.ID, channel)
 		log.Debug().
 			Str("input_channel_id", channelID).
 			Str("actual_channel_id", channel.ID).
 			Msg("Cached channel under both IDs")
 	}
-	c.cacheMutex.Unlock()
 
 	log.Info().
 		Str("channel_id", channel.ID).
@@ -776,17 +793,12 @@ func (c *YouTubeInnerTubeClient) GetSnowballVideos(ctx context.Context, seedChan
 
 // getCachedVideoStats checks if video statistics are already cached
 func (c *YouTubeInnerTubeClient) getCachedVideoStats(videoID string) (*youtubemodel.YouTubeVideo, bool) {
-	c.cacheMutex.RLock()
-	defer c.cacheMutex.RUnlock()
-	video, exists := c.videoStatsCache[videoID]
-	return video, exists
+	return c.videoStatsCache.Get(videoID)
 }
 
 // cacheVideoStats stores video statistics in cache
 func (c *YouTubeInnerTubeClient) cacheVideoStats(video *youtubemodel.YouTubeVideo) {
-	c.cacheMutex.Lock()
-	defer c.cacheMutex.Unlock()
-	c.videoStatsCache[video.ID] = video
+	c.videoStatsCache.Add(video.ID, video)
 }
 
 // Helper functions for parsing InnerTube responses
