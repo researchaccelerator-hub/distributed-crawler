@@ -18,6 +18,8 @@ const (
 	PlatformTelegram PlatformType = "telegram"
 	// PlatformYouTube is for YouTube crawling
 	PlatformYouTube PlatformType = "youtube"
+	// PlatformBluesky is for Bluesky crawling
+	PlatformBluesky PlatformType = "bluesky"
 )
 
 // CrawlTarget represents a specific source to crawl

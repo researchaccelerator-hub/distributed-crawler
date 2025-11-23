@@ -3,6 +3,7 @@ package common
 
 import (
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler/bluesky"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler/telegram"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler/youtube"
 )
@@ -19,7 +20,10 @@ func RegisterAllCrawlers(factory *crawler.DefaultCrawlerFactory) error {
 		return err
 	}
 
-	// Add more crawler registrations here as needed
+	// Register Bluesky crawler
+	if err := bluesky.RegisterBlueskyCrawler(factory); err != nil {
+		return err
+	}
 
 	return nil
 }

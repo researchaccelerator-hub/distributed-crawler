@@ -139,4 +139,7 @@ const (
 
 	// PlatformYouTube represents the YouTube platform
 	PlatformYouTube PlatformType = "youtube"
+
+	// PlatformBluesky represents the Bluesky platform
+	PlatformBluesky PlatformType = "bluesky"
 )
