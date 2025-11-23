@@ -22,6 +22,15 @@ const (
 	defaultVideoCacheSize    = 10000 // ~10MB typical
 )
 
+// Pre-compiled regex patterns for parsing (compiled once, reused many times)
+var (
+	// Extract numeric values from text like "43.2M" or "1,234"
+	numericPattern = regexp.MustCompile(`[\d.]+`)
+
+	// Parse relative timestamps like "2 hours ago" or "3 days ago"
+	relativeTimePattern = regexp.MustCompile(`(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago`)
+)
+
 // YouTubeInnerTubeClient implements the YouTubeClient interface using the InnerTube API
 // This provides an alternative to the YouTube Data API that doesn't require API keys
 // or have quota limitations, but requires more data parsing.
@@ -823,9 +832,8 @@ func parseCountFromText(text string) int64 {
 		text = strings.ReplaceAll(strings.ReplaceAll(text, "B", ""), "b", "")
 	}
 
-	// Extract numeric part using regex
-	re := regexp.MustCompile(`[\d.]+`)
-	numStr := re.FindString(text)
+	// Extract numeric part using pre-compiled regex
+	numStr := numericPattern.FindString(text)
 	if numStr == "" {
 		return 0
 	}
@@ -900,9 +908,8 @@ func extractText(textObj interface{}) string {
 func parseRelativeTime(relativeTime string) time.Time {
 	now := time.Now()
 
-	// Parse patterns like "X days ago", "X weeks ago", etc.
-	re := regexp.MustCompile(`(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago`)
-	matches := re.FindStringSubmatch(relativeTime)
+	// Parse patterns like "X days ago", "X weeks ago", etc. using pre-compiled regex
+	matches := relativeTimePattern.FindStringSubmatch(relativeTime)
 
 	if len(matches) < 3 {
 		// If we can't parse, return current time
