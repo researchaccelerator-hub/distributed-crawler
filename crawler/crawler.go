@@ -37,11 +37,12 @@ type CrawlResult struct {
 
 // CrawlJob represents a job to crawl a specific target
 type CrawlJob struct {
-	Target     CrawlTarget
-	FromTime   time.Time
-	ToTime     time.Time
-	Limit      int
-	SampleSize int // Number of posts to randomly sample (0 means no sampling)
+	Target           CrawlTarget
+	FromTime         time.Time
+	ToTime           time.Time
+	Limit            int
+	SampleSize       int // Number of posts to randomly sample (0 means no sampling)
+	SamplesRemaining int // Number of samples left
 }
 
 // Crawler defines the interface that all crawler implementations must satisfy

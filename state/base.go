@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -24,6 +25,11 @@ type BaseStateManager struct {
 
 	// Map of page ID -> Page (to store all pages)
 	pageMap map[string]Page
+
+	// Map/Slice for tracking previously discovered channels
+	discoveredChannels *DiscoveredChannels
+
+	edgeRecords []*EdgeRecord
 }
 
 // NewBaseStateManager creates a new BaseStateManager
@@ -36,9 +42,11 @@ func NewBaseStateManager(config Config) *BaseStateManager {
 			StartTime:   time.Now(),
 			Status:      "running",
 		},
-		lastUpdated: time.Now(),
-		layerMap:    make(map[int][]string),
-		pageMap:     make(map[string]Page),
+		lastUpdated:        time.Now(),
+		layerMap:           make(map[int][]string),
+		pageMap:            make(map[string]Page),
+		discoveredChannels: NewDiscoveredChannels(),
+		edgeRecords:        make([]*EdgeRecord, 0),
 	}
 }
 
@@ -63,11 +71,24 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 		// Store page in page map
 		bsm.pageMap[page.ID] = page
 
+		// Store Seed Urls as discovered Channel
+		if bsm.config.SamplingMethod == "random-walk" {
+			log.Info().Str("url", url).Msg("random-walk-seed: Adding seed url in Base SM Initialize")
+			err := bsm.discoveredChannels.Add(url)
+			if err != nil {
+				log.Error().Str("url", url).Msg("random-walk-seed: Unable to add seed url as discovered channel")
+			}
+		}
+
 		// Add page ID to layer 0
 		bsm.layerMap[0] = append(bsm.layerMap[0], page.ID)
 	}
 
 	log.Info().Msgf("Initialized state with %d seed URLs", len(seedURLs))
+	return nil
+}
+
+func (bsm *BaseStateManager) InitializeDiscoveredChannels() error {
 	return nil
 }
 
@@ -206,7 +227,7 @@ func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 	if bsm.config.MaxPagesConfig != nil && bsm.config.MaxPagesConfig.MaxPages > 0 {
 		maxPagesAllowed = bsm.config.MaxPagesConfig.MaxPages
 		maxPagesReached = totalExistingPages >= maxPagesAllowed
-		
+
 		if maxPagesReached {
 			log.Info().
 				Int("currentPages", totalExistingPages).
@@ -233,10 +254,10 @@ func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 
 	// Track the IDs of pages we're actually adding (after deduplication)
 	addedIDs := make([]string, 0)
-	
+
 	// Counter for pages we can add as replacements for deadend pages
 	replacementsAvailable := deadendPageCount
-	
+
 	// Process each page
 	for i := range pages {
 		// Check if URL already exists in any layer
@@ -244,14 +265,14 @@ func (bsm *BaseStateManager) AddLayer(pages []Page) error {
 			log.Debug().Msgf("Skipping duplicate URL: %s (already exists with ID: %s)", pages[i].URL, existingID)
 			continue
 		}
-		
+
 		// If we've reached the max pages limit, only add if we have replacements available
 		if maxPagesReached {
 			if replacementsAvailable <= 0 {
 				log.Debug().Msgf("Skipping URL %s: maximum page limit reached and no deadend replacements available", pages[i].URL)
 				continue
 			}
-			
+
 			// Consume one replacement slot
 			replacementsAvailable--
 			log.Debug().Msgf("Adding URL %s as a replacement for a deadend page (%d replacements remaining)", pages[i].URL, replacementsAvailable)
@@ -443,10 +464,10 @@ func (bsm *BaseStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 				Msg("Found incomplete crawl in memory")
 			return bsm.metadata.ExecutionID, true, nil
 		}
-		
+
 		// Check if the crawl has any incomplete pages even if it's marked as completed
 		hasIncompletePages := false
-		
+
 		// Look through layers to find incomplete pages
 		for _, pageIDs := range bsm.layerMap {
 			for _, pageID := range pageIDs {
@@ -465,7 +486,7 @@ func (bsm *BaseStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 				break
 			}
 		}
-		
+
 		if hasIncompletePages {
 			log.Info().
 				Str("crawlID", crawlID).
@@ -474,10 +495,36 @@ func (bsm *BaseStateManager) FindIncompleteCrawl(crawlID string) (string, bool, 
 			return bsm.metadata.ExecutionID, true, nil
 		}
 	}
-	
-	// The memory-only implementation doesn't have a way to check previous crawls, 
+
+	// The memory-only implementation doesn't have a way to check previous crawls,
 	// so we'll return false. The DaprStateManager implementation handles that case.
 	return "", false, nil
+}
+
+func (bsm *BaseStateManager) GetRandomDiscoveredChannel() (string, error) {
+	return bsm.discoveredChannels.Random()
+}
+
+func (bsm *BaseStateManager) IsDiscoveredChannel(channelID string) bool {
+	return bsm.discoveredChannels.Contains(channelID)
+}
+
+func (bsm *BaseStateManager) AddDiscoveredChannel(channelID string) error {
+	return bsm.discoveredChannels.Add(channelID)
+}
+
+func (bsm *BaseStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	return nil
+}
+
+func (bsm *BaseStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
+	bsm.mutex.Lock()
+	defer bsm.mutex.Unlock()
+	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Int("new_edge_count", len(edges)).
+		Msg("random-walk-edge: Adding new edges in base manager")
+	bsm.edgeRecords = append(bsm.edgeRecords, edges...)
+	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Msg("random-walk-edge: New edges added")
+	return nil
 }
 
 // StorePost and StoreFile are left to specific implementations

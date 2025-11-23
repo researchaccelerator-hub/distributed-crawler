@@ -50,7 +50,8 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 		urls = append(urls, fileURLs...)
 	}
 
-	if !generateCode && len(urls) == 0 {
+	// For random sampling, URLs are not required since we discover content randomly
+	if !generateCode && len(urls) == 0 && !(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
 	}
 
@@ -492,6 +493,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			"client": ytModelClient,
 			"state_manager": sm,
 			"crawl_label": crawlCfg.CrawlLabel, // Pass the crawl label to be added to posts
+			"crawler_config": map[string]interface{}{
+				"sampling_method":    crawlCfg.SamplingMethod,
+				"min_channel_videos": crawlCfg.MinChannelVideos,
+			},
 		}
 		
 		err = ytCrawler.Initialize(clientCtx, crawlerConfig)

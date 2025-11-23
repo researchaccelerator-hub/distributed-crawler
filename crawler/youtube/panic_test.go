@@ -41,6 +41,10 @@ func (m *MockPanicClient) GetSnowballVideos(ctx context.Context, seedChannels []
 	panic("test panic in GetSnowballVideos")
 }
 
+func (m *MockPanicClient) GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*youtubemodel.YouTubeVideo, error) {
+	panic("test panic in GetVideosByIDs")
+}
+
 func (m *MockPanicClient) Disconnect(ctx context.Context) error {
 	return nil
 }
@@ -48,23 +52,52 @@ func (m *MockPanicClient) Disconnect(ctx context.Context) error {
 // MockStateManager is a simple mock state manager
 type MockStateManager struct{}
 
-func (m *MockStateManager) Initialize(seedURLs []string) error                                                  { return nil }
-func (m *MockStateManager) GetPage(id string) (state.Page, error)                                              { return state.Page{}, nil }
-func (m *MockStateManager) UpdatePage(page state.Page) error                                                   { return nil }
-func (m *MockStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error   { return nil }
-func (m *MockStateManager) AddLayer(pages []state.Page) error                                                  { return nil }
-func (m *MockStateManager) GetLayerByDepth(depth int) ([]state.Page, error)                                   { return nil, nil }
-func (m *MockStateManager) GetMaxDepth() (int, error)                                                          { return 0, nil }
-func (m *MockStateManager) SaveState() error                                                                   { return nil }
-func (m *MockStateManager) ExportPagesToBinding(crawlID string) error                                          { return nil }
-func (m *MockStateManager) StorePost(channelID string, post model.Post) error                                  { return nil }
-func (m *MockStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) { return "", "", nil }
-func (m *MockStateManager) GetPreviousCrawls() ([]string, error)                                               { return nil, nil }
-func (m *MockStateManager) UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error         { return nil }
-func (m *MockStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error)                          { return "", false, nil }
-func (m *MockStateManager) HasProcessedMedia(mediaID string) (bool, error)                                     { return false, nil }
-func (m *MockStateManager) MarkMediaAsProcessed(mediaID string) error                                          { return nil }
-func (m *MockStateManager) Close() error                                                                       { return nil }
+func (m *MockStateManager) Initialize(seedURLs []string) error { return nil }
+
+func (m *MockStateManager) GetPage(id string) (state.Page, error) { return state.Page{}, nil }
+func (m *MockStateManager) UpdatePage(page state.Page) error      { return nil }
+func (m *MockStateManager) UpdateMessage(pageID string, chatID int64, messageID int64, status string) error {
+	return nil
+}
+func (m *MockStateManager) AddLayer(pages []state.Page) error                 { return nil }
+func (m *MockStateManager) GetLayerByDepth(depth int) ([]state.Page, error)   { return nil, nil }
+func (m *MockStateManager) GetMaxDepth() (int, error)                         { return 0, nil }
+func (m *MockStateManager) SaveState() error                                  { return nil }
+func (m *MockStateManager) ExportPagesToBinding(crawlID string) error         { return nil }
+func (m *MockStateManager) StorePost(channelID string, post model.Post) error { return nil }
+func (m *MockStateManager) StoreFile(channelID string, sourceFilePath string, fileName string) (string, string, error) {
+	return "", "", nil
+}
+func (m *MockStateManager) GetPreviousCrawls() ([]string, error) { return nil, nil }
+func (m *MockStateManager) UpdateCrawlMetadata(crawlID string, metadata map[string]interface{}) error {
+	return nil
+}
+func (m *MockStateManager) FindIncompleteCrawl(crawlID string) (string, bool, error) {
+	return "", false, nil
+}
+func (m *MockStateManager) HasProcessedMedia(mediaID string) (bool, error) { return false, nil }
+func (m *MockStateManager) MarkMediaAsProcessed(mediaID string) error      { return nil }
+func (m *MockStateManager) Close() error                                   { return nil }
+
+// Used for random-walk sampling
+
+func (m *MockStateManager) InitializeDiscoveredChannels() error             { return nil }
+func (m *MockStateManager) InitializeRandomWalkLayer() error                { return nil }
+func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }
+func (m *MockStateManager) IsDiscoveredChannel(channelID string) bool       { return true }
+func (m *MockStateManager) AddDiscoveredChannel(channelID string) error     { return nil }
+func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
+func (m *MockStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
+	return nil
+}
+
+// random-walk database operations
+func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+	return []state.Page{}, nil
+}
+func (m *MockStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error               { return nil }
+func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
+func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error                  { return nil }
 
 func TestPanicRecovery(t *testing.T) {
 	// Create a YouTube crawler with a mock client that will panic

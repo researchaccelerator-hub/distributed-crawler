@@ -128,7 +128,8 @@ Options:
   --platform string              Platform to crawl (telegram, youtube) (default: "telegram")
   --youtube-api-key string       API key for YouTube Data API (required for YouTube platform)
   --log-level string             Set logging level: trace, debug, info, warn, error (default: "debug")
-  --dapr                         Run with DAPR enabled
+  --mode string                  Execution mode: "standalone", "dapr-standalone", "dapr-job" (default: "standalone")
+  --dapr-port int                Port for Dapr job service (default: 3000)
   --help                         Display this help message
 ```
 
@@ -229,6 +230,266 @@ When running the scraper for the first time:
 3. If you have Two-Factor Authentication enabled, enter your password when prompted
 
 The auth session will be saved locally for future use.
+
+## Dapr Job Mode
+
+The scraper supports running in **Dapr Job Mode**, which provides distributed job scheduling and execution capabilities using the [Dapr Jobs API](https://docs.dapr.io/developing-applications/building-blocks/jobs/jobs-overview/). This mode is ideal for production environments where you need reliable, scalable, and distributed crawling operations.
+
+### Features
+
+- **Scheduled Crawling**: Schedule crawl jobs to run at specific times or intervals
+- **Distributed Execution**: Jobs are distributed across multiple instances for scalability
+- **Fault Tolerance**: "At least once" execution guarantee with automatic retry capabilities
+- **Job Persistence**: Job details are stored persistently and survive system restarts
+- **Platform Support**: Full support for both Telegram and YouTube platforms
+- **Advanced Configuration**: Complete feature parity with standalone mode
+
+### Prerequisites
+
+1. **Dapr Runtime**: Install Dapr CLI and runtime
+   ```bash
+   # Install Dapr CLI
+   wget -q https://raw.githubusercontent.com/dapr/cli/master/install/install.sh -O - | /bin/bash
+   
+   # Initialize Dapr
+   dapr init
+   ```
+
+2. **Environment Variables**: Same requirements as standalone mode (TG_API_*, STORAGE_ROOT, etc.)
+
+### Running in Dapr Job Mode
+
+#### 1. Start the Dapr Job Service
+
+```bash
+# Start the scraper in Dapr job mode
+dapr run --app-id telegram-scraper --app-port 3000 --dapr-http-port 3500 \
+  ./telegram-scraper --mode=dapr-job --dapr-port=3000
+```
+
+#### 2. Schedule Crawl Jobs
+
+Once the service is running, you can schedule jobs by sending HTTP requests to the Dapr Jobs API:
+
+##### Basic Telegram Crawl Job
+
+```bash
+curl -X POST "http://localhost:3500/v1.0-alpha1/jobs/telegram-scraper" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "telegram-crawl-job-1",
+    "dueTime": "30s",
+    "data": {
+      "droid": "telegram-crawl-job-1",
+      "task": "crawl telegram channels",
+      "urls": ["channel1", "channel2", "channel3"],
+      "platform": "telegram",
+      "crawlId": "my-telegram-crawl",
+      "maxDepth": 2,
+      "concurrency": 5,
+      "maxPosts": 1000
+    }
+  }'
+```
+
+##### YouTube Crawl Job
+
+```bash
+curl -X POST "http://localhost:3500/v1.0-alpha1/jobs/telegram-scraper" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "youtube-crawl-job-1", 
+    "dueTime": "1m",
+    "data": {
+      "droid": "youtube-crawl-job-1",
+      "task": "crawl youtube channels",
+      "urls": ["UCxxx1", "UCxxx2"],
+      "platform": "youtube",
+      "youtubeApiKey": "YOUR_YOUTUBE_API_KEY",
+      "crawlId": "my-youtube-crawl",
+      "samplingMethod": "channel",
+      "maxPosts": 500,
+      "minChannelVideos": 10,
+      "dateRangeMin": "2024-01-01T00:00:00Z",
+      "dateRangeMax": "2024-12-31T23:59:59Z"
+    }
+  }'
+```
+
+##### Advanced Job with URL File
+
+```bash
+curl -X POST "http://localhost:3500/v1.0-alpha1/jobs/telegram-scraper" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "advanced-crawl-job",
+    "dueTime": "2024-12-31T23:59:59Z",
+    "data": {
+      "droid": "advanced-crawl-job",
+      "task": "crawl from url file", 
+      "urlFile": "/path/to/channels.txt",
+      "platform": "telegram",
+      "crawlId": "bulk-telegram-crawl",
+      "maxDepth": 3,
+      "concurrency": 10,
+      "tdlibDatabaseUrls": ["http://db1/session1.db", "http://db2/session2.db"],
+      "maxPages": 1000
+    }
+  }'
+```
+
+#### 3. Job Configuration Parameters
+
+| Parameter | Type | Description | Required |
+|-----------|------|-------------|----------|
+| `name` | string | Unique job identifier | ✅ |
+| `dueTime` | string | When to execute (ISO 8601 or relative like "30s", "1m", "1h") | ✅ |
+| `droid` | string | Job executor name | ✅ |
+| `task` | string | Task description (must contain "crawl" for crawl jobs) | ✅ |
+| `urls` | []string | List of channel URLs/IDs to crawl | ✅* |
+| `urlFile` | string | Path to file containing URLs (one per line) | ✅* |
+| `platform` | string | Platform to crawl ("telegram" or "youtube") | ✅ |
+| `crawlId` | string | Custom crawl ID for tracking | ❌ |
+| `maxDepth` | int | Maximum crawl depth | ❌ |
+| `concurrency` | int | Number of concurrent workers | ❌ |
+| `maxPosts` | int | Maximum posts per channel | ❌ |
+| `youtubeApiKey` | string | YouTube API key (required for YouTube platform) | ✅** |
+| `samplingMethod` | string | Sampling method ("channel", "snowball", "random") | ❌ |
+| `minChannelVideos` | int | Minimum videos for YouTube channels | ❌ |
+| `sampleSize` | int | Sample size for random sampling | ❌ |
+| `minPostDate` | string | Minimum post date (ISO 8601) | ❌ |
+| `dateBetweenMin` | string | Date range start (ISO 8601) | ❌ |
+| `dateBetweenMax` | string | Date range end (ISO 8601) | ❌ |
+| `tdlibDatabaseUrls` | []string | TDLib database URLs for connection pooling | ❌ |
+| `maxPages` | int | Maximum pages to process | ❌ |
+
+**Notes:**
+- *Either `urls` or `urlFile` is required
+- **Required when `platform` is "youtube"
+
+#### 4. Job Management
+
+##### Check Job Status
+```bash
+# Get job details
+curl "http://localhost:3500/v1.0-alpha1/jobs/telegram-scraper/my-job-name"
+```
+
+##### List All Jobs
+```bash
+# List all jobs for the app
+curl "http://localhost:3500/v1.0-alpha1/jobs/telegram-scraper"
+```
+
+##### Delete a Job
+```bash
+# Delete a scheduled job
+curl -X DELETE "http://localhost:3500/v1.0-alpha1/jobs/telegram-scraper/my-job-name"
+```
+
+### Dapr Job Mode vs Standalone Mode
+
+| Feature | Standalone Mode | Dapr Job Mode |
+|---------|-----------------|----------------|
+| **Execution** | Immediate | Scheduled |
+| **Scalability** | Single instance | Multi-instance |
+| **Fault Tolerance** | Manual restart | Automatic retry |
+| **Job Persistence** | No | Yes |
+| **Remote Scheduling** | No | Yes via HTTP API |
+| **Load Distribution** | No | Yes |
+| **Configuration** | CLI arguments | JSON payload |
+| **Monitoring** | Local logs | Dapr dashboard + logs |
+
+### Production Deployment
+
+For production environments, you can deploy the Dapr job service using:
+
+#### Docker Compose
+```yaml
+version: '3.8'
+services:
+  telegram-scraper:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - TG_API_ID=${TG_API_ID}
+      - TG_API_HASH=${TG_API_HASH}
+      - STORAGE_ROOT=/data
+    volumes:
+      - ./data:/data
+    command: ["./telegram-scraper", "--mode=dapr-job", "--dapr-port=3000"]
+    
+  dapr-sidecar:
+    image: daprio/daprd:latest
+    depends_on:
+      - telegram-scraper
+    network_mode: "service:telegram-scraper"
+    command: [
+      "./daprd",
+      "--app-id", "telegram-scraper",
+      "--app-port", "3000",
+      "--dapr-http-port", "3500",
+      "--components-path", "/components"
+    ]
+    volumes:
+      - ./components:/components
+```
+
+#### Kubernetes
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: telegram-scraper-job
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: telegram-scraper-job
+  template:
+    metadata:
+      labels:
+        app: telegram-scraper-job
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: "telegram-scraper"
+        dapr.io/app-port: "3000"
+    spec:
+      containers:
+      - name: telegram-scraper
+        image: telegram-scraper:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: TG_API_ID
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secrets
+              key: api-id
+        - name: TG_API_HASH
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secrets
+              key: api-hash
+        command: ["./telegram-scraper", "--mode=dapr-job", "--dapr-port=3000"]
+```
+
+### Monitoring and Logging
+
+- **Dapr Dashboard**: Access at `http://localhost:8080` (when running `dapr dashboard`)
+- **Application Logs**: Standard Go logging with structured JSON output
+- **Job Status**: Query via Dapr Jobs API endpoints
+- **Metrics**: Integrate with Dapr observability components
+
+### Error Handling
+
+Jobs in Dapr mode include built-in error handling:
+
+- **Automatic Retry**: Failed jobs are automatically retried based on Dapr configuration
+- **Dead Letter Queue**: Persistently failed jobs can be routed to a dead letter queue
+- **Error Reporting**: Detailed error information is logged and available via API
+- **Resource Cleanup**: Automatic cleanup of connection pools and temporary files
 
 ## Architecture and Key Components
 

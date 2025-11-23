@@ -3,13 +3,14 @@ package state
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/researchaccelerator-hub/telegram-scraper/model"
-	"github.com/rs/zerolog/log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/researchaccelerator-hub/telegram-scraper/model"
+	"github.com/rs/zerolog/log"
 )
 
 // LocalStorageProvider implements file system operations
@@ -138,6 +139,30 @@ func (lsm *LocalStateManager) Initialize(seedURLs []string) error {
 
 	// Save the initial state
 	return lsm.SaveState()
+}
+
+func (lsm *LocalStateManager) InitializeDiscoveredChannels() error {
+	return fmt.Errorf("InitializeDiscoveredChannels not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) InitializeRandomWalkLayer() error {
+	return fmt.Errorf("InitializeRandomWalkLayer not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
+	return []Page{}, fmt.Errorf("GetPagesFromLayerBuffer not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
+	return fmt.Errorf("WipeLayerBuffer not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
+	return fmt.Errorf("ExecuteDatabaseOperation not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) AddPageToLayerBuffer(page *Page) error {
+	return fmt.Errorf(" not implemented for local state manager")
 }
 
 // SaveState persists the state to the filesystem

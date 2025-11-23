@@ -3,6 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/pprof"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/dapr"
 	"github.com/researchaccelerator-hub/telegram-scraper/orchestrator"
@@ -10,11 +18,6 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/worker"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -27,11 +30,10 @@ var (
 	urlFile           string
 	urlFileURL        string
 	generateCode      bool
-	crawlType         string
 	minPostDate       string
 	daprMode          string
-	mode              string   // New: execution mode (standalone, dapr-standalone, orchestrator, worker)
-	workerID          string   // New: worker identifier for distributed mode
+	mode              string // New: execution mode (standalone, dapr-standalone, orchestrator, worker)
+	workerID          string // New: worker identifier for distributed mode
 	minUsers          int
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
@@ -49,6 +51,30 @@ func main() {
 	// The actual level will be configured in PersistentPreRunE
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+
+	// TODO: Remove after identifying memory leak
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	log.Info().Msg("Starting server on :6060")
+	log.Info().Msg("Profiling endpoints are available at http://localhost:6060/debug/pprof/")
+
+	server := &http.Server{
+		Addr:    ":6060",
+		Handler: mux,
+	}
+
+	// Start the HTTP server.
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			log.Error().Msgf("Could not start server: %s\n", err)
+		}
+	}()
 
 	// Initialize and execute the root command
 	if err := rootCmd.Execute(); err != nil {
@@ -125,11 +151,18 @@ Distributed modes (Phase 2+):
 Direct execution modes:
   --mode=standalone      - Single process crawling without Dapr
   --mode=dapr-standalone - Single process crawling with Dapr state management
+  --mode=dapr-job        - Dapr job mode for scheduled crawling tasks (uses CLI config + job data)
 
 Legacy modes (for backward compatibility):
   --dapr --dapr-mode=job - Traditional Dapr job mode
   --dapr                 - Traditional Dapr standalone mode
   (no flags)             - Traditional standalone mode
+
+Configuration Priority:
+  - All CLI arguments are accepted and used as defaults
+  - dapr-job mode: job data overrides CLI arguments when provided
+  - URLs: job data takes precedence, CLI URLs used if job has none
+  - YouTube random sampling doesn't require URLs (discovers content randomly)
 
 Examples:
   # Distributed orchestrator (Phase 2+)
@@ -140,6 +173,9 @@ Examples:
   
   # Explicit standalone
   crawler --mode=standalone --urls="url1,url2"
+  
+  # DAPR job mode (all CLI args accepted, job data can override)
+  crawler --mode=dapr-job --dapr-port=6481 --platform=youtube --max-posts=1000
   
   # Legacy compatibility
   crawler --urls="url1,url2"`,
@@ -160,14 +196,31 @@ Examples:
 		zerolog.SetGlobalLevel(level)
 		log.Info().Str("log_level", level.String()).Msg("Logger initialized")
 
-		// Check YouTube API key if platform is YouTube
-		if crawlerCfg.Platform == "youtube" {
+		// Check YouTube API key if platform is YouTube (skip for dapr-job mode as API key may come from job data)
+		if crawlerCfg.Platform == "youtube" && mode != "dapr-job" {
 			if crawlerCfg.YouTubeAPIKey == "" {
 				fmt.Println("Error: When using --platform youtube, you must provide a valid YouTube API key with --youtube-api-key")
 				log.Error().Msg("YouTube API key is required but was not provided")
+				return fmt.Errorf("YouTube API key is required for YouTube platform")
 			} else {
 				log.Info().Str("api_key_status", "provided").Str("api_key_length", fmt.Sprintf("%d chars", len(crawlerCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
 			}
+		} else if crawlerCfg.Platform == "youtube" && mode == "dapr-job" {
+			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
+		}
+
+		// TODO: update to just pass the whole crawl config to validate sampling method
+		// Validate sampling method combinations (skip URL validation for dapr-job mode)
+		if crawlerCfg.SamplingMethod == "random-walk" {
+			// xor operation to confirm only one of the two options is provided
+			if (len(urlList) > 0 || urlFileURL != "") != (crawlerCfg.SeedSize > 0) {
+			} else if ((len(urlList) > 0 || urlFileURL != "") && (crawlerCfg.SeedSize > 0)) || ((len(urlList) == 0 && urlFileURL == "") && (crawlerCfg.SeedSize == 0)) {
+				return fmt.Errorf("Must provide either seed urls or seed size in random-walk crawl")
+			} else if len(crawlerCfg.CrawlID) > 32 {
+				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
+			}
+		} else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
+			return err
 		}
 
 		// Load configuration file if specified
@@ -270,6 +323,18 @@ Examples:
 			crawlerCfg.SkipMediaDownload = viper.GetBool("crawler.skipmedia")
 		}
 
+		// Load sampling method configuration
+		crawlerCfg.SamplingMethod = viper.GetString("crawler.sampling")
+		if crawlerCfg.SamplingMethod == "" {
+			crawlerCfg.SamplingMethod = "channel" // Default value
+		}
+
+		// Load minimum channel videos configuration
+		crawlerCfg.MinChannelVideos = viper.GetInt64("crawler.min_channel_videos")
+		if crawlerCfg.MinChannelVideos == 0 {
+			crawlerCfg.MinChannelVideos = 10 // Default value
+		}
+
 		log.Debug().
 			Int("min_users", crawlerCfg.MinUsers).
 			Str("crawl_id", crawlerCfg.CrawlID).
@@ -329,26 +394,26 @@ Examples:
 		dateBetweenStr := viper.GetString("crawler.datebetween")
 		if dateBetweenStr != "" {
 			log.Debug().Str("date_between", dateBetweenStr).Msg("Processing date-between parameter")
-			
+
 			// Parse date range in format "YYYY-MM-DD,YYYY-MM-DD"
 			dates := strings.Split(dateBetweenStr, ",")
 			if len(dates) != 2 {
 				log.Error().Str("date_between", dateBetweenStr).Msg("Invalid date-between format")
 				return fmt.Errorf("invalid date-between format, must be 'YYYY-MM-DD,YYYY-MM-DD'")
 			}
-			
+
 			minDate, err := time.Parse("2006-01-02", strings.TrimSpace(dates[0]))
 			if err != nil {
 				log.Error().Err(err).Str("min_date", dates[0]).Msg("Invalid min date in date-between")
 				return fmt.Errorf("invalid min date in date-between format, must be YYYY-MM-DD: %v", err)
 			}
-			
+
 			maxDate, err := time.Parse("2006-01-02", strings.TrimSpace(dates[1]))
 			if err != nil {
 				log.Error().Err(err).Str("max_date", dates[1]).Msg("Invalid max date in date-between")
 				return fmt.Errorf("invalid max date in date-between format, must be YYYY-MM-DD: %v", err)
 			}
-			
+
 			// Validate that min date is before max date
 			if minDate.After(maxDate) {
 				log.Error().
@@ -357,7 +422,7 @@ Examples:
 					Msg("Min date is after max date in date-between")
 				return fmt.Errorf("min date must be before max date in date-between")
 			}
-			
+
 			crawlerCfg.DateBetweenMin = minDate
 			crawlerCfg.DateBetweenMax = maxDate
 			log.Info().
@@ -404,6 +469,7 @@ Examples:
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		// If no specific subcommand is invoked, show help
+		// Skip URL requirement check for dapr-job mode since URLs come from job data
 		if !generateCode && len(args) == 0 && !crawlerCfg.DaprMode && len(urlList) == 0 && urlFile == "" && urlFileURL == "" && mode == "" {
 			log.Info().Msg("No arguments provided, showing help")
 			cmd.Help()
@@ -460,6 +526,10 @@ Examples:
 		case "dapr-standalone":
 			log.Info().Str("mode", mode).Msg("Starting in explicit DAPR standalone mode")
 			dapr.StartDaprStandaloneMode(urlList, urlFile, crawlerCfg, generateCode)
+		case "dapr-job":
+			log.Info().Str("mode", mode).Msg("Starting in DAPR job mode")
+			// URLs not required for dapr-job mode as they come from job data
+			dapr.StartDaprMode(crawlerCfg)
 		case "":
 			// Legacy mode detection for backward compatibility
 			if crawlerCfg.DaprMode {
@@ -501,7 +571,7 @@ Examples:
 // startOrchestratorMode starts the distributed orchestrator
 func startOrchestratorMode(urlList []string, urlFile string, crawlerCfg common.CrawlerConfig, generateCode bool) {
 	log.Info().Msg("Starting orchestrator mode (Phase 1 - basic structure)")
-	
+
 	// Collect URLs from command line arguments or file
 	var urls []string
 	if len(urlList) > 0 {
@@ -516,7 +586,8 @@ func startOrchestratorMode(urlList []string, urlFile string, crawlerCfg common.C
 		urls = append(urls, fileURLs...)
 	}
 
-	if len(urls) == 0 {
+	// For random sampling, URLs are not required since we discover content randomly
+	if len(urls) == 0 && !(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
 	}
 
@@ -595,6 +666,48 @@ func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
 	}
 }
 
+// validateSamplingMethod validates that the platform supports the specified sampling method
+func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string, mode string) error {
+	// Valid sampling methods per platform
+	validMethods := map[string][]string{
+		"telegram": {"channel", "snowball", "random-walk"},
+		"youtube":  {"channel", "random", "snowball"},
+	}
+
+	// Check if platform is supported
+	supportedMethods, exists := validMethods[platform]
+	if !exists {
+		return fmt.Errorf("unsupported platform: %s", platform)
+	}
+
+	// Check if sampling method is valid for this platform
+	isSupported := false
+	for _, method := range supportedMethods {
+		if method == samplingMethod {
+			isSupported = true
+			break
+		}
+	}
+
+	if !isSupported {
+		return fmt.Errorf("sampling method '%s' is not supported for platform '%s'. Supported methods: %v",
+			samplingMethod, platform, supportedMethods)
+	}
+
+	// For random sampling, no URLs/channels are required
+	if samplingMethod == "random" || samplingMethod == "random-walk" {
+		return nil
+	}
+
+	// For channel and snowball sampling, validate that URLs are provided
+	// Skip URL validation for dapr-job mode since jobs provide URLs through job data
+	if (samplingMethod == "channel" || samplingMethod == "snowball" || samplingMethod == "random-walk") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
+		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
+	}
+
+	return nil
+}
+
 // Initialize cobra command
 func init() {
 	// Global flags
@@ -609,7 +722,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.OutputFormat, "output", "json", "Output format (json, csv, etc.)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.StorageRoot, "storage-root", "/tmp/crawl", "Storage root directory")
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
-	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "1m", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
+	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
 	rootCmd.PersistentFlags().StringVar(&dateBetween, "date-between", "", "Date range to crawl posts between (format: YYYY-MM-DD,YYYY-MM-DD)")
 	rootCmd.PersistentFlags().IntVar(&sampleSize, "sample-size", 0, "Number of posts to randomly sample when using date-between (0 means no sampling)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive (deprecated, use --tdlib-database-urls)")
@@ -625,6 +738,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, random-walk, snowball")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.SeedSize, "seed-size", 0, "Number of discovered channels to randomly select as seed channels")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.WalkbackRate, "walkback-rate", 15, "The rate at which to perform walkbacks when using random-walk sampling")
+	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 
 	// New distributed mode flags
 	rootCmd.PersistentFlags().StringVar(&mode, "mode", "", "Execution mode: standalone, dapr-standalone, orchestrator, worker (empty for legacy auto-detection)")
@@ -635,7 +752,6 @@ func init() {
 	rootCmd.Flags().StringVar(&urlFile, "url-file", "", "file containing URLs to crawl (one per line)")
 	rootCmd.Flags().StringVar(&urlFileURL, "url-file-url", "", "URL to a file containing URLs to crawl (one per line)")
 	rootCmd.Flags().BoolVar(&generateCode, "generate-code", false, "run code generation after crawling")
-	rootCmd.Flags().StringVar(&crawlType, "crawl-type", "focused", "Select between focused(default) and snowball")
 
 	// Bind flags to viper
 	viper.BindPFlag("logging.level", rootCmd.PersistentFlags().Lookup("log-level"))
@@ -664,6 +780,10 @@ func init() {
 	viper.BindPFlag("crawler.skipmedia", rootCmd.PersistentFlags().Lookup("skip-media"))
 	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
 	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
+	viper.BindPFlag("crawler.sampling", rootCmd.PersistentFlags().Lookup("sampling"))
+	viper.BindPFlag("crawler.seedsize", rootCmd.PersistentFlags().Lookup("seed-size"))
+	viper.BindPFlag("crawler.walkback_rate", rootCmd.PersistentFlags().Lookup("walkback-rate"))
+	viper.BindPFlag("crawler.min_channel_videos", rootCmd.PersistentFlags().Lookup("min-channel-videos"))
 	viper.BindPFlag("distributed.mode", rootCmd.PersistentFlags().Lookup("mode"))
 	viper.BindPFlag("distributed.worker_id", rootCmd.PersistentFlags().Lookup("worker-id"))
 

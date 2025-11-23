@@ -103,6 +103,8 @@ type WorkItemConfig struct {
 	CrawlLabel        string    `json:"crawl_label,omitempty"`
 	SkipMediaDownload bool      `json:"skip_media_download"`
 	YouTubeAPIKey     string    `json:"youtube_api_key,omitempty"`
+	SamplingMethod    string    `json:"sampling_method,omitempty"`
+	MinChannelVideos  int64     `json:"min_channel_videos,omitempty"`
 }
 
 // ResultMessage represents a message containing work results

@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"time"
-	
+
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 )
@@ -20,18 +20,18 @@ func NewClientAdapter(client clientpkg.Client) (*ClientAdapter, error) {
 	if client == nil {
 		return nil, fmt.Errorf("client cannot be nil")
 	}
-	
+
 	if client.GetChannelType() != "youtube" {
 		return nil, fmt.Errorf("client is not a YouTube client")
 	}
-	
+
 	adapter := &ClientAdapter{
 		client: client,
 	}
-	
+
 	// Verify adapter implements YouTubeClient interface
 	var _ youtubemodel.YouTubeClient = adapter
-	
+
 	return adapter, nil
 }
 
@@ -52,19 +52,19 @@ func (a *ClientAdapter) GetChannelInfo(ctx context.Context, channelID string) (*
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert client.Channel to YouTubeChannel
 	ytChannel := &youtubemodel.YouTubeChannel{
 		ID:              channelID,
 		Title:           channel.GetName(),
 		Description:     channel.GetDescription(),
 		SubscriberCount: int64(channel.GetMemberCount()),
-		ViewCount:       0, // Not directly available
-		VideoCount:      0, // Not directly available
+		ViewCount:       0,           // Not directly available
+		VideoCount:      0,           // Not directly available
 		PublishedAt:     time.Time{}, // Not directly available
 		Thumbnails:      make(map[string]string),
 	}
-	
+
 	return ytChannel, nil
 }
 
@@ -75,7 +75,7 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert messages to YouTube videos
 	videos := make([]*youtubemodel.YouTubeVideo, 0, len(messages))
 	for _, msg := range messages {
@@ -92,17 +92,17 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 			Thumbnails:   msg.GetThumbnails(),
 			Language:     msg.GetLanguage(),
 		}
-		
+
 		// Extract like count from reactions if available
 		if reactions := msg.GetReactions(); reactions != nil {
 			if likeCount, ok := reactions["like"]; ok {
 				video.LikeCount = likeCount
 			}
 		}
-		
+
 		videos = append(videos, video)
 	}
-	
+
 	return videos, nil
 }
 
@@ -112,16 +112,37 @@ func (a *ClientAdapter) GetVideosFromChannel(ctx context.Context, channelID stri
 	return a.GetVideos(ctx, channelID, fromTime, toTime, limit)
 }
 
+func (a *ClientAdapter) GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*youtubemodel.YouTubeVideo, error) {
+
+	// Check if the underlying client is a YouTubeClientAdapter that wraps a YouTubeDataClient
+	if ytClientAdapter, ok := a.client.(*clientpkg.YouTubeClientAdapter); ok {
+		// Access the wrapped YouTubeDataClient which has the actual GetVideosByIDs implementation
+		return ytClientAdapter.GetVideosByIDs(ctx, videoIDs)
+	}
+	// Fallback for clients that don't support GetVideosByIDs
+	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("GetVideosByIDs not supported by underlying client type %T", a.client)
+}
+
 // GetRandomVideos retrieves videos using random sampling
 func (a *ClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	// This is a simplified implementation since the underlying client doesn't support random sampling
-	// In a real implementation, this would use a more sophisticated method for random sampling
-	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("random sampling not implemented in adapter")
+	// Check if the underlying client is a YouTubeClientAdapter that wraps a YouTubeDataClient
+	if ytClientAdapter, ok := a.client.(*clientpkg.YouTubeClientAdapter); ok {
+		// Access the wrapped YouTubeDataClient which has the actual random sampling implementation
+		return ytClientAdapter.GetRandomVideos(ctx, fromTime, toTime, limit)
+	}
+
+	// Fallback for clients that don't support random sampling
+	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("random sampling not supported by underlying client type %T", a.client)
 }
 
 // GetSnowballVideos retrieves videos using snowball sampling
 func (a *ClientAdapter) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	// This is a simplified implementation since the underlying client doesn't support snowball sampling
-	// In a real implementation, this would implement snowball sampling
-	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("snowball sampling not implemented in adapter")
+	// Check if the underlying client is a YouTubeClientAdapter that wraps a YouTubeDataClient
+	if ytClientAdapter, ok := a.client.(*clientpkg.YouTubeClientAdapter); ok {
+		// Access the wrapped YouTubeDataClient which has the actual snowball sampling implementation
+		return ytClientAdapter.GetSnowballVideos(ctx, seedChannelIDs, fromTime, toTime, limit)
+	}
+
+	// Fallback for clients that don't support snowball sampling
+	return []*youtubemodel.YouTubeVideo{}, fmt.Errorf("snowball sampling not supported by underlying client type %T", a.client)
 }
