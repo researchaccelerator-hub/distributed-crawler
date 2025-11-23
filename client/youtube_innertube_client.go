@@ -18,7 +18,9 @@ import (
 // This provides an alternative to the YouTube Data API that doesn't require API keys
 // or have quota limitations, but requires more data parsing.
 type YouTubeInnerTubeClient struct {
-	client *innertubego.InnerTube
+	client    *innertubego.InnerTube
+	mu        sync.RWMutex // Protects client and connected state
+	connected bool
 
 	// Caching system similar to YouTubeDataClient
 	channelCache         map[string]*youtubemodel.YouTubeChannel
@@ -69,21 +71,42 @@ func NewYouTubeInnerTubeClient(config *InnerTubeConfig) (*YouTubeInnerTubeClient
 	}, nil
 }
 
+// ensureConnected checks if the client is connected and returns an error if not
+func (c *YouTubeInnerTubeClient) ensureConnected() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.connected || c.client == nil {
+		return fmt.Errorf("client not connected - call Connect() first")
+	}
+
+	return nil
+}
+
 // Connect establishes a connection to the InnerTube API
 func (c *YouTubeInnerTubeClient) Connect(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if already connected
+	if c.connected && c.client != nil {
+		log.Warn().Msg("Client already connected")
+		return nil
+	}
+
 	log.Info().Msg("Connecting to YouTube InnerTube API")
 
 	// Create InnerTube client
 	// Parameters: config, clientType, clientVersion, apiKey, accessToken, refreshToken, httpClient, debug
 	client, err := innertubego.NewInnerTube(
-		nil,           // config (will use defaults)
-		c.clientType,  // clientType
+		nil,             // config (will use defaults)
+		c.clientType,    // clientType
 		c.clientVersion, // clientVersion
-		"",            // apiKey (not needed for unauthenticated access)
-		"",            // accessToken (not implemented yet)
-		"",            // refreshToken (not implemented yet)
-		nil,           // httpClient (will use default)
-		true,          // debug mode
+		"",              // apiKey (not needed for unauthenticated access)
+		"",              // accessToken (not implemented yet)
+		"",              // refreshToken (not implemented yet)
+		nil,             // httpClient (will use default)
+		true,            // debug mode
 	)
 
 	if err != nil {
@@ -92,21 +115,37 @@ func (c *YouTubeInnerTubeClient) Connect(ctx context.Context) error {
 	}
 
 	c.client = client
+	c.connected = true
 	log.Info().Msg("Successfully connected to YouTube InnerTube API")
 	return nil
 }
 
 // Disconnect closes the connection to the InnerTube API
 func (c *YouTubeInnerTubeClient) Disconnect(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.connected {
+		log.Warn().Msg("Client already disconnected")
+		return nil
+	}
+
 	log.Info().Msg("Disconnecting from YouTube InnerTube API")
 	c.client = nil
+	c.connected = false
 	return nil
 }
 
 // GetChannelInfo retrieves information about a YouTube channel using InnerTube
 func (c *YouTubeInnerTubeClient) GetChannelInfo(ctx context.Context, channelID string) (*youtubemodel.YouTubeChannel, error) {
-	if c.client == nil {
-		return nil, fmt.Errorf("InnerTube client not connected")
+	// Validate connection
+	if err := c.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	// Validate input
+	if err := validateChannelID(channelID); err != nil {
+		return nil, fmt.Errorf("invalid channel ID: %w", err)
 	}
 
 	// Check cache first
@@ -175,8 +214,22 @@ func (c *YouTubeInnerTubeClient) GetVideos(ctx context.Context, channelID string
 
 // GetVideosFromChannel retrieves videos from a specific YouTube channel using InnerTube
 func (c *YouTubeInnerTubeClient) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	if c.client == nil {
-		return nil, fmt.Errorf("InnerTube client not connected")
+	// Validate connection
+	if err := c.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	// Validate inputs
+	if err := validateChannelID(channelID); err != nil {
+		return nil, fmt.Errorf("invalid channel ID: %w", err)
+	}
+
+	if err := validateTimeRange(fromTime, toTime); err != nil {
+		return nil, fmt.Errorf("invalid time range: %w", err)
+	}
+
+	if err := validateLimit(limit); err != nil {
+		return nil, fmt.Errorf("invalid limit: %w", err)
 	}
 
 	log.Info().
@@ -604,6 +657,121 @@ func (c *YouTubeInnerTubeClient) parseVideosFromBrowse(data interface{}, channel
 		Msg("Parsed videos from InnerTube")
 
 	return videos, nil
+}
+
+// GetVideosByIDs retrieves specific videos by their IDs using the InnerTube Player endpoint
+func (c *YouTubeInnerTubeClient) GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*youtubemodel.YouTubeVideo, error) {
+	// Validate connection
+	if err := c.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	// Validate inputs
+	if err := validateVideoIDs(videoIDs); err != nil {
+		return nil, fmt.Errorf("invalid video IDs: %w", err)
+	}
+
+	log.Info().
+		Int("video_count", len(videoIDs)).
+		Msg("Fetching videos by IDs via InnerTube")
+
+	videos := make([]*youtubemodel.YouTubeVideo, 0, len(videoIDs))
+
+	for _, videoID := range videoIDs {
+		// Check cache first
+		if cachedVideo, exists := c.getCachedVideoStats(videoID); exists {
+			log.Debug().Str("video_id", videoID).Msg("Using cached video")
+			videos = append(videos, cachedVideo)
+			continue
+		}
+
+		// TODO: Call Player endpoint to get detailed video stats
+		// For now, return error indicating limitation
+		log.Warn().
+			Str("video_id", videoID).
+			Msg("Player endpoint not yet implemented - cannot fetch individual video details")
+	}
+
+	// Note: This is a simplified implementation
+	// A full implementation would call the Player endpoint for each video
+	// to get detailed statistics (likes, comments, full description, etc.)
+
+	log.Warn().Msg("GetVideosByIDs has limited implementation - Player endpoint not integrated")
+
+	return videos, nil
+}
+
+// GetRandomVideos returns an error as this operation is not supported by InnerTube API
+func (c *YouTubeInnerTubeClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	return nil, fmt.Errorf("GetRandomVideos not supported by InnerTube API - InnerTube does not provide Search.List with random prefix functionality. Use YouTube Data API client instead")
+}
+
+// GetSnowballVideos performs snowball sampling starting from seed channels
+func (c *YouTubeInnerTubeClient) GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	// Validate connection
+	if err := c.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	// Validate inputs
+	if err := validateChannelIDs(seedChannelIDs); err != nil {
+		return nil, fmt.Errorf("invalid seed channel IDs: %w", err)
+	}
+
+	if err := validateTimeRange(fromTime, toTime); err != nil {
+		return nil, fmt.Errorf("invalid time range: %w", err)
+	}
+
+	if err := validateLimit(limit); err != nil {
+		return nil, fmt.Errorf("invalid limit: %w", err)
+	}
+
+	log.Info().
+		Int("seed_count", len(seedChannelIDs)).
+		Time("from_time", fromTime).
+		Time("to_time", toTime).
+		Int("limit", limit).
+		Msg("Starting snowball sampling via InnerTube")
+
+	// TODO: Implement full snowball sampling
+	// This would involve:
+	// 1. Get videos from seed channels
+	// 2. Extract channel mentions from video descriptions
+	// 3. Perform BFS traversal with discovered channels
+	// 4. Track visited channels to prevent cycles
+	// 5. Use worker pool for parallel processing
+
+	// For now, just get videos from seed channels
+	allVideos := make([]*youtubemodel.YouTubeVideo, 0)
+
+	for _, channelID := range seedChannelIDs {
+		videos, err := c.GetVideosFromChannel(ctx, channelID, fromTime, toTime, limit)
+		if err != nil {
+			log.Warn().
+				Err(err).
+				Str("channel_id", channelID).
+				Msg("Failed to get videos from seed channel")
+			continue
+		}
+
+		allVideos = append(allVideos, videos...)
+
+		// Check if we've reached the limit
+		if limit > 0 && len(allVideos) >= limit {
+			allVideos = allVideos[:limit]
+			break
+		}
+	}
+
+	log.Info().
+		Int("total_videos", len(allVideos)).
+		Msg("Snowball sampling complete (simplified - no link extraction yet)")
+
+	// Note: This is a simplified implementation that only fetches from seed channels
+	// A full implementation would extract channel links and traverse the network
+	log.Warn().Msg("GetSnowballVideos has simplified implementation - no channel link extraction yet")
+
+	return allVideos, nil
 }
 
 // getCachedVideoStats checks if video statistics are already cached
