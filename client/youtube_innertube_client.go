@@ -22,6 +22,11 @@ const (
 	defaultVideoCacheSize    = 10000 // ~10MB typical
 )
 
+// Default timeout values for API calls
+const (
+	defaultAPITimeout = 30 * time.Second // Default timeout for InnerTube API calls
+)
+
 // Pre-compiled regex patterns for parsing (compiled once, reused many times)
 var (
 	// Extract numeric values from text like "43.2M" or "1,234"
@@ -45,14 +50,16 @@ type YouTubeInnerTubeClient struct {
 	videoStatsCache      *lru.Cache[string, *youtubemodel.YouTubeVideo]
 
 	// Configuration
-	clientType    string // "WEB", "ANDROID", "IOS", etc.
-	clientVersion string
+	clientType    string        // "WEB", "ANDROID", "IOS", etc.
+	clientVersion string        // Version string for the client
+	apiTimeout    time.Duration // Timeout for API calls
 }
 
 // InnerTubeConfig contains configuration for the InnerTube client
 type InnerTubeConfig struct {
-	ClientType    string // Default: "WEB"
-	ClientVersion string // Default: "2.20230728.00.00"
+	ClientType    string        // Default: "WEB"
+	ClientVersion string        // Default: "2.20230728.00.00"
+	APITimeout    time.Duration // Timeout for API calls (default: 30s)
 }
 
 // NewYouTubeInnerTubeClient creates a new YouTube client using the InnerTube API
@@ -73,9 +80,14 @@ func NewYouTubeInnerTubeClient(config *InnerTubeConfig) (*YouTubeInnerTubeClient
 		config.ClientVersion = "2.20230728.00.00"
 	}
 
+	if config.APITimeout == 0 {
+		config.APITimeout = defaultAPITimeout
+	}
+
 	log.Info().
 		Str("client_type", config.ClientType).
 		Str("client_version", config.ClientVersion).
+		Dur("api_timeout", config.APITimeout).
 		Msg("Creating YouTube InnerTube client")
 
 	// Create LRU caches with size limits
@@ -97,6 +109,7 @@ func NewYouTubeInnerTubeClient(config *InnerTubeConfig) (*YouTubeInnerTubeClient
 	return &YouTubeInnerTubeClient{
 		clientType:           config.ClientType,
 		clientVersion:        config.ClientVersion,
+		apiTimeout:           config.APITimeout,
 		channelCache:         channelCache,
 		uploadsPlaylistCache: uploadsPlaylistCache,
 		videoStatsCache:      videoStatsCache,
@@ -195,10 +208,18 @@ func (c *YouTubeInnerTubeClient) GetChannelInfo(ctx context.Context, channelID s
 	// InnerTube API requires a browse ID which is typically the channel ID
 	browseID := channelID
 
+	// Apply timeout to API call
+	apiCtx, cancel := context.WithTimeout(ctx, c.apiTimeout)
+	defer cancel()
+
 	// Call the browse endpoint
 	// Parameters: context, browseID, params, continuation
-	data, err := c.client.Browse(ctx, &browseID, nil, nil)
+	data, err := c.client.Browse(apiCtx, &browseID, nil, nil)
 	if err != nil {
+		if apiCtx.Err() == context.DeadlineExceeded {
+			log.Error().Str("channel_id", channelID).Dur("timeout", c.apiTimeout).Msg("API call timed out")
+			return nil, fmt.Errorf("browse channel timed out after %v: %w", c.apiTimeout, err)
+		}
 		log.Error().Err(err).Str("channel_id", channelID).Msg("Failed to browse channel")
 		return nil, fmt.Errorf("failed to browse channel: %w", err)
 	}
@@ -279,9 +300,18 @@ func (c *YouTubeInnerTubeClient) GetVideosFromChannel(ctx context.Context, chann
 
 	// Browse the channel to get videos
 	browseID := channelID
+
+	// Apply timeout to API call
+	apiCtx, cancel := context.WithTimeout(ctx, c.apiTimeout)
+	defer cancel()
+
 	// Parameters: context, browseID, params, continuation
-	data, err := c.client.Browse(ctx, &browseID, nil, nil)
+	data, err := c.client.Browse(apiCtx, &browseID, nil, nil)
 	if err != nil {
+		if apiCtx.Err() == context.DeadlineExceeded {
+			log.Error().Str("channel_id", channelID).Dur("timeout", c.apiTimeout).Msg("API call timed out")
+			return nil, fmt.Errorf("browse channel for videos timed out after %v: %w", c.apiTimeout, err)
+		}
 		log.Error().Err(err).Str("channel_id", channelID).Msg("Failed to browse channel for videos")
 		return nil, fmt.Errorf("failed to browse channel: %w", err)
 	}
