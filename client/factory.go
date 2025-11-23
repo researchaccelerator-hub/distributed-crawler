@@ -25,11 +25,28 @@ func (f *DefaultClientFactory) CreateClient(ctx context.Context, platformType st
 	case "telegram":
 		return NewTelegramClient(config)
 	case "youtube":
-		apiKey, ok := config["api_key"].(string)
-		if !ok || apiKey == "" {
-			return nil, fmt.Errorf("youtube client requires api_key in config")
+		// Check if we should use InnerTube instead of Data API
+		useInnerTube := getConfigBool(config, "use_innertube", false)
+
+		if useInnerTube {
+			// Use InnerTube API (no API key required)
+			innerTubeConfig := &InnerTubeConfig{
+				ClientType:    getConfigString(config, "client_type", "WEB"),
+				ClientVersion: getConfigString(config, "client_version", "2.20230728.00.00"),
+			}
+			client, err := NewYouTubeInnerTubeClient(innerTubeConfig)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create InnerTube client: %w", err)
+			}
+			return &YouTubeInnerTubeClientAdapter{client: client}, nil
+		} else {
+			// Use YouTube Data API (requires API key)
+			apiKey, ok := config["api_key"].(string)
+			if !ok || apiKey == "" {
+				return nil, fmt.Errorf("youtube client requires api_key in config (or set use_innertube=true)")
+			}
+			return NewYouTubeClientAdapter(apiKey)
 		}
-		return NewYouTubeClientAdapter(apiKey)
 	case "bluesky":
 		// Extract Bluesky configuration
 		blueskyConfig := BlueskyConfig{
@@ -79,6 +96,13 @@ func getConfigStringSlice(config map[string]interface{}, key string, defaultValu
 
 func getConfigInt(config map[string]interface{}, key string, defaultValue int) int {
 	if val, ok := config[key].(int); ok {
+		return val
+	}
+	return defaultValue
+}
+
+func getConfigBool(config map[string]interface{}, key string, defaultValue bool) bool {
+	if val, ok := config[key].(bool); ok {
 		return val
 	}
 	return defaultValue

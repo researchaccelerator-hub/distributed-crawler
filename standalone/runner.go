@@ -437,15 +437,20 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		clientCtx := context.Background()
 		clientFactory := clientpkg.NewDefaultClientFactory()
 		
-		// Debug API key passing
-		if crawlCfg.YouTubeAPIKey == "" {
-			log.Error().Msg("YouTube API key is empty - make sure you provided it with --youtube-api-key")
+		// Debug API key or InnerTube selection
+		if crawlCfg.UseInnerTube {
+			log.Info().Msg("Using YouTube InnerTube API (no API key required)")
 		} else {
-			log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(crawlCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
+			if crawlCfg.YouTubeAPIKey == "" {
+				log.Error().Msg("YouTube API key is empty - make sure you provided it with --youtube-api-key or use --use-innertube")
+			} else {
+				log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(crawlCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
+			}
 		}
-		
+
 		config := map[string]interface{}{
-			"api_key": crawlCfg.YouTubeAPIKey,
+			"api_key":       crawlCfg.YouTubeAPIKey,
+			"use_innertube": crawlCfg.UseInnerTube,
 		}
 		
 		var err error

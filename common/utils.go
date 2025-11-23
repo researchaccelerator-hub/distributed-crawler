@@ -40,6 +40,7 @@ type CrawlerConfig struct {
 	SkipMediaDownload bool   // Skip downloading media files (only process metadata)
 	Platform          string // Platform to crawl: "telegram", "youtube", etc.
 	YouTubeAPIKey     string // API key for YouTube Data API
+	UseInnerTube      bool   // Use YouTube InnerTube API instead of Data API (no key required)
 	SamplingMethod    string // Sampling method: "channel", "random", "snowball", "random-walk"
 	SeedSize          int    // Number of discovered channels to use as seed channels in random-walk crawl
 	WalkbackRate      int    // Rate to walkback using random-walk sampling method
