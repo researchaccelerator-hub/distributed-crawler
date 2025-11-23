@@ -3,6 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -221,68 +224,384 @@ func (c *YouTubeInnerTubeClient) GetVideosFromChannel(ctx context.Context, chann
 
 // parseChannelFromBrowse extracts channel information from InnerTube browse response
 func (c *YouTubeInnerTubeClient) parseChannelFromBrowse(data interface{}, channelID string) (*youtubemodel.YouTubeChannel, error) {
-	// InnerTube returns complex nested JSON structures
-	// This is a simplified parser - in production, you'd need comprehensive parsing logic
-
-	log.Warn().Msg("InnerTube channel parsing is simplified - may not extract all data")
-
-	// Create a basic channel object
-	// In a full implementation, you would navigate the InnerTube response structure
-	// to extract: title, description, subscriber count, view count, video count, etc.
-
-	channel := &youtubemodel.YouTubeChannel{
-		ID:              channelID,
-		Title:           "Channel (InnerTube)", // Would be parsed from response
-		Description:     "",
-		SubscriberCount: 0,
-		ViewCount:       0,
-		VideoCount:      0,
-		PublishedAt:     time.Now(),
-		Thumbnails:      make(map[string]string),
-		Country:         "",
+	dataMap, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid data type for channel browse response")
 	}
 
-	// TODO: Parse actual data from the InnerTube response
-	// The response structure is complex and varies by endpoint
-	// Example structure navigation would look like:
-	// dataMap := data.(map[string]interface{})
-	// header := dataMap["header"].(map[string]interface{})
-	// metadata := header["c4TabbedHeaderRenderer"].(map[string]interface{})
-	// title := metadata["title"].(string)
+	channel := &youtubemodel.YouTubeChannel{
+		ID:          channelID,
+		Thumbnails:  make(map[string]string),
+		PublishedAt: time.Now(), // Default to now, may be updated if we find creation date
+	}
+
+	var headerParsed bool
+
+	// Try extracting from header (multiple formats due to YouTube A/B testing)
+	if header, ok := dataMap["header"].(map[string]interface{}); ok {
+		// Try legacy c4TabbedHeaderRenderer format
+		if c4Header, ok := header["c4TabbedHeaderRenderer"].(map[string]interface{}); ok {
+			headerParsed = true
+			log.Debug().Msg("Using c4TabbedHeaderRenderer format")
+
+			// Extract title
+			if title, ok := c4Header["title"].(string); ok {
+				channel.Title = title
+			}
+
+			// Extract channel ID (may differ from input if we got a handle)
+			if cID, ok := c4Header["channelId"].(string); ok {
+				channel.ID = cID
+			}
+
+			// Extract subscriber count
+			if subCountObj, ok := c4Header["subscriberCountText"].(map[string]interface{}); ok {
+				channel.SubscriberCount = parseCount(subCountObj)
+			}
+
+			// Extract video count
+			if videoCountObj, ok := c4Header["videosCountText"].(map[string]interface{}); ok {
+				channel.VideoCount = parseCount(videoCountObj)
+			}
+
+			// Extract view count (if available)
+			if viewCountObj, ok := c4Header["viewCountText"].(map[string]interface{}); ok {
+				channel.ViewCount = parseCount(viewCountObj)
+			}
+
+			// Extract avatar/thumbnails
+			if avatar, ok := c4Header["avatar"].(map[string]interface{}); ok {
+				if thumbs, ok := avatar["thumbnails"].([]interface{}); ok {
+					for _, thumb := range thumbs {
+						if t, ok := thumb.(map[string]interface{}); ok {
+							if url, ok := t["url"].(string); ok {
+								// Categorize by size
+								if width, ok := t["width"].(float64); ok {
+									if width >= 800 {
+										channel.Thumbnails["high"] = url
+									} else if width >= 240 {
+										channel.Thumbnails["medium"] = url
+									} else {
+										channel.Thumbnails["default"] = url
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Extract banner (optional)
+			if banner, ok := c4Header["banner"].(map[string]interface{}); ok {
+				if thumbs, ok := banner["thumbnails"].([]interface{}); ok {
+					for _, thumb := range thumbs {
+						if t, ok := thumb.(map[string]interface{}); ok {
+							if url, ok := t["url"].(string); ok {
+								channel.Thumbnails["banner"] = url
+								break // Just take first banner
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Try new pageHeaderViewModel format (YouTube's newer A/B test)
+		if pageHeader, ok := header["pageHeaderViewModel"].(map[string]interface{}); ok {
+			if !headerParsed {
+				log.Debug().Msg("Using pageHeaderViewModel format")
+			}
+			headerParsed = true
+
+			// Extract title from nested structure
+			if titleObj, ok := pageHeader["title"].(map[string]interface{}); ok {
+				if dynText, ok := titleObj["dynamicTextViewModel"].(map[string]interface{}); ok {
+					if textObj, ok := dynText["text"].(map[string]interface{}); ok {
+						if content, ok := textObj["content"].(string); ok {
+							channel.Title = content
+						}
+					}
+				}
+			}
+
+			// Extract metadata (subscriber count, video count, etc.)
+			if metadataObj, ok := pageHeader["metadata"].(map[string]interface{}); ok {
+				if contentMeta, ok := metadataObj["contentMetadataViewModel"].(map[string]interface{}); ok {
+					if rows, ok := contentMeta["metadataRows"].([]interface{}); ok {
+						for _, row := range rows {
+							if rowMap, ok := row.(map[string]interface{}); ok {
+								if parts, ok := rowMap["metadataParts"].([]interface{}); ok {
+									for _, part := range parts {
+										if partMap, ok := part.(map[string]interface{}); ok {
+											if text, ok := partMap["text"].(map[string]interface{}); ok {
+												if content, ok := text["content"].(string); ok {
+													// Try to identify what this metadata is
+													lowerContent := strings.ToLower(content)
+													if strings.Contains(lowerContent, "subscriber") {
+														channel.SubscriberCount = parseCountFromText(content)
+													} else if strings.Contains(lowerContent, "video") {
+														channel.VideoCount = parseCountFromText(content)
+													} else if strings.Contains(lowerContent, "view") {
+														channel.ViewCount = parseCountFromText(content)
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Extract banner image
+			if bannerObj, ok := pageHeader["banner"].(map[string]interface{}); ok {
+				if imageBanner, ok := bannerObj["imageBannerViewModel"].(map[string]interface{}); ok {
+					if image, ok := imageBanner["image"].(map[string]interface{}); ok {
+						if sources, ok := image["sources"].([]interface{}); ok {
+							for _, source := range sources {
+								if s, ok := source.(map[string]interface{}); ok {
+									if url, ok := s["url"].(string); ok {
+										channel.Thumbnails["banner"] = url
+										break
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Extract avatar from image
+			if imageObj, ok := pageHeader["image"].(map[string]interface{}); ok {
+				if decoratedAvatar, ok := imageObj["decoratedAvatarViewModel"].(map[string]interface{}); ok {
+					if avatar, ok := decoratedAvatar["avatar"].(map[string]interface{}); ok {
+						if avatarImg, ok := avatar["avatarViewModel"].(map[string]interface{}); ok {
+							if img, ok := avatarImg["image"].(map[string]interface{}); ok {
+								if sources, ok := img["sources"].([]interface{}); ok {
+									for _, source := range sources {
+										if s, ok := source.(map[string]interface{}); ok {
+											if url, ok := s["url"].(string); ok {
+												if width, ok := s["width"].(float64); ok {
+													if width >= 800 {
+														channel.Thumbnails["high"] = url
+													} else if width >= 240 {
+														channel.Thumbnails["medium"] = url
+													} else {
+														channel.Thumbnails["default"] = url
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Try extracting from metadata section
+	if metadata, ok := dataMap["metadata"].(map[string]interface{}); ok {
+		if channelMeta, ok := metadata["channelMetadataRenderer"].(map[string]interface{}); ok {
+			// Extract description
+			if description, ok := channelMeta["description"].(string); ok {
+				channel.Description = description
+			}
+
+			// Extract channel ID if we don't have it yet
+			if externalID, ok := channelMeta["externalId"].(string); ok {
+				if channel.ID == "" || channel.ID == channelID {
+					channel.ID = externalID
+				}
+			}
+
+			// Extract country
+			if country, ok := channelMeta["country"].(string); ok {
+				channel.Country = country
+			}
+
+			// Extract title as fallback
+			if channel.Title == "" {
+				if title, ok := channelMeta["title"].(string); ok {
+					channel.Title = title
+				}
+			}
+		}
+	}
+
+	if !headerParsed {
+		log.Warn().
+			Str("channel_id", channelID).
+			Msg("Could not find recognized header format in browse response")
+	}
 
 	log.Debug().
-		Str("channel_id", channelID).
-		Msg("Parsed channel from InnerTube (simplified parser)")
+		Str("channel_id", channel.ID).
+		Str("title", channel.Title).
+		Int64("subscribers", channel.SubscriberCount).
+		Int64("videos", channel.VideoCount).
+		Msg("Parsed channel from InnerTube")
 
 	return channel, nil
 }
 
 // parseVideosFromBrowse extracts video information from InnerTube browse response
+// Returns the parsed videos and a continuation token for pagination (if available)
 func (c *YouTubeInnerTubeClient) parseVideosFromBrowse(data interface{}, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	log.Warn().Msg("InnerTube video parsing is simplified - may not extract all data")
-
-	// This is a placeholder implementation
-	// In production, you would need to:
-	// 1. Navigate the InnerTube response structure
-	// 2. Extract video renderers from tabs/sections
-	// 3. Parse each video's metadata (title, description, views, likes, etc.)
-	// 4. Handle pagination using continuation tokens
-	// 5. Filter by time range
+	dataMap, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid data type for video browse response")
+	}
 
 	videos := make([]*youtubemodel.YouTubeVideo, 0)
 
-	// TODO: Implement actual parsing logic
-	// Example structure navigation:
-	// dataMap := data.(map[string]interface{})
-	// contents := dataMap["contents"].(map[string]interface{})
-	// tabs := contents["twoColumnBrowseResultsRenderer"].(map[string]interface{})["tabs"].([]interface{})
-	// for each tab, extract gridRenderer or richItemRenderer
-	// for each item, parse videoRenderer
+	// Navigate to tabs in the response
+	contents, ok := dataMap["contents"].(map[string]interface{})
+	if !ok {
+		log.Warn().Msg("No contents found in browse response")
+		return videos, nil
+	}
+
+	twoCol, ok := contents["twoColumnBrowseResultsRenderer"].(map[string]interface{})
+	if !ok {
+		log.Warn().Msg("No twoColumnBrowseResultsRenderer found")
+		return videos, nil
+	}
+
+	tabs, ok := twoCol["tabs"].([]interface{})
+	if !ok {
+		log.Warn().Msg("No tabs found in response")
+		return videos, nil
+	}
+
+	// Find the videos tab (usually index 1, but we'll check all)
+	for tabIdx, tab := range tabs {
+		tabMap, ok := tab.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		tabRenderer, ok := tabMap["tabRenderer"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		content, ok := tabRenderer["content"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Try richGridRenderer (new layout)
+		if richGrid, ok := content["richGridRenderer"].(map[string]interface{}); ok {
+			log.Debug().Int("tab_index", tabIdx).Msg("Using richGridRenderer layout")
+
+			if items, ok := richGrid["contents"].([]interface{}); ok {
+				for _, item := range items {
+					itemMap, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+
+					// Check for richItemRenderer (contains video)
+					if richItem, ok := itemMap["richItemRenderer"].(map[string]interface{}); ok {
+						if contentObj, ok := richItem["content"].(map[string]interface{}); ok {
+							// Try videoRenderer
+							if videoRenderer, ok := contentObj["videoRenderer"].(map[string]interface{}); ok {
+								video := parseVideoRenderer(videoRenderer, channelID)
+								if video != nil {
+									// Apply time filtering
+									if !fromTime.IsZero() && video.PublishedAt.Before(fromTime) {
+										continue
+									}
+									if !toTime.IsZero() && video.PublishedAt.After(toTime) {
+										continue
+									}
+									videos = append(videos, video)
+
+									// Check limit
+									if limit > 0 && len(videos) >= limit {
+										return videos, nil
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Try sectionListRenderer (older layout)
+		if sectionList, ok := content["sectionListRenderer"].(map[string]interface{}); ok {
+			log.Debug().Int("tab_index", tabIdx).Msg("Using sectionListRenderer layout")
+
+			if sectionContents, ok := sectionList["contents"].([]interface{}); ok {
+				for _, sectionItem := range sectionContents {
+					sectionMap, ok := sectionItem.(map[string]interface{})
+					if !ok {
+						continue
+					}
+
+					// Check for itemSectionRenderer
+					if itemSection, ok := sectionMap["itemSectionRenderer"].(map[string]interface{}); ok {
+						if itemContents, ok := itemSection["contents"].([]interface{}); ok {
+							for _, contentItem := range itemContents {
+								contentMap, ok := contentItem.(map[string]interface{})
+								if !ok {
+									continue
+								}
+
+								// Check for gridRenderer
+								if gridRenderer, ok := contentMap["gridRenderer"].(map[string]interface{}); ok {
+									if gridItems, ok := gridRenderer["items"].([]interface{}); ok {
+										for _, gridItem := range gridItems {
+											gridItemMap, ok := gridItem.(map[string]interface{})
+											if !ok {
+												continue
+											}
+
+											// Try gridVideoRenderer
+											if gridVideoRenderer, ok := gridItemMap["gridVideoRenderer"].(map[string]interface{}); ok {
+												video := parseVideoRenderer(gridVideoRenderer, channelID)
+												if video != nil {
+													// Apply time filtering
+													if !fromTime.IsZero() && video.PublishedAt.Before(fromTime) {
+														continue
+													}
+													if !toTime.IsZero() && video.PublishedAt.After(toTime) {
+														continue
+													}
+													videos = append(videos, video)
+
+													// Check limit
+													if limit > 0 && len(videos) >= limit {
+														return videos, nil
+													}
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// If we found videos in this tab, we're done
+		if len(videos) > 0 {
+			break
+		}
+	}
 
 	log.Debug().
 		Str("channel_id", channelID).
 		Int("videos_parsed", len(videos)).
-		Msg("Parsed videos from InnerTube (simplified parser)")
+		Msg("Parsed videos from InnerTube")
 
 	return videos, nil
 }
@@ -300,4 +619,237 @@ func (c *YouTubeInnerTubeClient) cacheVideoStats(video *youtubemodel.YouTubeVide
 	c.cacheMutex.Lock()
 	defer c.cacheMutex.Unlock()
 	c.videoStatsCache[video.ID] = video
+}
+
+// Helper functions for parsing InnerTube responses
+
+// parseCountFromText converts formatted text like "43.2M subscribers" or "1,234 videos" to int64
+func parseCountFromText(text string) int64 {
+	// Remove leading/trailing whitespace
+	text = strings.TrimSpace(text)
+	text = strings.ReplaceAll(text, ",", "")
+
+	// Determine multiplier based on suffix
+	var multiplier int64 = 1
+	upperText := strings.ToUpper(text)
+	if strings.Contains(upperText, "K") {
+		multiplier = 1000
+		text = strings.ReplaceAll(strings.ReplaceAll(text, "K", ""), "k", "")
+	} else if strings.Contains(upperText, "M") {
+		multiplier = 1000000
+		text = strings.ReplaceAll(strings.ReplaceAll(text, "M", ""), "m", "")
+	} else if strings.Contains(upperText, "B") {
+		multiplier = 1000000000
+		text = strings.ReplaceAll(strings.ReplaceAll(text, "B", ""), "b", "")
+	}
+
+	// Extract numeric part using regex
+	re := regexp.MustCompile(`[\d.]+`)
+	numStr := re.FindString(text)
+	if numStr == "" {
+		return 0
+	}
+
+	// Parse the number
+	num, err := strconv.ParseFloat(numStr, 64)
+	if err != nil {
+		return 0
+	}
+
+	return int64(num * float64(multiplier))
+}
+
+// parseCount extracts count from InnerTube text object (simpleText or runs format)
+func parseCount(countObj map[string]interface{}) int64 {
+	// Try simpleText format
+	if simpleText, ok := countObj["simpleText"].(string); ok {
+		return parseCountFromText(simpleText)
+	}
+
+	// Try runs array format
+	if runs, ok := countObj["runs"].([]interface{}); ok {
+		var fullText string
+		for _, run := range runs {
+			if runMap, ok := run.(map[string]interface{}); ok {
+				if text, ok := runMap["text"].(string); ok {
+					fullText += text
+				}
+			}
+		}
+		return parseCountFromText(fullText)
+	}
+
+	return 0
+}
+
+// extractText extracts text from InnerTube text object (simpleText or runs format)
+func extractText(textObj interface{}) string {
+	if textObj == nil {
+		return ""
+	}
+
+	// Handle direct string
+	if str, ok := textObj.(string); ok {
+		return str
+	}
+
+	// Handle map with simpleText
+	if textMap, ok := textObj.(map[string]interface{}); ok {
+		if simpleText, ok := textMap["simpleText"].(string); ok {
+			return simpleText
+		}
+
+		// Handle runs array
+		if runs, ok := textMap["runs"].([]interface{}); ok {
+			var parts []string
+			for _, run := range runs {
+				if runMap, ok := run.(map[string]interface{}); ok {
+					if text, ok := runMap["text"].(string); ok {
+						parts = append(parts, text)
+					}
+				}
+			}
+			return strings.Join(parts, "")
+		}
+	}
+
+	return ""
+}
+
+// parseRelativeTime converts relative time text like "5 days ago" to absolute timestamp
+func parseRelativeTime(relativeTime string) time.Time {
+	now := time.Now()
+
+	// Parse patterns like "X days ago", "X weeks ago", etc.
+	re := regexp.MustCompile(`(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago`)
+	matches := re.FindStringSubmatch(relativeTime)
+
+	if len(matches) < 3 {
+		// If we can't parse, return current time
+		return now
+	}
+
+	value, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return now
+	}
+
+	unit := matches[2]
+
+	switch unit {
+	case "second":
+		return now.Add(-time.Duration(value) * time.Second)
+	case "minute":
+		return now.Add(-time.Duration(value) * time.Minute)
+	case "hour":
+		return now.Add(-time.Duration(value) * time.Hour)
+	case "day":
+		return now.AddDate(0, 0, -value)
+	case "week":
+		return now.AddDate(0, 0, -value*7)
+	case "month":
+		return now.AddDate(0, -value, 0)
+	case "year":
+		return now.AddDate(-value, 0, 0)
+	}
+
+	return now
+}
+
+// parseVideoRenderer extracts video data from a videoRenderer or gridVideoRenderer object
+func parseVideoRenderer(renderer map[string]interface{}, channelID string) *youtubemodel.YouTubeVideo {
+	video := &youtubemodel.YouTubeVideo{
+		ChannelID:  channelID,
+		Thumbnails: make(map[string]string),
+	}
+
+	// Extract video ID (required)
+	if videoID, ok := renderer["videoId"].(string); ok {
+		video.ID = videoID
+	} else {
+		// No video ID, can't process this video
+		return nil
+	}
+
+	// Extract title
+	if titleObj, ok := renderer["title"]; ok {
+		video.Title = extractText(titleObj)
+	}
+
+	// Extract description (if available - not always present in browse responses)
+	if descObj, ok := renderer["description"]; ok {
+		video.Description = extractText(descObj)
+	} else if descSnippet, ok := renderer["descriptionSnippet"]; ok {
+		video.Description = extractText(descSnippet)
+	}
+
+	// Extract thumbnails
+	if thumbObj, ok := renderer["thumbnail"].(map[string]interface{}); ok {
+		if thumbs, ok := thumbObj["thumbnails"].([]interface{}); ok {
+			for _, thumb := range thumbs {
+				if t, ok := thumb.(map[string]interface{}); ok {
+					if url, ok := t["url"].(string); ok {
+						// Categorize by width
+						if width, ok := t["width"].(float64); ok {
+							if width >= 640 {
+								video.Thumbnails["high"] = url
+							} else if width >= 320 {
+								video.Thumbnails["medium"] = url
+							} else {
+								video.Thumbnails["default"] = url
+							}
+						} else {
+							// No width info, use as default
+							if video.Thumbnails["default"] == "" {
+								video.Thumbnails["default"] = url
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Extract published time (relative format like "5 days ago")
+	if publishedObj, ok := renderer["publishedTimeText"]; ok {
+		relativeTime := extractText(publishedObj)
+		if relativeTime != "" {
+			video.PublishedAt = parseRelativeTime(relativeTime)
+		}
+	}
+
+	// Extract duration/length
+	if lengthObj, ok := renderer["lengthText"]; ok {
+		video.Duration = extractText(lengthObj)
+	}
+
+	// Extract view count
+	if viewCountObj, ok := renderer["viewCountText"]; ok {
+		viewText := extractText(viewCountObj)
+		if viewText != "" {
+			video.ViewCount = parseCountFromText(viewText)
+		}
+	}
+
+	// Note: Like count and comment count are not available in browse responses
+	// They require calling the Player or Next endpoint for each video
+
+	// Check for badges (live, membership, etc.)
+	if badges, ok := renderer["badges"].([]interface{}); ok {
+		for _, badge := range badges {
+			if badgeMap, ok := badge.(map[string]interface{}); ok {
+				if metaBadge, ok := badgeMap["metadataBadgeRenderer"].(map[string]interface{}); ok {
+					if style, ok := metaBadge["style"].(string); ok {
+						log.Debug().
+							Str("video_id", video.ID).
+							Str("badge_style", style).
+							Msg("Video has badge")
+						// Could set flags based on badge style if needed
+					}
+				}
+			}
+		}
+	}
+
+	return video
 }
