@@ -352,67 +352,7 @@ func (c *YouTubeInnerTubeClient) parseChannelFromBrowse(data interface{}, channe
 		if c4Header, ok := header["c4TabbedHeaderRenderer"].(map[string]interface{}); ok {
 			headerParsed = true
 			log.Debug().Msg("Using c4TabbedHeaderRenderer format")
-
-			// Extract title
-			if title, ok := c4Header["title"].(string); ok {
-				channel.Title = title
-			}
-
-			// Extract channel ID (may differ from input if we got a handle)
-			if cID, ok := c4Header["channelId"].(string); ok {
-				channel.ID = cID
-			}
-
-			// Extract subscriber count
-			if subCountObj, ok := c4Header["subscriberCountText"].(map[string]interface{}); ok {
-				channel.SubscriberCount = parseCount(subCountObj)
-			}
-
-			// Extract video count
-			if videoCountObj, ok := c4Header["videosCountText"].(map[string]interface{}); ok {
-				channel.VideoCount = parseCount(videoCountObj)
-			}
-
-			// Extract view count (if available)
-			if viewCountObj, ok := c4Header["viewCountText"].(map[string]interface{}); ok {
-				channel.ViewCount = parseCount(viewCountObj)
-			}
-
-			// Extract avatar/thumbnails
-			if avatar, ok := c4Header["avatar"].(map[string]interface{}); ok {
-				if thumbs, ok := avatar["thumbnails"].([]interface{}); ok {
-					for _, thumb := range thumbs {
-						if t, ok := thumb.(map[string]interface{}); ok {
-							if url, ok := t["url"].(string); ok {
-								// Categorize by size
-								if width, ok := t["width"].(float64); ok {
-									if width >= 800 {
-										channel.Thumbnails["high"] = url
-									} else if width >= 240 {
-										channel.Thumbnails["medium"] = url
-									} else {
-										channel.Thumbnails["default"] = url
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// Extract banner (optional)
-			if banner, ok := c4Header["banner"].(map[string]interface{}); ok {
-				if thumbs, ok := banner["thumbnails"].([]interface{}); ok {
-					for _, thumb := range thumbs {
-						if t, ok := thumb.(map[string]interface{}); ok {
-							if url, ok := t["url"].(string); ok {
-								channel.Thumbnails["banner"] = url
-								break // Just take first banner
-							}
-						}
-					}
-				}
-			}
+			parseC4TabbedHeader(c4Header, channel)
 		}
 
 		// Try new pageHeaderViewModel format (YouTube's newer A/B test)
@@ -421,125 +361,13 @@ func (c *YouTubeInnerTubeClient) parseChannelFromBrowse(data interface{}, channe
 				log.Debug().Msg("Using pageHeaderViewModel format")
 			}
 			headerParsed = true
-
-			// Extract title from nested structure
-			if titleObj, ok := pageHeader["title"].(map[string]interface{}); ok {
-				if dynText, ok := titleObj["dynamicTextViewModel"].(map[string]interface{}); ok {
-					if textObj, ok := dynText["text"].(map[string]interface{}); ok {
-						if content, ok := textObj["content"].(string); ok {
-							channel.Title = content
-						}
-					}
-				}
-			}
-
-			// Extract metadata (subscriber count, video count, etc.)
-			if metadataObj, ok := pageHeader["metadata"].(map[string]interface{}); ok {
-				if contentMeta, ok := metadataObj["contentMetadataViewModel"].(map[string]interface{}); ok {
-					if rows, ok := contentMeta["metadataRows"].([]interface{}); ok {
-						for _, row := range rows {
-							if rowMap, ok := row.(map[string]interface{}); ok {
-								if parts, ok := rowMap["metadataParts"].([]interface{}); ok {
-									for _, part := range parts {
-										if partMap, ok := part.(map[string]interface{}); ok {
-											if text, ok := partMap["text"].(map[string]interface{}); ok {
-												if content, ok := text["content"].(string); ok {
-													// Try to identify what this metadata is
-													lowerContent := strings.ToLower(content)
-													if strings.Contains(lowerContent, "subscriber") {
-														channel.SubscriberCount = parseCountFromText(content)
-													} else if strings.Contains(lowerContent, "video") {
-														channel.VideoCount = parseCountFromText(content)
-													} else if strings.Contains(lowerContent, "view") {
-														channel.ViewCount = parseCountFromText(content)
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// Extract banner image
-			if bannerObj, ok := pageHeader["banner"].(map[string]interface{}); ok {
-				if imageBanner, ok := bannerObj["imageBannerViewModel"].(map[string]interface{}); ok {
-					if image, ok := imageBanner["image"].(map[string]interface{}); ok {
-						if sources, ok := image["sources"].([]interface{}); ok {
-							for _, source := range sources {
-								if s, ok := source.(map[string]interface{}); ok {
-									if url, ok := s["url"].(string); ok {
-										channel.Thumbnails["banner"] = url
-										break
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// Extract avatar from image
-			if imageObj, ok := pageHeader["image"].(map[string]interface{}); ok {
-				if decoratedAvatar, ok := imageObj["decoratedAvatarViewModel"].(map[string]interface{}); ok {
-					if avatar, ok := decoratedAvatar["avatar"].(map[string]interface{}); ok {
-						if avatarImg, ok := avatar["avatarViewModel"].(map[string]interface{}); ok {
-							if img, ok := avatarImg["image"].(map[string]interface{}); ok {
-								if sources, ok := img["sources"].([]interface{}); ok {
-									for _, source := range sources {
-										if s, ok := source.(map[string]interface{}); ok {
-											if url, ok := s["url"].(string); ok {
-												if width, ok := s["width"].(float64); ok {
-													if width >= 800 {
-														channel.Thumbnails["high"] = url
-													} else if width >= 240 {
-														channel.Thumbnails["medium"] = url
-													} else {
-														channel.Thumbnails["default"] = url
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+			parsePageHeaderViewModel(pageHeader, channel)
 		}
 	}
 
 	// Try extracting from metadata section
 	if metadata, ok := dataMap["metadata"].(map[string]interface{}); ok {
-		if channelMeta, ok := metadata["channelMetadataRenderer"].(map[string]interface{}); ok {
-			// Extract description
-			if description, ok := channelMeta["description"].(string); ok {
-				channel.Description = description
-			}
-
-			// Extract channel ID if we don't have it yet
-			if externalID, ok := channelMeta["externalId"].(string); ok {
-				if channel.ID == "" || channel.ID == channelID {
-					channel.ID = externalID
-				}
-			}
-
-			// Extract country
-			if country, ok := channelMeta["country"].(string); ok {
-				channel.Country = country
-			}
-
-			// Extract title as fallback
-			if channel.Title == "" {
-				if title, ok := channelMeta["title"].(string); ok {
-					channel.Title = title
-				}
-			}
-		}
+		parseChannelMetadata(metadata, channel, channelID)
 	}
 
 	if !headerParsed {
@@ -838,6 +666,207 @@ func (c *YouTubeInnerTubeClient) getCachedVideoStats(videoID string) (*youtubemo
 // cacheVideoStats stores video statistics in cache
 func (c *YouTubeInnerTubeClient) cacheVideoStats(video *youtubemodel.YouTubeVideo) {
 	c.videoStatsCache.Add(video.ID, video)
+}
+
+// Helper functions for channel parsing (reduces parseChannelFromBrowse complexity)
+
+// parseC4TabbedHeader extracts channel data from legacy c4TabbedHeaderRenderer format
+func parseC4TabbedHeader(c4Header map[string]interface{}, channel *youtubemodel.YouTubeChannel) {
+	// Extract title
+	if title, ok := c4Header["title"].(string); ok {
+		channel.Title = title
+	}
+
+	// Extract channel ID (may differ from input if we got a handle)
+	if cID, ok := c4Header["channelId"].(string); ok {
+		channel.ID = cID
+	}
+
+	// Extract subscriber count
+	if subCountObj, ok := c4Header["subscriberCountText"].(map[string]interface{}); ok {
+		channel.SubscriberCount = parseCount(subCountObj)
+	}
+
+	// Extract video count
+	if videoCountObj, ok := c4Header["videosCountText"].(map[string]interface{}); ok {
+		channel.VideoCount = parseCount(videoCountObj)
+	}
+
+	// Extract view count (if available)
+	if viewCountObj, ok := c4Header["viewCountText"].(map[string]interface{}); ok {
+		channel.ViewCount = parseCount(viewCountObj)
+	}
+
+	// Extract avatar/thumbnails
+	if avatar, ok := c4Header["avatar"].(map[string]interface{}); ok {
+		parseThumbnailsFromArray(avatar, channel.Thumbnails, "avatar")
+	}
+
+	// Extract banner (optional)
+	if banner, ok := c4Header["banner"].(map[string]interface{}); ok {
+		parseThumbnailsFromArray(banner, channel.Thumbnails, "banner")
+	}
+}
+
+// parsePageHeaderViewModel extracts channel data from new pageHeaderViewModel format
+func parsePageHeaderViewModel(pageHeader map[string]interface{}, channel *youtubemodel.YouTubeChannel) {
+	// Extract title from nested structure
+	if titleObj, ok := pageHeader["title"].(map[string]interface{}); ok {
+		if dynText, ok := titleObj["dynamicTextViewModel"].(map[string]interface{}); ok {
+			if textObj, ok := dynText["text"].(map[string]interface{}); ok {
+				if content, ok := textObj["content"].(string); ok {
+					channel.Title = content
+				}
+			}
+		}
+	}
+
+	// Extract metadata (subscriber count, video count, etc.)
+	if metadataObj, ok := pageHeader["metadata"].(map[string]interface{}); ok {
+		parseContentMetadata(metadataObj, channel)
+	}
+
+	// Extract banner image
+	if bannerObj, ok := pageHeader["banner"].(map[string]interface{}); ok {
+		parseImageBanner(bannerObj, channel.Thumbnails)
+	}
+
+	// Extract avatar from image
+	if imageObj, ok := pageHeader["image"].(map[string]interface{}); ok {
+		parseDecoratedAvatar(imageObj, channel.Thumbnails)
+	}
+}
+
+// parseContentMetadata extracts counts from contentMetadataViewModel structure
+func parseContentMetadata(metadataObj map[string]interface{}, channel *youtubemodel.YouTubeChannel) {
+	if contentMeta, ok := metadataObj["contentMetadataViewModel"].(map[string]interface{}); ok {
+		if rows, ok := contentMeta["metadataRows"].([]interface{}); ok {
+			for _, row := range rows {
+				if rowMap, ok := row.(map[string]interface{}); ok {
+					if parts, ok := rowMap["metadataParts"].([]interface{}); ok {
+						for _, part := range parts {
+							if partMap, ok := part.(map[string]interface{}); ok {
+								if text, ok := partMap["text"].(map[string]interface{}); ok {
+									if content, ok := text["content"].(string); ok {
+										// Try to identify what this metadata is
+										lowerContent := strings.ToLower(content)
+										if strings.Contains(lowerContent, "subscriber") {
+											channel.SubscriberCount = parseCountFromText(content)
+										} else if strings.Contains(lowerContent, "video") {
+											channel.VideoCount = parseCountFromText(content)
+										} else if strings.Contains(lowerContent, "view") {
+											channel.ViewCount = parseCountFromText(content)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// parseImageBanner extracts banner URL from imageBannerViewModel
+func parseImageBanner(bannerObj map[string]interface{}, thumbnails map[string]string) {
+	if imageBanner, ok := bannerObj["imageBannerViewModel"].(map[string]interface{}); ok {
+		if image, ok := imageBanner["image"].(map[string]interface{}); ok {
+			if sources, ok := image["sources"].([]interface{}); ok {
+				for _, source := range sources {
+					if s, ok := source.(map[string]interface{}); ok {
+						if url, ok := s["url"].(string); ok {
+							thumbnails["banner"] = url
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// parseDecoratedAvatar extracts avatar URLs from decoratedAvatarViewModel
+func parseDecoratedAvatar(imageObj map[string]interface{}, thumbnails map[string]string) {
+	if decoratedAvatar, ok := imageObj["decoratedAvatarViewModel"].(map[string]interface{}); ok {
+		if avatar, ok := decoratedAvatar["avatar"].(map[string]interface{}); ok {
+			if avatarImg, ok := avatar["avatarViewModel"].(map[string]interface{}); ok {
+				if img, ok := avatarImg["image"].(map[string]interface{}); ok {
+					if sources, ok := img["sources"].([]interface{}); ok {
+						categorizeThumbnails(sources, thumbnails)
+					}
+				}
+			}
+		}
+	}
+}
+
+// parseThumbnailsFromArray extracts thumbnails from array format used in older headers
+func parseThumbnailsFromArray(obj map[string]interface{}, thumbnails map[string]string, category string) {
+	if thumbs, ok := obj["thumbnails"].([]interface{}); ok {
+		if category == "banner" {
+			// For banners, just take the first one
+			for _, thumb := range thumbs {
+				if t, ok := thumb.(map[string]interface{}); ok {
+					if url, ok := t["url"].(string); ok {
+						thumbnails["banner"] = url
+						break
+					}
+				}
+			}
+		} else {
+			// For avatars, categorize by size
+			categorizeThumbnails(thumbs, thumbnails)
+		}
+	}
+}
+
+// categorizeThumbnails organizes thumbnails by size (default/medium/high)
+func categorizeThumbnails(sources []interface{}, thumbnails map[string]string) {
+	for _, source := range sources {
+		if s, ok := source.(map[string]interface{}); ok {
+			if url, ok := s["url"].(string); ok {
+				if width, ok := s["width"].(float64); ok {
+					if width >= 800 {
+						thumbnails["high"] = url
+					} else if width >= 240 {
+						thumbnails["medium"] = url
+					} else {
+						thumbnails["default"] = url
+					}
+				}
+			}
+		}
+	}
+}
+
+// parseChannelMetadata extracts data from channelMetadataRenderer section
+func parseChannelMetadata(metadata map[string]interface{}, channel *youtubemodel.YouTubeChannel, fallbackID string) {
+	if channelMeta, ok := metadata["channelMetadataRenderer"].(map[string]interface{}); ok {
+		// Extract description
+		if description, ok := channelMeta["description"].(string); ok {
+			channel.Description = description
+		}
+
+		// Extract channel ID if we don't have it yet
+		if externalID, ok := channelMeta["externalId"].(string); ok {
+			if channel.ID == "" || channel.ID == fallbackID {
+				channel.ID = externalID
+			}
+		}
+
+		// Extract country
+		if country, ok := channelMeta["country"].(string); ok {
+			channel.Country = country
+		}
+
+		// Extract title as fallback
+		if channel.Title == "" {
+			if title, ok := channelMeta["title"].(string); ok {
+				channel.Title = title
+			}
+		}
+	}
 }
 
 // Helper functions for parsing InnerTube responses
