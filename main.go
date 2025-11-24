@@ -196,17 +196,21 @@ Examples:
 		zerolog.SetGlobalLevel(level)
 		log.Info().Str("log_level", level.String()).Msg("Logger initialized")
 
-		// Check YouTube API key if platform is YouTube (skip for dapr-job mode as API key may come from job data)
+		// Check YouTube API configuration if platform is YouTube
 		if crawlerCfg.Platform == "youtube" && mode != "dapr-job" {
-			if crawlerCfg.YouTubeAPIKey == "" {
-				fmt.Println("Error: When using --platform youtube, you must provide a valid YouTube API key with --youtube-api-key")
-				log.Error().Msg("YouTube API key is required but was not provided")
-				return fmt.Errorf("YouTube API key is required for YouTube platform")
+			if crawlerCfg.UseInnerTube {
+				log.Info().Msg("Using YouTube InnerTube API (no API key required)")
 			} else {
-				log.Info().Str("api_key_status", "provided").Str("api_key_length", fmt.Sprintf("%d chars", len(crawlerCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
+				if crawlerCfg.YouTubeAPIKey == "" {
+					fmt.Println("Error: When using --platform youtube without --use-innertube, you must provide a valid YouTube API key with --youtube-api-key")
+					log.Error().Msg("YouTube API key is required but was not provided (or use --use-innertube flag)")
+					return fmt.Errorf("YouTube API key is required for YouTube platform (or use --use-innertube)")
+				} else {
+					log.Info().Str("api_key_status", "provided").Str("api_key_length", fmt.Sprintf("%d chars", len(crawlerCfg.YouTubeAPIKey))).Msg("Using YouTube Data API with API key")
+				}
 			}
 		} else if crawlerCfg.Platform == "youtube" && mode == "dapr-job" {
-			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
+			log.Debug().Msg("YouTube platform selected for dapr-job mode; API configuration will be validated when job data is processed")
 		}
 
 		// TODO: update to just pass the whole crawl config to validate sampling method
@@ -737,6 +741,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&tdlibVerbosity, "tdlib-verbosity", 1, "TDLib verbosity level (0-10, where 10 is most verbose)")
 	rootCmd.PersistentFlags().BoolVar(&skipMediaDownload, "skip-media", false, "Skip downloading media files (thumbnails, videos, etc.)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.YouTubeAPIKey, "youtube-api-key", "", "API key for YouTube Data API")
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.UseInnerTube, "use-innertube", false, "Use YouTube InnerTube API instead of Data API (no API key required)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.Platform, "platform", "telegram", "Platform to crawl (telegram, youtube)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.SamplingMethod, "sampling", "channel", "Sampling method: channel, random, random-walk, snowball")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.SeedSize, "seed-size", 0, "Number of discovered channels to randomly select as seed channels")
@@ -779,6 +784,7 @@ func init() {
 	viper.BindPFlag("crawler.maxpages", rootCmd.PersistentFlags().Lookup("max-pages"))
 	viper.BindPFlag("crawler.skipmedia", rootCmd.PersistentFlags().Lookup("skip-media"))
 	viper.BindPFlag("youtube.api_key", rootCmd.PersistentFlags().Lookup("youtube-api-key"))
+	viper.BindPFlag("youtube.use_innertube", rootCmd.PersistentFlags().Lookup("use-innertube"))
 	viper.BindPFlag("crawler.platform", rootCmd.PersistentFlags().Lookup("platform"))
 	viper.BindPFlag("crawler.sampling", rootCmd.PersistentFlags().Lookup("sampling"))
 	viper.BindPFlag("crawler.seedsize", rootCmd.PersistentFlags().Lookup("seed-size"))

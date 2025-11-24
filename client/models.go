@@ -260,3 +260,132 @@ func (m *YouTubeMessage) GetLanguage() string {
 func (m *YouTubeMessage) GetType() string {
 	return "youtube"
 }
+
+// BlueskyChannel implements Channel for Bluesky
+type BlueskyChannel struct {
+	ID          string
+	Name        string
+	Description string
+	MemberCount int64
+}
+
+// GetID implements Channel
+func (c *BlueskyChannel) GetID() string {
+	return c.ID
+}
+
+// GetName implements Channel
+func (c *BlueskyChannel) GetName() string {
+	return c.Name
+}
+
+// GetDescription implements Channel
+func (c *BlueskyChannel) GetDescription() string {
+	return c.Description
+}
+
+// GetMemberCount implements Channel
+func (c *BlueskyChannel) GetMemberCount() int64 {
+	return c.MemberCount
+}
+
+// GetCountry implements Channel
+func (c *BlueskyChannel) GetCountry() string {
+	return "" // Not available for Bluesky
+}
+
+// GetType implements Channel
+func (c *BlueskyChannel) GetType() string {
+	return "bluesky"
+}
+
+// BlueskyMessage implements Message for Bluesky
+type BlueskyMessage struct {
+	ID           string
+	ChannelID    string
+	SenderID     string
+	SenderName   string
+	Text         string
+	Title        string
+	Description  string
+	Timestamp    time.Time
+	Views        int64
+	Reactions    map[string]int64
+	Thumbnails   map[string]string
+	CommentCount int64
+	Language     string
+	Type         string
+}
+
+// GetID implements Message
+func (m *BlueskyMessage) GetID() string {
+	return m.ID
+}
+
+// GetChannelID implements Message
+func (m *BlueskyMessage) GetChannelID() string {
+	return m.ChannelID
+}
+
+// GetSenderID implements Message
+func (m *BlueskyMessage) GetSenderID() string {
+	return m.SenderID
+}
+
+// GetSenderName implements Message
+func (m *BlueskyMessage) GetSenderName() string {
+	return m.SenderName
+}
+
+// GetText implements Message
+func (m *BlueskyMessage) GetText() string {
+	return m.Text
+}
+
+// GetTimestamp implements Message
+func (m *BlueskyMessage) GetTimestamp() time.Time {
+	return m.Timestamp
+}
+
+// GetViews implements Message
+func (m *BlueskyMessage) GetViews() int64 {
+	return m.Views
+}
+
+// GetReactions implements Message
+func (m *BlueskyMessage) GetReactions() map[string]int64 {
+	return m.Reactions
+}
+
+// GetTitle implements Message
+func (m *BlueskyMessage) GetTitle() string {
+	return m.Title
+}
+
+// GetDescription implements Message
+func (m *BlueskyMessage) GetDescription() string {
+	return m.Description
+}
+
+// GetCommentCount implements Message
+func (m *BlueskyMessage) GetCommentCount() int64 {
+	return m.CommentCount
+}
+
+// GetThumbnails implements Message
+func (m *BlueskyMessage) GetThumbnails() map[string]string {
+	return m.Thumbnails
+}
+
+// GetLanguage implements Message
+func (m *BlueskyMessage) GetLanguage() string {
+	return m.Language
+}
+
+// GetType implements Message
+func (m *BlueskyMessage) GetType() string {
+	if m.Type != "" {
+		return m.Type
+	}
+	return "bluesky"
+}
