@@ -432,104 +432,31 @@ func (c *YouTubeInnerTubeClient) parseVideosFromBrowse(data interface{}, channel
 			continue
 		}
 
+		var foundVideos bool
+		var tabVideos []*youtubemodel.YouTubeVideo
+
 		// Try richGridRenderer (new layout)
 		if richGrid, ok := content["richGridRenderer"].(map[string]interface{}); ok {
 			log.Debug().Int("tab_index", tabIdx).Msg("Using richGridRenderer layout")
-
-			if items, ok := richGrid["contents"].([]interface{}); ok {
-				for _, item := range items {
-					itemMap, ok := item.(map[string]interface{})
-					if !ok {
-						continue
-					}
-
-					// Check for richItemRenderer (contains video)
-					if richItem, ok := itemMap["richItemRenderer"].(map[string]interface{}); ok {
-						if contentObj, ok := richItem["content"].(map[string]interface{}); ok {
-							// Try videoRenderer
-							if videoRenderer, ok := contentObj["videoRenderer"].(map[string]interface{}); ok {
-								video := parseVideoRenderer(videoRenderer, channelID)
-								if video != nil {
-									// Apply time filtering
-									if !fromTime.IsZero() && video.PublishedAt.Before(fromTime) {
-										continue
-									}
-									if !toTime.IsZero() && video.PublishedAt.After(toTime) {
-										continue
-									}
-									videos = append(videos, video)
-
-									// Check limit
-									if limit > 0 && len(videos) >= limit {
-										return videos, nil
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+			tabVideos, foundVideos = parseRichGridRenderer(richGrid, channelID, fromTime, toTime, limit)
+			videos = append(videos, tabVideos...)
 		}
 
 		// Try sectionListRenderer (older layout)
-		if sectionList, ok := content["sectionListRenderer"].(map[string]interface{}); ok {
-			log.Debug().Int("tab_index", tabIdx).Msg("Using sectionListRenderer layout")
-
-			if sectionContents, ok := sectionList["contents"].([]interface{}); ok {
-				for _, sectionItem := range sectionContents {
-					sectionMap, ok := sectionItem.(map[string]interface{})
-					if !ok {
-						continue
-					}
-
-					// Check for itemSectionRenderer
-					if itemSection, ok := sectionMap["itemSectionRenderer"].(map[string]interface{}); ok {
-						if itemContents, ok := itemSection["contents"].([]interface{}); ok {
-							for _, contentItem := range itemContents {
-								contentMap, ok := contentItem.(map[string]interface{})
-								if !ok {
-									continue
-								}
-
-								// Check for gridRenderer
-								if gridRenderer, ok := contentMap["gridRenderer"].(map[string]interface{}); ok {
-									if gridItems, ok := gridRenderer["items"].([]interface{}); ok {
-										for _, gridItem := range gridItems {
-											gridItemMap, ok := gridItem.(map[string]interface{})
-											if !ok {
-												continue
-											}
-
-											// Try gridVideoRenderer
-											if gridVideoRenderer, ok := gridItemMap["gridVideoRenderer"].(map[string]interface{}); ok {
-												video := parseVideoRenderer(gridVideoRenderer, channelID)
-												if video != nil {
-													// Apply time filtering
-													if !fromTime.IsZero() && video.PublishedAt.Before(fromTime) {
-														continue
-													}
-													if !toTime.IsZero() && video.PublishedAt.After(toTime) {
-														continue
-													}
-													videos = append(videos, video)
-
-													// Check limit
-													if limit > 0 && len(videos) >= limit {
-														return videos, nil
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
+		if !foundVideos {
+			if sectionList, ok := content["sectionListRenderer"].(map[string]interface{}); ok {
+				log.Debug().Int("tab_index", tabIdx).Msg("Using sectionListRenderer layout")
+				tabVideos, foundVideos = parseSectionListRenderer(sectionList, channelID, fromTime, toTime, limit-len(videos))
+				videos = append(videos, tabVideos...)
 			}
 		}
 
-		// If we found videos in this tab, we're done
+		// If we found videos in this tab and reached the limit, we're done
+		if foundVideos && limit > 0 && len(videos) >= limit {
+			break
+		}
+
+		// If we found videos in this tab, we're done (even if below limit)
 		if len(videos) > 0 {
 			break
 		}
@@ -867,6 +794,129 @@ func parseChannelMetadata(metadata map[string]interface{}, channel *youtubemodel
 			}
 		}
 	}
+}
+
+// Helper functions for video parsing (reduces parseVideosFromBrowse complexity)
+
+// parseRichGridRenderer extracts videos from richGridRenderer layout (new format)
+func parseRichGridRenderer(richGrid map[string]interface{}, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, bool) {
+	videos := make([]*youtubemodel.YouTubeVideo, 0)
+
+	items, ok := richGrid["contents"].([]interface{})
+	if !ok {
+		return videos, false
+	}
+
+	for _, item := range items {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check for richItemRenderer (contains video)
+		if richItem, ok := itemMap["richItemRenderer"].(map[string]interface{}); ok {
+			if contentObj, ok := richItem["content"].(map[string]interface{}); ok {
+				// Try videoRenderer
+				if videoRenderer, ok := contentObj["videoRenderer"].(map[string]interface{}); ok {
+					video := parseVideoRenderer(videoRenderer, channelID)
+					if video != nil && shouldIncludeVideo(video, fromTime, toTime) {
+						videos = append(videos, video)
+
+						// Check limit
+						if limit > 0 && len(videos) >= limit {
+							return videos, true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return videos, len(videos) > 0
+}
+
+// parseSectionListRenderer extracts videos from sectionListRenderer layout (older format)
+func parseSectionListRenderer(sectionList map[string]interface{}, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, bool) {
+	videos := make([]*youtubemodel.YouTubeVideo, 0)
+
+	sectionContents, ok := sectionList["contents"].([]interface{})
+	if !ok {
+		return videos, false
+	}
+
+	for _, sectionItem := range sectionContents {
+		sectionMap, ok := sectionItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Check for itemSectionRenderer
+		if itemSection, ok := sectionMap["itemSectionRenderer"].(map[string]interface{}); ok {
+			if itemContents, ok := itemSection["contents"].([]interface{}); ok {
+				for _, contentItem := range itemContents {
+					contentMap, ok := contentItem.(map[string]interface{})
+					if !ok {
+						continue
+					}
+
+					// Check for gridRenderer
+					if gridRenderer, ok := contentMap["gridRenderer"].(map[string]interface{}); ok {
+						gridVideos, limitReached := parseGridRenderer(gridRenderer, channelID, fromTime, toTime, limit-len(videos))
+						videos = append(videos, gridVideos...)
+
+						if limitReached {
+							return videos, true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return videos, len(videos) > 0
+}
+
+// parseGridRenderer extracts videos from gridRenderer structure
+func parseGridRenderer(gridRenderer map[string]interface{}, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, bool) {
+	videos := make([]*youtubemodel.YouTubeVideo, 0)
+
+	gridItems, ok := gridRenderer["items"].([]interface{})
+	if !ok {
+		return videos, false
+	}
+
+	for _, gridItem := range gridItems {
+		gridItemMap, ok := gridItem.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Try gridVideoRenderer
+		if gridVideoRenderer, ok := gridItemMap["gridVideoRenderer"].(map[string]interface{}); ok {
+			video := parseVideoRenderer(gridVideoRenderer, channelID)
+			if video != nil && shouldIncludeVideo(video, fromTime, toTime) {
+				videos = append(videos, video)
+
+				// Check limit
+				if limit > 0 && len(videos) >= limit {
+					return videos, true
+				}
+			}
+		}
+	}
+
+	return videos, false
+}
+
+// shouldIncludeVideo checks if video passes time filtering criteria
+func shouldIncludeVideo(video *youtubemodel.YouTubeVideo, fromTime, toTime time.Time) bool {
+	if !fromTime.IsZero() && video.PublishedAt.Before(fromTime) {
+		return false
+	}
+	if !toTime.IsZero() && video.PublishedAt.After(toTime) {
+		return false
+	}
+	return true
 }
 
 // Helper functions for parsing InnerTube responses
