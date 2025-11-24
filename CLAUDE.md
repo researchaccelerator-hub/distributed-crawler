@@ -376,6 +376,215 @@ The Bluesky crawler uses a **streaming time-window approach** that differs from 
 - No engagement counts (likes, reposts) directly from firehose - requires separate API calls
 - Outlinks discovery doesn't trigger snowball crawling (not currently wired up for Bluesky)
 
+## Go API Client Best Practices
+
+Based on the YouTube InnerTube client implementation (see `client/youtube_innertube_*.go`), follow these patterns when building production-ready API clients:
+
+### Phase 1: Critical Production Readiness
+
+**Input Validation**
+- Pre-compile regex patterns at package level (not in functions)
+- Validate all inputs before making API calls
+- Provide clear, actionable error messages
+
+```go
+// Pre-compile patterns
+var channelIDPattern = regexp.MustCompile(`^UC[a-zA-Z0-9_-]{22}$`)
+
+// Validate before API call
+func (c *Client) GetData(id string) error {
+    if err := validateID(id); err != nil {
+        return fmt.Errorf("invalid ID: %w", err)
+    }
+    // ... make API call
+}
+```
+
+**Connection State Management**
+- Track connection state with thread-safe mutex
+- Implement `ensureConnected()` helper
+- Check connection before all operations
+
+```go
+type Client struct {
+    client    *APIClient
+    mu        sync.RWMutex  // Protects client and connected state
+    connected bool
+}
+
+func (c *Client) ensureConnected() error {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+
+    if !c.connected || c.client == nil {
+        return fmt.Errorf("client not connected - call Connect() first")
+    }
+    return nil
+}
+```
+
+**Resource Bounds**
+- Use LRU caches instead of unbounded maps
+- Define cache size limits at package level
+- LRU caches are thread-safe (no manual locking needed)
+
+```go
+import lru "github.com/hashicorp/golang-lru/v2"
+
+const defaultCacheSize = 1000
+
+type Client struct {
+    cache *lru.Cache[string, *Data]  // Not map[string]*Data
+}
+
+func NewClient() (*Client, error) {
+    cache, err := lru.New[string, *Data](defaultCacheSize)
+    if err != nil {
+        return nil, err
+    }
+    return &Client{cache: cache}, nil
+}
+```
+
+**API Timeouts**
+- Configure timeouts (default 30 seconds)
+- Use context.WithTimeout for all API calls
+- Distinguish timeout errors from other errors
+
+```go
+func (c *Client) apiCall(ctx context.Context) error {
+    apiCtx, cancel := context.WithTimeout(ctx, c.apiTimeout)
+    defer cancel()
+
+    data, err := c.client.Call(apiCtx)
+    if err != nil {
+        if apiCtx.Err() == context.DeadlineExceeded {
+            log.Error().Dur("timeout", c.apiTimeout).Msg("API call timed out")
+            return fmt.Errorf("timed out after %v: %w", c.apiTimeout, err)
+        }
+        return fmt.Errorf("API call failed: %w", err)
+    }
+    return nil
+}
+```
+
+### Phase 2: Performance and Maintainability
+
+**Regex Optimization**
+- NEVER compile regex inside functions (especially in loops)
+- Pre-compile at package level
+- Reuse compiled patterns
+
+```go
+// ❌ Wrong - compiles on every call
+func parse(text string) string {
+    re := regexp.MustCompile(`\d+`)  // BAD
+    return re.FindString(text)
+}
+
+// ✅ Correct - compile once at package init
+var numericPattern = regexp.MustCompile(`\d+`)
+
+func parse(text string) string {
+    return numericPattern.FindString(text)
+}
+```
+
+**Parser Refactoring**
+- Keep functions under 100 lines
+- Limit nesting depth to 3-4 levels
+- Extract format-specific parsing into helpers
+- Single responsibility per function
+
+```go
+// ❌ Wrong - 225 lines, 6-7 nesting levels
+func parseChannel(data interface{}) (*Channel, error) {
+    // Massive nested if statements
+}
+
+// ✅ Correct - delegate to focused helpers
+func parseChannel(data interface{}) (*Channel, error) {
+    // 30-40 lines
+    if format1 { parseFormat1(data, channel) }  // 40 lines each
+    if format2 { parseFormat2(data, channel) }
+    if metadata { parseMetadata(data, channel) }
+    return channel, nil
+}
+```
+
+**Deduplication**
+- Extract repeated logic into helper functions
+- Use helper for common filtering/validation
+
+```go
+// ❌ Wrong - repeated 4 times
+if !fromTime.IsZero() && item.Time.Before(fromTime) {
+    continue
+}
+if !toTime.IsZero() && item.Time.After(toTime) {
+    continue
+}
+
+// ✅ Correct - single function
+func shouldInclude(item *Item, fromTime, toTime time.Time) bool {
+    if !fromTime.IsZero() && item.Time.Before(fromTime) {
+        return false
+    }
+    if !toTime.IsZero() && item.Time.After(toTime) {
+        return false
+    }
+    return true
+}
+```
+
+### Phase 3: Testing
+
+**Unit Tests**
+- Table-driven tests for validation
+- 60+ test cases covering edge cases
+- Test validation before testing API logic
+
+**Integration Tests**
+- Real API calls with `-short` skip flag
+- Test with well-known public resources
+- Validate caching behavior
+- Test error conditions (invalid input, timeout, disconnected)
+- Document in separate INTEGRATION_TESTS.md
+
+```go
+func TestIntegration(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping integration test in short mode")
+    }
+    // ... test with real API
+}
+```
+
+### Production Readiness Checklist
+
+Before deploying an API client:
+
+- [ ] Input validation on all public methods
+- [ ] Connection state tracking (thread-safe)
+- [ ] Resource bounds (LRU caches)
+- [ ] API timeouts (configurable, 30s default)
+- [ ] Error wrapping with context
+- [ ] Regex pre-compiled at package level
+- [ ] Parser functions < 100 lines
+- [ ] Nesting depth < 4 levels
+- [ ] Unit tests (validation, parsing)
+- [ ] Integration tests (real API)
+- [ ] Documentation (how to run tests)
+
+### Examples in Codebase
+
+See `client/youtube_innertube_*.go` for complete implementation:
+- `youtube_innertube_client.go` - Main client (production-ready)
+- `youtube_innertube_validation.go` - Input validation patterns
+- `youtube_innertube_validation_test.go` - 60+ validation tests
+- `youtube_innertube_integration_test.go` - 11 integration tests
+- `INTEGRATION_TESTS.md` - Test documentation
+
 ## Important Notes
 
 - **macOS TDLib**: Always export CGO_CFLAGS and CGO_LDFLAGS before building
