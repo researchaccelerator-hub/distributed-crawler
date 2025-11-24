@@ -300,13 +300,16 @@ func (c *YouTubeInnerTubeClient) GetVideosFromChannel(ctx context.Context, chann
 
 	// Browse the channel to get videos
 	browseID := channelID
+	// Params to get the Videos tab specifically
+	// "EgZ2aWRlb3PyBgQKAjoA" = Videos tab
+	videosTabParams := "EgZ2aWRlb3PyBgQKAjoA"
 
 	// Apply timeout to API call
 	apiCtx, cancel := context.WithTimeout(ctx, c.apiTimeout)
 	defer cancel()
 
 	// Parameters: context, browseID, params, continuation
-	data, err := c.client.Browse(apiCtx, &browseID, nil, nil)
+	data, err := c.client.Browse(apiCtx, &browseID, &videosTabParams, nil)
 	if err != nil {
 		if apiCtx.Err() == context.DeadlineExceeded {
 			log.Error().Str("channel_id", channelID).Dur("timeout", c.apiTimeout).Msg("API call timed out")
