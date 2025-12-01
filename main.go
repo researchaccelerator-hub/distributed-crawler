@@ -219,9 +219,11 @@ Examples:
 			} else if len(crawlerCfg.CrawlID) > 32 {
 				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
 			}
-		} else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
-			return err
 		}
+		// TODO: validate sampling method doesn't work with urlFileUrl. Need to redo validateSamplingMethod to accept Crawl config
+		// else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
+		// 	return err
+		// }
 
 		// Load configuration file if specified
 		if cfgFile != "" {
