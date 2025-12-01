@@ -396,6 +396,12 @@ func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error {
 	return args.Error(0)
 }
 
+// Combine Files
+func (m *MockStateManager) UploadCombinedFile(filename string) error {
+	args := m.Called(filename)
+	return args.Error(0)
+}
+
 // Close closes the state manager
 func (m *MockStateManager) Close() error {
 	args := m.Called()

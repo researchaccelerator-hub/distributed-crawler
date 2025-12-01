@@ -115,7 +115,7 @@ func createTempStateManager() (state.StateManagementInterface, string, error) {
 
 	// Create a mock state manager for tests
 	mockStateManager := new(MockStateManager)
-	
+
 	// Setup common expectations for the mock
 	crawlID := "test-crawl-" + uuid.New().String()
 	mockStateManager.On("GetState").Return(state.State{
@@ -124,13 +124,13 @@ func createTempStateManager() (state.StateManagementInterface, string, error) {
 		},
 		Layers: []*state.Layer{},
 	})
-	
+
 	// Setup other common expectations as needed
 	mockStateManager.On("UpdateStatePage", mock.AnythingOfType("state.Page")).Return()
 	mockStateManager.On("UpdateStateMessage", mock.AnythingOfType("int64"), mock.AnythingOfType("int64"), mock.AnythingOfType("*state.Page"), mock.AnythingOfType("string")).Return()
 	mockStateManager.On("StoreState").Return(nil)
 	mockStateManager.On("SaveState").Return(nil)
-	
+
 	return mockStateManager, tmpDir, nil
 }
 
