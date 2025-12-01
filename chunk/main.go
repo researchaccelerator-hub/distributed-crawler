@@ -76,9 +76,6 @@ func (c *Chunker) Start() error {
 	log.Info().Int64("trigger_mb", c.triggerSize/1024/1024).Int64("hardcap_mb", c.hardCapSize/1024/1024).Timestamp().Dur("timeout", c.batchTimeout).
 		Msg("Chunker started. Waiting for files")
 
-	// Keep main alive
-	select {}
-
 	return nil
 }
 
