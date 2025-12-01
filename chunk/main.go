@@ -75,7 +75,6 @@ func (c *Chunker) Start() error {
 	//
 	go c.consumeBatches(jobsChan)
 
-	log.Info().Msg("Chunker started. Waiting for files")
 	log.Info().Int64("trigger_mb", c.triggerSize/1024/1024).Int64("hardcap_mb", c.hardCapSize/1024/1024).Timestamp().Dur("timeout_seconds", c.batchTimeout/1000).
 		Msg("Chunker started. Waiting for files")
 
@@ -225,6 +224,15 @@ func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 	}
 
 	for i, entry := range batch {
+
+		// Check file size hasn't changed
+		info, err := os.Stat(entry.Path)
+		if err != nil {
+			log.Warn().Err(err).Str("new_file", entry.Path).Msg("Chunk-CF: Could not stat file in file combined")
+		} else if info.Size() != entry.Size {
+			log.Error().Str("file", entry.Path).Int64("initial_size", entry.Size).Int64("current_size", info.Size()).Msg("Chunk-CF: File sizes do not match before combining")
+		}
+
 		inFile, err := os.Open(entry.Path)
 		if err != nil {
 			return "", fmt.Errorf("Chunk-CF: error opening file %s: %w", entry.Path, err)
