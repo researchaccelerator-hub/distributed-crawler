@@ -60,6 +60,9 @@ func (c *Chunker) Start() error {
 	if err := os.MkdirAll(c.watchDir, 0755); err != nil {
 		return fmt.Errorf("failed to create watch directory: %s", c.watchDir)
 	}
+	if err := os.MkdirAll(c.combineDir, 0755); err != nil {
+		return fmt.Errorf("failed to create combine directory: %s", c.combineDir)
+	}
 
 	fileChan := make(chan FileEntry, 1000)
 	jobsChan := make(chan []FileEntry, 100)
