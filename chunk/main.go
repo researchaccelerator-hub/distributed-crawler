@@ -52,7 +52,7 @@ func NewChunker(sm state.StateManagementInterface, watchDir string, combineDir s
 		combineDir:   combineDir,
 		triggerSize:  triggerSize,
 		hardCapSize:  hardCapSize,
-		batchTimeout: 30 * time.Second,
+		batchTimeout: 300 * time.Second, // 5 minutes
 	}
 }
 
@@ -76,7 +76,7 @@ func (c *Chunker) Start() error {
 	go c.consumeBatches(jobsChan)
 
 	log.Info().Msg("Chunker started. Waiting for files")
-	log.Info().Int64("trigger_mb", c.triggerSize/1024/1024).Int64("hardcap_mb", c.hardCapSize/1024/1024).Timestamp().Dur("timeout", c.batchTimeout).
+	log.Info().Int64("trigger_mb", c.triggerSize/1024/1024).Int64("hardcap_mb", c.hardCapSize/1024/1024).Timestamp().Dur("timeout_seconds", c.batchTimeout/1000).
 		Msg("Chunker started. Waiting for files")
 
 	return nil
