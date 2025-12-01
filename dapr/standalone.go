@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/researchaccelerator-hub/telegram-scraper/chunk"
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
@@ -179,6 +180,21 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	sm, cfg, err := CreateStateManager(&smfact, crawlCfg, crawlexecid)
 	if err != nil {
 		return
+	}
+
+	// Turn on chunking if necessary
+	if crawlCfg.CombineFiles {
+		chunker := chunk.NewChunker(
+			sm,
+			crawlCfg.CombineWatchDir,
+			crawlCfg.CombineWriteDir,
+			crawlCfg.CombineTriggerSize*1024*1024,
+			crawlCfg.CombineHardCap*1024*1024,
+		)
+
+		if err := chunker.Start(); err != nil {
+			log.Fatal().Err(err).Msg("Failed to start file combiner")
+		}
 	}
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -505,6 +521,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			Platform:       crawlCfg.Platform, // Pass the platform information
 			SamplingMethod: crawlCfg.SamplingMethod,
 			SeedSize:       crawlCfg.SeedSize,
+			CombineFiles:   crawlCfg.CombineFiles,
 		}
 	} else {
 		cfg = state.Config{
@@ -514,6 +531,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			Platform:         crawlCfg.Platform, // Pass the platform information
 			SamplingMethod:   crawlCfg.SamplingMethod,
 			SeedSize:         crawlCfg.SeedSize,
+			CombineFiles:     crawlCfg.CombineFiles,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
 				MaxPages: crawlCfg.MaxPages,

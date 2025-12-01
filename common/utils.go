@@ -14,36 +14,42 @@ import (
 
 // Configuration structure
 type CrawlerConfig struct {
-	DaprMode          bool
-	DaprPort          int
-	Concurrency       int
-	Timeout           int
-	UserAgent         string
-	OutputFormat      string
-	StorageRoot       string
-	TDLibDatabaseURL  string   // Single database URL (for backward compatibility)
-	TDLibDatabaseURLs []string // Multiple database URLs for connection pooling
-	MinPostDate       time.Time
-	PostRecency       time.Time
-	DateBetweenMin    time.Time // Start date for date-between range
-	DateBetweenMax    time.Time // End date for date-between range
-	SampleSize        int       // Number of posts to randomly sample when using date-between
-	DaprJobMode       bool
-	MinUsers          int
-	CrawlID           string
-	CrawlLabel        string // User-defined label for the crawl (e.g., "youtube-snowball")
-	MaxComments       int
-	MaxPosts          int
-	MaxDepth          int
-	MaxPages          int    // Maximum number of pages to crawl (default: 108000)
-	TDLibVerbosity    int    // TDLib verbosity level for logging (default: 1)
-	SkipMediaDownload bool   // Skip downloading media files (only process metadata)
-	Platform          string // Platform to crawl: "telegram", "youtube", etc.
-	YouTubeAPIKey     string // API key for YouTube Data API
-	SamplingMethod    string // Sampling method: "channel", "random", "snowball", "random-walk"
-	SeedSize          int    // Number of discovered channels to use as seed channels in random-walk crawl
-	WalkbackRate      int    // Rate to walkback using random-walk sampling method
-	MinChannelVideos  int64  // Minimum videos per channel for inclusion
+	DaprMode           bool
+	DaprPort           int
+	Concurrency        int
+	Timeout            int
+	UserAgent          string
+	OutputFormat       string
+	StorageRoot        string
+	TDLibDatabaseURL   string   // Single database URL (for backward compatibility)
+	TDLibDatabaseURLs  []string // Multiple database URLs for connection pooling
+	MinPostDate        time.Time
+	PostRecency        time.Time
+	DateBetweenMin     time.Time // Start date for date-between range
+	DateBetweenMax     time.Time // End date for date-between range
+	SampleSize         int       // Number of posts to randomly sample when using date-between
+	DaprJobMode        bool
+	MinUsers           int
+	CrawlID            string
+	CrawlLabel         string // User-defined label for the crawl (e.g., "youtube-snowball")
+	MaxComments        int
+	MaxPosts           int
+	MaxDepth           int
+	MaxPages           int    // Maximum number of pages to crawl (default: 108000)
+	TDLibVerbosity     int    // TDLib verbosity level for logging (default: 1)
+	SkipMediaDownload  bool   // Skip downloading media files (only process metadata)
+	Platform           string // Platform to crawl: "telegram", "youtube", etc.
+	YouTubeAPIKey      string // API key for YouTube Data API
+	SamplingMethod     string // Sampling method: "channel", "random", "snowball", "random-walk"
+	SeedSize           int    // Number of discovered channels to use as seed channels in random-walk crawl
+	WalkbackRate       int    // Rate to walkback using random-walk sampling method
+	MinChannelVideos   int64  // Minimum videos per channel for inclusion
+	CombineFiles       bool   // Flag to turn on combining files before upload
+	CombineWatchDir    string // Location to write crawl data to and watch for combining files once they reach the trigger size
+	CombineWriteDir    string // Location to write combined files to before upload
+	CombineTriggerSize int64  // Total file size hreshold for creating a new combined file
+	CombineHardCap     int64  // File size cap that can not be exceeded in creation of combined file
+
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

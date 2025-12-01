@@ -90,6 +90,10 @@ type StateManagementInterface interface {
 	WipeLayerBuffer(includeCurrentCrawl bool) error
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
 	AddPageToLayerBuffer(page *Page) error
+
+	// Combined files
+	UploadCombinedFile(filename string) error
+
 	// Cleanup
 	// Close performs cleanup operations when shutting down
 	Close() error
@@ -153,6 +157,9 @@ type Config struct {
 	DaprConfig     *DaprConfig
 	LocalConfig    *LocalConfig
 	MaxPagesConfig *MaxPagesConfig
+
+	// Boolean for whether or not to combine crawl data before upload
+	CombineFiles bool
 }
 
 // AzureConfig contains Azure Blob Storage-specific configuration options

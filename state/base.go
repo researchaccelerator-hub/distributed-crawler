@@ -527,6 +527,11 @@ func (bsm *BaseStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	return nil
 }
 
+func (bsm *BaseStateManager) UploadCombinedFile(filename string) error {
+	log.Info().Msg("Combined files is not implemented for BaseStateManager")
+	return nil
+}
+
 // StorePost and StoreFile are left to specific implementations
 // HasProcessedMedia and MarkMediaAsProcessed are left to specific implementations
 // SaveState is left to specific implementations
