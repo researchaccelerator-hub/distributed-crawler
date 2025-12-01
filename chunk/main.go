@@ -101,7 +101,7 @@ func (c *Chunker) watchFiles(out chan<- FileEntry) {
 				log.Error().Err(err).Msg("Chunk-FW: Encountered error in file watcher Events")
 				return
 			}
-			if event.Op&fsnotify.Create == fsnotify.Create &&
+			if event.Op&fsnotify.Write == fsnotify.Write &&
 				strings.HasSuffix(event.Name, ".json") {
 
 				info, err := os.Stat(event.Name)
