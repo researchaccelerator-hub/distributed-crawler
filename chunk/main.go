@@ -187,7 +187,11 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 			continue
 		}
 
-		log.Info().Str("combined_file", outputName).Msg("Chunk-CB: batch combined. Uploading to storage")
+		info, err := os.Stat(outputName)
+		if err != nil {
+			log.Warn().Err(err).Str("combined_file", outputName).Msg("Chunk-CB: Could not stat file in file combined")
+		}
+		log.Info().Str("combined_file", outputName).Int64("total_bytes", info.Size()).Msg("Chunk-CB: batch combined. Uploading to storage")
 
 		err = c.sm.UploadCombinedFile(outputName)
 
