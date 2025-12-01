@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -3226,7 +3227,7 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 	// Create storage path
 	storagePath, err := dsm.generateCrawlExecutableStoragePath(
 		"combined-posts",
-		filename,
+		path.Base(filename),
 	)
 
 	if err != nil {
