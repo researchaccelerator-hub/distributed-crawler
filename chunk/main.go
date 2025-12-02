@@ -163,7 +163,7 @@ func (c *Chunker) processBatches(in <-chan FileEntry, out chan<- []FileEntry) {
 
 			state.Files = append(state.Files, file)
 			state.Size += file.Size
-
+			log.Info().Int("file_count", len(state.Files)).Int64("buffer_size_bytes", state.Size).Msg("Chunk-PB: Current buffer")
 			if state.Size >= c.triggerSize {
 				log.Info().Msg("Chunk-PB: trigger size reached. Flushing batch")
 				flush()
