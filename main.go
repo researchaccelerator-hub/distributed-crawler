@@ -749,8 +749,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWatchDir, "combine-watch-dir", "/tmp/watch-files", "Where single crawl data files are written to be combined later")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWriteDir, "combine-write-dir", "/tmp/combine-write", "Where combined files are written before upload")
-	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineTriggerSize, "combine-trigger-size", 170, "Number of MB to set trigger size for combining files")
-	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineHardCap, "combine-hard-cap", 200, "Number of MB to set hard cap for combining files")
+	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineTriggerSize, "combine-trigger-size", 170, "Number of MiB to set trigger size for combining files")
+	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineHardCap, "combine-hard-cap", 200, "Number of MiB to set hard cap for combining files")
 
 	// New distributed mode flags
 	rootCmd.PersistentFlags().StringVar(&mode, "mode", "", "Execution mode: standalone, dapr-standalone, orchestrator, worker (empty for legacy auto-detection)")
