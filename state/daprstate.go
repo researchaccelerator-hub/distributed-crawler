@@ -995,7 +995,7 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 			return fmt.Errorf("Chunk: Unable to marshall data for writing to file: %w", err)
 		}
 
-		filename := fmt.Sprintf("%s/single_file_%d.json", dsm.BaseStateManager.config.CombineWatchDir, time.Now().UnixNano())
+		filename := fmt.Sprintf("%s/post_%s_%d.json", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
 
 		err = os.WriteFile(filename, jsonData, 0644)
 		if err != nil {

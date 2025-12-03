@@ -151,7 +151,7 @@ func (c *Chunker) processBatches(in <-chan FileEntry, out chan<- []FileEntry) {
 			if file.Size > c.hardCapSize {
 				log.Warn().Str("file_name", file.Path).Int64("total_bytes", file.Size).Msg("Chunk-PB: File exceeds hard cap. Deleting")
 				if err := os.Remove(file.Path); err != nil {
-					log.Error().Err(err).Str("file_name", file.Path).Msg("Chunk-CB: failed to remove file")
+					log.Error().Err(err).Str("file_name", file.Path).Msg("Chunk-PB: failed to remove file")
 				}
 				continue
 			}
@@ -217,6 +217,7 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 
 func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 	outputFileName := fmt.Sprintf("%s/combined_%d", c.combineDir, time.Now().UnixNano())
+	log.Info().Str("combined_file", outputFileName).Msg("Chunk-CF: Combining batch into files")
 	outfile, err := os.Create(outputFileName)
 	if err != nil {
 		return "", fmt.Errorf("Chunk-CF: unable to create output file %s: %w", outputFileName, err)
