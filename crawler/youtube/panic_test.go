@@ -91,6 +91,9 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 	return nil
 }
 
+// Combine files
+func (m *MockStateManager) UploadCombinedFile(filename string) error { return nil }
+
 // random-walk database operations
 func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
 	return []state.Page{}, nil

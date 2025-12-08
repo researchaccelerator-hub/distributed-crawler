@@ -87,6 +87,9 @@ func (m *MockYouTubeStateManager) StoreChannelData(channelID string, channelData
 	return nil
 }
 
+// Combine Files
+func (m *MockYouTubeStateManager) UploadCombinedFile(filename string) error { return nil }
+
 // random-walk database
 func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
 func (m *MockYouTubeStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {

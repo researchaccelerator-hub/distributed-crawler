@@ -219,9 +219,11 @@ Examples:
 			} else if len(crawlerCfg.CrawlID) > 32 {
 				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
 			}
-		} else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
-			return err
 		}
+		// TODO: validate sampling method doesn't work with urlFileUrl. Need to redo validateSamplingMethod to accept Crawl config
+		// else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
+		// 	return err
+		// }
 
 		// Load configuration file if specified
 		if cfgFile != "" {
@@ -743,6 +745,13 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.WalkbackRate, "walkback-rate", 15, "The rate at which to perform walkbacks when using random-walk sampling")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 
+	// Combine files flags
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWatchDir, "combine-watch-dir", "/tmp/watch-files", "Where single crawl data files are written to be combined later")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWriteDir, "combine-write-dir", "/tmp/combine-write", "Where combined files are written before upload")
+	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineTriggerSize, "combine-trigger-size", 170, "Number of MiB to set trigger size for combining files")
+	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineHardCap, "combine-hard-cap", 200, "Number of MiB to set hard cap for combining files")
+
 	// New distributed mode flags
 	rootCmd.PersistentFlags().StringVar(&mode, "mode", "", "Execution mode: standalone, dapr-standalone, orchestrator, worker (empty for legacy auto-detection)")
 	rootCmd.PersistentFlags().StringVar(&workerID, "worker-id", "", "Worker identifier for distributed mode (required for worker mode)")
@@ -786,6 +795,11 @@ func init() {
 	viper.BindPFlag("crawler.min_channel_videos", rootCmd.PersistentFlags().Lookup("min-channel-videos"))
 	viper.BindPFlag("distributed.mode", rootCmd.PersistentFlags().Lookup("mode"))
 	viper.BindPFlag("distributed.worker_id", rootCmd.PersistentFlags().Lookup("worker-id"))
+	viper.BindPFlag("crawler.combine_files", rootCmd.PersistentFlags().Lookup("combine-files"))
+	viper.BindPFlag("crawler.combine_watch_dir", rootCmd.PersistentFlags().Lookup("combine-watch-dir"))
+	viper.BindPFlag("crawler.combine_write_dir", rootCmd.PersistentFlags().Lookup("combine-write-dir"))
+	viper.BindPFlag("crawler.combine_trigger_size", rootCmd.PersistentFlags().Lookup("combine-trigger-size"))
+	viper.BindPFlag("crawler.combine_hard_cap", rootCmd.PersistentFlags().Lookup("combine-hard-cap"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)

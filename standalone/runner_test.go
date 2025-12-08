@@ -216,6 +216,9 @@ func (m *MockDaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params 
 }
 func (m *MockDaprStateManager) AddPageToLayerBuffer(page *state.Page) error { return nil }
 
+// Combine Files
+func (m *MockDaprStateManager) UploadCombinedFile(filename string) error { return nil }
+
 // MockDaprStateManagerFactory creates our mock Dapr state manager
 type MockDaprStateManagerFactory struct {
 	mock.Mock

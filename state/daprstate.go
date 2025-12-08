@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -984,6 +985,23 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 
 	// post data is not necessary for random-walk crawls
 	if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+		return nil
+	}
+
+	if dsm.BaseStateManager.config.CombineFiles {
+		jsonData, err := json.Marshal(post)
+
+		if err != nil {
+			return fmt.Errorf("Chunk: Unable to marshall data for writing to file: %w", err)
+		}
+
+		filename := fmt.Sprintf("%s/post_%s_%d.json", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
+
+		err = os.WriteFile(filename, jsonData, 0644)
+		if err != nil {
+			return fmt.Errorf("Chunk: Unable to write to combined filename %s: %w", filename, err)
+		}
+
 		return nil
 	}
 
@@ -3192,4 +3210,55 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 		log.Error().Msg("random-walk-layer: no pages found")
 		return pages, nil
 	}
+}
+
+// TODO: alot of shared code between StorePost. Generalize a solution that both functions can use
+func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
+
+	postData, err := os.ReadFile(filename)
+
+	if err != nil {
+		return fmt.Errorf("Chunk: error reading combined file %s: %w", filename, err)
+	}
+
+	// Append newline for JSONL format
+	postData = append(postData, '\n')
+
+	// Create storage path
+	storagePath, err := dsm.generateCrawlExecutableStoragePath(
+		"combined-posts",
+		path.Base(filename),
+	)
+
+	if err != nil {
+		return fmt.Errorf("Chunk: error creating storage path %s: %w", filename, err)
+	}
+
+	log.Info().Str("storage_path", storagePath).Msg("Chunk: Storage path created REMOVE")
+
+	// Encode data for Dapr binding
+	encodedData := base64.StdEncoding.EncodeToString(postData)
+	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
+	if err != nil {
+		return err
+	}
+	// Prepare metadata
+	metadata := map[string]string{
+		key:         storagePath,
+		"operation": "append",
+	}
+	// Send to Dapr binding
+	req := daprc.InvokeBindingRequest{
+		Name:      dsm.storageBinding,
+		Operation: "create",
+		Data:      []byte(encodedData),
+		Metadata:  metadata,
+	}
+
+	log.Info().Msgf("Writing file to: %s", storagePath)
+	_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
+	if err != nil {
+		return fmt.Errorf("failed to store post via Dapr: %w", err)
+	}
+	return nil
 }
