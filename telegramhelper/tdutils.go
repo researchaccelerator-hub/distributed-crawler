@@ -859,7 +859,6 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 					log.Info().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 					channelNamesMap[channelName] = true
 				}
-
 			case *client.TextEntityTypeMention:
 				// Extract mention
 				offset := entity.Offset
@@ -867,11 +866,6 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				if int(offset+length) <= len(messageText.Text.Text) {
 					mention := messageText.Text.Text[offset : offset+length]
 					if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
-						// if strings.HasPrefix(mention, "@") {
-						// 	// Remove the @ prefix
-						// log.Info().Str("mention", mention).Msg("random-walk-links: adding TextEntityTypeMention")
-						// 	channelNamesMap[mention[1:]] = true
-						// }
 						channelName := matches[1]
 						log.Info().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 						channelNamesMap[channelName] = true
