@@ -612,7 +612,7 @@ var ParseMessage = func(
 				ShareCount:     0,
 			},
 			ChannelURLExternal: fmt.Sprintf("https://t.me/c/%s", channelName),
-			ChannelURL:         "",
+			ChannelURL:         fmt.Sprintf("https://t.me/c/%s", channelName),
 		},
 		PlatformName: "Telegram",
 		// SharedID unavailable
@@ -652,7 +652,7 @@ var ParseMessage = func(
 
 	result := cfg.NullValidator.ValidatePost(&post)
 	if !result.Valid {
-		log.Error().Strs("errors", result.Errors).Msg("Missing critical fields in telegram post data")
+		log.Error().Strs("errors", result.Errors).Msg("ParseMessage: Missing critical fields in telegram post data")
 	}
 
 	// Store the post but don't return an error if storage fails

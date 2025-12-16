@@ -148,7 +148,7 @@ func (c *TelegramCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJo
 		post := c.convertMessageToPost(msg)
 		result := job.NullValidator.ValidatePost(&post)
 		if !result.Valid {
-			log.Error().Strs("errors", result.Errors).Msg("Missing critical fields in telegram post data")
+			log.Error().Strs("errors", result.Errors).Msg("FetchMessages: Missing critical fields in telegram post data")
 		}
 		posts = append(posts, post)
 	}
