@@ -563,37 +563,38 @@ var ParseMessage = func(
 	if supergroupInfo != nil {
 		memberCount = int(supergroupInfo.MemberCount)
 	}
-
+	// TODO: verify some of these are available like CrawlLabel
 	post = model.Post{
-		PostLink:       mlr.Link,
-		ChannelID:      fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
-		PostUID:        postUid,
-		URL:            mlr.Link,
-		PublishedAt:    publishedAt,
-		CreatedAt:      createdAt,
-		LanguageCode:   "",
-		Engagement:     vc,
-		ViewCount:      vc,
-		LikeCount:      0,
-		ShareCount:     sharecount,
-		CommentCount:   len(comments),
-		ChannelName:    chat.Title,
-		Description:    description,
+		PostLink:     mlr.Link,
+		ChannelID:    fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
+		PostUID:      postUid,
+		URL:          mlr.Link,
+		PublishedAt:  publishedAt,
+		CreatedAt:    createdAt,
+		LanguageCode: "",
+		Engagement:   vc,
+		ViewCount:    vc,
+		LikeCount:    0,
+		ShareCount:   sharecount,
+		CommentCount: len(comments),
+		// CrawlLabel unavailable
+		// ListIDs unavailable
+		ChannelName: chat.Title,
+		// SearchTerms unavailable
+		// SearchTermIDs unavailable
+		// ProjectIDs unavailable
+		// ExerciseIDs unavailable
+		// LabelData unavailable
+		// LabelsMetadata unavailable
+		// ProjectLabeledPostIDs unavailable
+		// LabelerIDs unavailable
+		// AllLabels unavailable
+		// LabelIDs unavailable
 		IsAd:           false,
-		PostType:       posttype,
 		TranscriptText: "",
 		ImageText:      "",
-		PlatformName:   "Telegram",
-		LikesCount:     0,
-		SharesCount:    sharecount,
-		CommentsCount:  len(comments),
-		ViewsCount:     vc,
-		SearchableText: "",
-		AllText:        "",
-		ThumbURL:       thumbnailPath,
-		MediaURL:       videoPath,
-		Outlinks:       outlinks,
-		CaptureTime:    time.Now(),
+		// VideoLength unavailable
+		// IsVerified unavailable
 		ChannelData: model.ChannelData{
 			ChannelID:           fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
 			ChannelName:         chat.Title,
@@ -613,9 +614,45 @@ var ParseMessage = func(
 			ChannelURLExternal: fmt.Sprintf("https://t.me/c/%s", channelName),
 			ChannelURL:         "",
 		},
-		Comments:  comments,
-		Reactions: reactions,
-		Handle:    username,
+		PlatformName: "Telegram",
+		// SharedID unavailable
+		// QuotedID unavailable
+		// RepliedID unavailable
+		// AILabel unavailable
+		// RootPostID unavailable
+		// EngagementStepsCount unavailable
+		// OCRData unavailable
+		// PerformanceScores unavailable
+		// HasEmbedMedia unavailable
+		Description: description,
+		// RepostChannelData unavailable
+		PostType: posttype,
+		// InnerLink unavailable
+		// PostTitle unavailable
+		// MediaData unavailable
+		// IsReply unavailable
+		// AdFields unavailable
+		LikesCount:     0,
+		SharesCount:    sharecount,
+		CommentsCount:  len(comments),
+		ViewsCount:     vc,
+		SearchableText: "",
+		AllText:        "",
+		// ContrastAgentProjectIDs unavailable
+		// AgentIDs unavailable
+		// SegmentIDs unavailable
+		ThumbURL:    thumbnailPath,
+		MediaURL:    videoPath,
+		Comments:    comments,
+		Reactions:   reactions,
+		Outlinks:    outlinks,
+		CaptureTime: time.Now(),
+		Handle:      username,
+	}
+
+	result := cfg.NullValidator.ValidatePost(&post)
+	if !result.Valid {
+		log.Error().Strs("errors", result.Errors).Msg("Missing critical fields in telegram post data")
 	}
 
 	// Store the post but don't return an error if storage fails

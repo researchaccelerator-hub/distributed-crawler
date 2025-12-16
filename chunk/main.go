@@ -101,7 +101,7 @@ func (c *Chunker) watchFiles(out chan<- FileEntry) {
 				return
 			}
 			if event.Op&fsnotify.Write == fsnotify.Write &&
-				strings.HasSuffix(event.Name, ".json") {
+				strings.HasSuffix(event.Name, ".jsonl") {
 
 				info, err := os.Stat(event.Name)
 				if err != nil {
@@ -216,7 +216,7 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 }
 
 func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
-	outputFileName := fmt.Sprintf("%s/combined_%d", c.combineDir, time.Now().UnixNano())
+	outputFileName := fmt.Sprintf("%s/combined_%d.jsonl", c.combineDir, time.Now().UnixNano())
 	log.Info().Str("combined_file", outputFileName).Msg("Chunk-CF: Combining batch into files")
 	outfile, err := os.Create(outputFileName)
 	if err != nil {
@@ -224,11 +224,12 @@ func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 	}
 	defer outfile.Close()
 
-	if _, err := outfile.WriteString("["); err != nil {
-		return "", fmt.Errorf("Chunk-CF: error writing opening bracket: %w", err)
-	}
+	// REMOVE: after testing for change to jsonl
+	// if _, err := outfile.WriteString("["); err != nil {
+	// 	return "", fmt.Errorf("Chunk-CF: error writing opening bracket: %w", err)
+	// }
 
-	for i, entry := range batch {
+	for _, entry := range batch {
 
 		// Check file size hasn't changed
 		info, err := os.Stat(entry.Path)
@@ -249,14 +250,21 @@ func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 			return "", fmt.Errorf("Chunk-CF: error copying from file %s: %w", entry.Path, err)
 		}
 
-		if i < len(batch)-1 {
-			if _, err := outfile.WriteString(","); err != nil {
-				return "", fmt.Errorf("Chunk-CF: error writing comma: %w", err)
-			}
-		}
+		// // delim for jsonl
+		// if _, err := outfile.WriteString("\n"); err != nil {
+		// 	return "", fmt.Errorf("Chunk-CF: error writing newline: %w", err)
+		// }
+
+		// REMOVE: after testing for change to jsonl
+		// if i < len(batch)-1 {
+		// 	if _, err := outfile.WriteString(","); err != nil {
+		// 		return "", fmt.Errorf("Chunk-CF: error writing comma: %w", err)
+		// 	}
+		// }
 	}
-	if _, err := outfile.WriteString("]"); err != nil {
-		return "", fmt.Errorf("Chunk-CF: error writing closing bracket: %w", err)
-	}
+	// REMOVE: after testing for change to jsonl
+	// if _, err := outfile.WriteString("]"); err != nil {
+	// 	return "", fmt.Errorf("Chunk-CF: error writing closing bracket: %w", err)
+	// }
 	return outputFileName, nil
 }

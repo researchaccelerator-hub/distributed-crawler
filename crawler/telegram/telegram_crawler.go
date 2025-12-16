@@ -92,11 +92,23 @@ func (c *TelegramCrawler) GetChannelInfo(ctx context.Context, target crawler.Cra
 
 	// Convert client.Channel to model.ChannelData
 	channelData := &model.ChannelData{
-		ChannelName: channel.GetName(),
-		ChannelURL:  fmt.Sprintf("https://t.me/%s", channel.GetID()),
+		ChannelID:          channel.GetID(),
+		ChannelName:        channel.GetName(),
+		ChannelDescription: channel.GetDescription(),
+		// ChannelProfile image unavailable
 		ChannelEngagementData: model.EngagementData{
 			FollowerCount: int(channel.GetMemberCount()),
+			// FollowingCount unavailable
+			// LikeCount unavailable
+			// PostCount unavailable
+			// ViewCount unavailable
+			// Comment count unavailable
+			// Share count unavailable
 		},
+		ChannelURL:         fmt.Sprintf("https://t.me/%s", channel.GetID()),
+		ChannelURLExternal: fmt.Sprintf("https://t.me/%s", channel.GetID()),
+		CountryCode:        channel.GetCountry(),
+		// PublishedAt unavailable
 	}
 
 	return channelData, nil
@@ -134,6 +146,10 @@ func (c *TelegramCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJo
 	posts := make([]model.Post, 0, len(messages))
 	for _, msg := range messages {
 		post := c.convertMessageToPost(msg)
+		result := job.NullValidator.ValidatePost(&post)
+		if !result.Valid {
+			log.Error().Strs("errors", result.Errors).Msg("Missing critical fields in telegram post data")
+		}
 		posts = append(posts, post)
 	}
 
@@ -161,18 +177,73 @@ func (c *TelegramCrawler) Close() error {
 
 // convertMessageToPost converts a client.Message to model.Post
 func (c *TelegramCrawler) convertMessageToPost(message client.Message) model.Post {
+	// TODO: get more available fieds in here like crawllabel
 	post := model.Post{
-		PostUID:       message.GetID(),
-		ChannelName:   message.GetChannelID(),
-		PublishedAt:   message.GetTimestamp(),
-		CreatedAt:     time.Now(),
-		Description:   message.GetText(),
-		ViewsCount:    int(message.GetViews()),
-		PlatformName:  "telegram",
+		// PostLink unavailable
+		ChannelID: message.GetChannelID(),
+		PostUID:   message.GetID(),
+		// URL unavailable
+		PublishedAt: message.GetTimestamp(),
+		CreatedAt:   time.Now(),
+		// Language Code unavailable
+		// Engagement unavailable
+		ViewCount: int(message.GetViews()),
+		// LikeCount unavailable
+		// ShareCount unavailable
+		// CommentCount unavailable
+		// CrawlLabel unavaiable
+		// ListIDs unavailable
+		ChannelName: message.GetChannelID(),
+		// SearchTerms unavailable
+		// SearchTermIDs unavailable
+		// ProjectIDs unavailable
+		// ExerciseIDs unavailable
+		// LabelData unavailable
+		// LabelsMetadata unavailable
+		// ProjectLabeledPostIDs unavailable
+		// LabelerIDs unavailable
+		// AllLabels unavailable
+		// LabelIDs unavailable
+		// IsAd unavailable
+		// TranscriptText unavailable
+		// ImageText unavailable
+		// VideoLength unavailable
+		// IsVerified unavailable
+		// ChannelData unavailable (CHECK THIS)
+		PlatformName: "telegram",
+		// SharedID unavailable
+		// QuotedID unavailable
+		// RepliedID unavailable
+		// AILabel unavailable
+		// RootPostID unavailable
+		// EngagementStepsCount unavailable
+		// OCRData unavailable
+		// Performance Scores unavailable
+		// HasEmbedMedia unavailable
+		Description: message.GetText(),
+		// RepostChannelData unavailable
+		// PostType unavailable
+		// InnerLink unavailable
+		// PostTitle unavailable
+		// MediaData unavailable
+		// IsReply unavailable
+		// AdFields unavailable
+		// LikesCount unavailable
+		// SharesCount unavailable
+		// CommentsCount unavailable
+		ViewsCount:     int(message.GetViews()),
 		SearchableText: message.GetText(),
-		AllText:       message.GetText(),
-		CaptureTime:   time.Now(),
-		Handle:        message.GetSenderName(),
+		AllText:        message.GetText(),
+		// ContrastAgentProjectIDs unavailable
+		// AgentIDs unavailable
+		// SegmentIDs unavailable
+		// ThumbURL unavailable
+		// MediaURL unavailable
+		// Comments collected elsewhere
+		// Reactions collected below
+		// Outlinks collected later
+		CaptureTime: time.Now(),
+		Handle:      message.GetSenderName(),
 	}
 
 	// Set reactions if available

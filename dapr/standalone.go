@@ -766,19 +766,28 @@ func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common
 	}
 
 	// Fetch channel info and videos
-	_, ytErr := ytCrawler.GetChannelInfo(ctx, target)
+	channelData, ytErr := ytCrawler.GetChannelInfo(ctx, target)
 	if ytErr != nil {
 		err = fmt.Errorf("failed to get YouTube channel info: %w", ytErr)
 		log.Error().Err(err).Msg("Failed to get YouTube channel info")
 		return []*state.Page{}, err
 	}
+	validationResult := crawlCfg.NullValidator.ValidateChannelData(channelData)
+
+	if !validationResult.Valid {
+		err = fmt.Errorf("Missing critical fields: %v", validationResult.Errors)
+		log.Error().Strs("validation_errors", validationResult.Errors).Msg("Missing critical fields in youtube channel data. Skipping")
+		return []*state.Page{}, err
+	}
+
 	fromTime, toTime := CalculateDateFilters(crawlCfg)
 	job := crawler.CrawlJob{
-		Target:     target,
-		FromTime:   fromTime,
-		ToTime:     toTime,
-		Limit:      crawlCfg.MaxPosts,
-		SampleSize: crawlCfg.SampleSize,
+		Target:        target,
+		FromTime:      fromTime,
+		ToTime:        toTime,
+		Limit:         crawlCfg.MaxPosts,
+		SampleSize:    crawlCfg.SampleSize,
+		NullValidator: crawlCfg.NullValidator,
 	}
 
 	// Log job details
@@ -823,6 +832,7 @@ func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.C
 		Limit:            crawlCfg.MaxPosts,
 		SampleSize:       crawlCfg.SampleSize,
 		SamplesRemaining: crawlCfg.SampleSize,
+		NullValidator:    crawlCfg.NullValidator,
 	}
 
 	ytCrawler, ytClient, clientCtx, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)

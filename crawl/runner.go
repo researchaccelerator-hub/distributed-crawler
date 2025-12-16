@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"sync"
 	"time"
 
@@ -254,15 +255,43 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	if err != nil {
 		return nil, err
 	}
+	channelData := &model.ChannelData{
+		ChannelID:   strconv.FormatInt(channelInfo.chat.Id, 10),
+		ChannelName: channelInfo.chat.Title,
+		// ChannelDescription unavailable
+		ChannelProfileImage: channelInfo.chat.Photo.Extra,
+		ChannelEngagementData: model.EngagementData{
+			FollowerCount: int(channelInfo.memberCount),
+			// FollowingCount unavailable
+			// LikeCount unavailable
+			PostCount:  int(channelInfo.messageCount),
+			ViewsCount: int(channelInfo.totalViews),
+			// Comment count unavailable
+			// Share count unavailable
+		},
+		ChannelURLExternal: fmt.Sprintf("https://t.me/%s", p.URL),
+		ChannelURL:         fmt.Sprintf("https://t.me/%s", p.URL),
+		// CountryCode unavailable
+		// PublishedAt unavailable
+	}
+
+	validationResult := cfg.NullValidator.ValidateChannelData(channelData)
+
+	if !validationResult.Valid {
+		err = fmt.Errorf("Channel %s is missing critical fields: %v", p.URL, validationResult.Errors)
+		log.Error().Strs("validation_errors", validationResult.Errors).Msg("Null-RunForChannel: Missing critical fields in youtube channel data. Skipping")
+		return nil, err
+	}
+
 	// store channel data, as posts are not saved in random-walk
 	if cfg.SamplingMethod == "random-walk" {
-		channelData := &model.ChannelData{
-			ChannelName: channelInfo.chat.Title,
-			ChannelURL:  fmt.Sprintf("https://t.me/%s", p.URL),
-			ChannelEngagementData: model.EngagementData{
-				FollowerCount: int(channelInfo.memberCount),
-			},
-		}
+		// channelData := &model.ChannelData{
+		// 	ChannelName: channelInfo.chat.Title,
+		// 	ChannelURL:  fmt.Sprintf("https://t.me/%s", p.URL),
+		// 	ChannelEngagementData: model.EngagementData{
+		// 		FollowerCount: int(channelInfo.memberCount),
+		// 	},
+		// }
 
 		err := sm.StoreChannelData(p.URL, channelData)
 		if err != nil {

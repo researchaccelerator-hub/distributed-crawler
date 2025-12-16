@@ -13,6 +13,7 @@ import (
 
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/dapr"
+	"github.com/researchaccelerator-hub/telegram-scraper/null_handler"
 	"github.com/researchaccelerator-hub/telegram-scraper/orchestrator"
 	"github.com/researchaccelerator-hub/telegram-scraper/standalone"
 	"github.com/researchaccelerator-hub/telegram-scraper/worker"
@@ -502,6 +503,25 @@ Examples:
 			}
 		}
 
+		// Set up null_handler
+		var nullHandlerPlatform null_handler.Platform
+
+		if crawlerCfg.Platform == "youtube" {
+			nullHandlerPlatform = null_handler.PlatformYouTube
+		} else {
+			nullHandlerPlatform = null_handler.PlatformTelegram
+		}
+
+		if crawlerCfg.NullConfig != "" {
+			config, err := null_handler.LoadConfigFromJSON([]byte(crawlerCfg.NullConfig), nullHandlerPlatform)
+			if err != nil {
+				log.Fatal().Err(err).Msg("Encountered error loading null-config")
+			}
+			crawlerCfg.NullValidator = *null_handler.NewValidatorWithConfig(config)
+		} else {
+			crawlerCfg.NullValidator = *null_handler.NewValidator(nullHandlerPlatform)
+		}
+
 		// Log url information if available
 		if len(urlList) > 0 {
 			log.Info().
@@ -744,6 +764,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.SeedSize, "seed-size", 0, "Number of discovered channels to randomly select as seed channels")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.WalkbackRate, "walkback-rate", 15, "The rate at which to perform walkbacks when using random-walk sampling")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.NullConfig, "null-config", "{}", "Config for handling of null values in post and channel data. See README for more information")
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
@@ -800,6 +821,7 @@ func init() {
 	viper.BindPFlag("crawler.combine_write_dir", rootCmd.PersistentFlags().Lookup("combine-write-dir"))
 	viper.BindPFlag("crawler.combine_trigger_size", rootCmd.PersistentFlags().Lookup("combine-trigger-size"))
 	viper.BindPFlag("crawler.combine_hard_cap", rootCmd.PersistentFlags().Lookup("combine-hard-cap"))
+	viper.BindPFlag("crawler.null_config", rootCmd.PersistentFlags().Lookup("null-config"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)

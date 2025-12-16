@@ -8,6 +8,7 @@ import (
 
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
+	"github.com/researchaccelerator-hub/telegram-scraper/null_handler"
 )
 
 // MockConcurrentClient is a mock YouTube client for testing concurrent access
@@ -91,10 +92,11 @@ func TestConcurrentMapAccess(t *testing.T) {
 						ID:   channelID,
 						Type: crawler.PlatformYouTube,
 					},
-					FromTime:   time.Now().Add(-24 * time.Hour),
-					ToTime:     time.Now(),
-					Limit:      2,
-					SampleSize: 0, // No sampling for tests
+					FromTime:      time.Now().Add(-24 * time.Hour),
+					ToTime:        time.Now(),
+					Limit:         2,
+					SampleSize:    0, // No sampling for tests
+					NullValidator: *null_handler.NewValidator(null_handler.PlatformYouTube),
 				}
 
 				_, err := c.FetchMessages(context.Background(), job)

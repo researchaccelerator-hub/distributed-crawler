@@ -990,12 +990,13 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 
 	if dsm.BaseStateManager.config.CombineFiles {
 		jsonData, err := json.Marshal(post)
-
+		// append \n for jsonl
+		jsonData = append(jsonData, '\n')
 		if err != nil {
 			return fmt.Errorf("Chunk: Unable to marshall data for writing to file: %w", err)
 		}
 
-		filename := fmt.Sprintf("%s/post_%s_%d.json", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
+		filename := fmt.Sprintf("%s/post_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
 
 		err = os.WriteFile(filename, jsonData, 0644)
 		if err != nil {
@@ -3222,7 +3223,7 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 	}
 
 	// Append newline for JSONL format
-	postData = append(postData, '\n')
+	// postData = append(postData, '\n')
 
 	// Create storage path
 	storagePath, err := dsm.generateCrawlExecutableStoragePath(
