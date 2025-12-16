@@ -335,6 +335,15 @@ func (v *Validator) ValidateChannelData(data *model.ChannelData) *ValidationResu
 
 	v.validateStruct("ChannelData", "channel", reflect.ValueOf(data).Elem(), result)
 
+	if result.Valid {
+		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Strs("unavailable_fields", result.UnavailableUsed).
+			Strs("non_essential_missing_fields", result.Warnings).Msgf("null_validation: Valid channel data")
+	} else {
+		log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Strs("critical_missing_fields", result.Errors).
+			Strs("unavailable_fields", result.UnavailableUsed).Strs("non_essential_missing_fields", result.Warnings).
+			Msgf("null_validation: Invalid channel data")
+	}
+
 	return result
 }
 
@@ -349,6 +358,15 @@ func (v *Validator) ValidatePost(data *model.Post) *ValidationResult {
 	}
 
 	v.validateStruct("", "post", reflect.ValueOf(data).Elem(), result)
+
+	if result.Valid {
+		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Strs("unavailable_fields", result.UnavailableUsed).
+			Strs("non_essential_missing_fields", result.Warnings).Msgf("null_validation: Valid post data")
+	} else {
+		log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Strs("critical_missing_fields", result.Errors).
+			Strs("unavailable_fields", result.UnavailableUsed).Strs("non_essential_missing_fields", result.Warnings).
+			Msgf("null_validation: Invalid post data")
+	}
 
 	return result
 }
@@ -444,15 +462,15 @@ func (v *Validator) handleEmptyField(fieldPath string, dataType string, result *
 	switch config.Behavior {
 	case BehaviorCritical:
 		result.Valid = false
-		result.Errors = append(result.Errors, config.Message)
-		log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Str("data_type", dataType).Str("field_path", fieldPath).Msgf("null_validation: %s", config.Message)
+		result.Errors = append(result.Errors, fieldPath)
+		// log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Str("data_type", dataType).Str("field_path", fieldPath).Msgf("null_validation: %s", config.Message)
 	case BehaviorLog:
-		result.Warnings = append(result.Warnings, config.Message)
-		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Str("data_type", dataType).Str("field_path", fieldPath).Msgf("null_validation: %s", config.Message)
+		result.Warnings = append(result.Warnings, fieldPath)
+		// log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Str("data_type", dataType).Str("field_path", fieldPath).Msgf("null_validation: %s", config.Message)
 
 	case BehaviorUnavailable:
 		result.UnavailableUsed = append(result.UnavailableUsed, fieldPath)
-		log.Debug().Str("platform", fmt.Sprint(v.config.Platform)).Str("data_type", dataType).Str("field_path", fieldPath).Msgf("null_validation: %s", config.Message)
+		// log.Debug().Str("platform", fmt.Sprint(v.config.Platform)).Str("data_type", dataType).Str("field_path", fieldPath).Msgf("null_validation: %s", config.Message)
 
 	case BehaviorOptional:
 		// Still log the event, but no console output
