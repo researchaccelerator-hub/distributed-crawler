@@ -8,6 +8,7 @@ import (
 
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
+	"github.com/rs/zerolog/log"
 )
 
 // ClientAdapter adapts a client.Client to the YouTubeClient interface
@@ -52,7 +53,7 @@ func (a *ClientAdapter) GetChannelInfo(ctx context.Context, channelID string) (*
 	if err != nil {
 		return nil, err
 	}
-
+	log.Info().Str("channel_id", channelID).Msg("Converting YouTube channel info using adaptor")
 	// Convert client.Channel to YouTubeChannel
 	ytChannel := &youtubemodel.YouTubeChannel{
 		ID:              channelID,
