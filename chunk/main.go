@@ -66,13 +66,15 @@ func (c *Chunker) Start() error {
 
 	fileChan := make(chan FileEntry, 1000)
 	jobsChan := make(chan []FileEntry, 100)
+	internalBuffer := make(chan fsnotify.Event, 100000)
 
-	go c.watchFiles(fileChan)
+	go c.watchFilesWithInternalBuffer(internalBuffer)
+
+	go c.processEvents(internalBuffer, fileChan)
 
 	// Greedy Knapsack Heuristic -> jobsChan
 	go c.processBatches(fileChan, jobsChan)
 
-	//
 	go c.consumeBatches(jobsChan)
 
 	log.Info().Int64("trigger_mb", c.triggerSize/1024/1024).Int64("hardcap_mb", c.hardCapSize/1024/1024).Timestamp().Dur("timeout_seconds", c.batchTimeout/1000).
@@ -81,13 +83,12 @@ func (c *Chunker) Start() error {
 	return nil
 }
 
-func (c *Chunker) watchFiles(out chan<- FileEntry) {
+func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Chunk-WF: Failed to create watcher")
 	}
 	defer watcher.Close()
-
 	if err := watcher.Add(c.watchDir); err != nil {
 		log.Fatal().Err(err).Msg("Failed to add watch dir to watcher")
 	}
@@ -97,27 +98,37 @@ func (c *Chunker) watchFiles(out chan<- FileEntry) {
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
-				log.Error().Err(err).Msg("Chunk-FW: Encountered error in file watcher Events")
+				log.Error().Err(err).Msg("Chunk-WF: Encountered error in watchFilesInternalBuffer Events")
 				return
 			}
-			if event.Op&fsnotify.Write == fsnotify.Write &&
-				strings.HasSuffix(event.Name, ".jsonl") {
-
-				info, err := os.Stat(event.Name)
-				if err != nil {
-					log.Warn().Err(err).Str("new_file", event.Name).Msg("Chunk-FW: Could not stat file. Skipping")
-					continue
-				}
-
-				out <- FileEntry{Path: event.Name, Size: info.Size()}
-				log.Info().Str("file_name", filepath.Base(event.Name)).Int64("file_size", info.Size()).Msg("Chunk-FW: New file entry added")
-			}
+			out <- event
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				log.Error().Err(err).Msg("Chunk-FW: Encountered error in file watcher Errors. Not ok")
+				log.Error().Err(err).Msg("Chunk-WF: Encountered error in file watcher Errors. Not ok")
 				return
 			}
-			log.Error().Err(err).Msg("Chunk-FW: Encountered error in file watcher Errors. Ok")
+			log.Error().Err(err).Msg("Chunk-WF: Encountered error in file watcher Errors. Ok")
+			if isOverflow(err) {
+				log.Error().Msg("Kernel buffer full! Triggering rescan")
+				// TODO: Trigger rescan coroutine
+			}
+		}
+	}
+
+}
+
+func (c *Chunker) processEvents(internalBuffer <-chan fsnotify.Event, out chan<- FileEntry) {
+	for event := range internalBuffer {
+		if event.Op&fsnotify.Write == fsnotify.Write &&
+			strings.HasSuffix(event.Name, ".jsonl") {
+
+			info, err := os.Stat(event.Name)
+			if err != nil {
+				log.Warn().Err(err).Str("new_file", event.Name).Msg("Chunk-PE: Could not stat file. Skipping")
+				continue
+			}
+			out <- FileEntry{Path: event.Name, Size: info.Size()}
+			log.Info().Str("file_name", filepath.Base(event.Name)).Int64("file_size", info.Size()).Msg("Chunk-PE: New file entry added")
 		}
 	}
 }
@@ -224,11 +235,6 @@ func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 	}
 	defer outfile.Close()
 
-	// REMOVE: after testing for change to jsonl
-	// if _, err := outfile.WriteString("["); err != nil {
-	// 	return "", fmt.Errorf("Chunk-CF: error writing opening bracket: %w", err)
-	// }
-
 	for _, entry := range batch {
 
 		// Check file size hasn't changed
@@ -249,22 +255,13 @@ func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("Chunk-CF: error copying from file %s: %w", entry.Path, err)
 		}
-
-		// // delim for jsonl
-		// if _, err := outfile.WriteString("\n"); err != nil {
-		// 	return "", fmt.Errorf("Chunk-CF: error writing newline: %w", err)
-		// }
-
-		// REMOVE: after testing for change to jsonl
-		// if i < len(batch)-1 {
-		// 	if _, err := outfile.WriteString(","); err != nil {
-		// 		return "", fmt.Errorf("Chunk-CF: error writing comma: %w", err)
-		// 	}
-		// }
 	}
-	// REMOVE: after testing for change to jsonl
-	// if _, err := outfile.WriteString("]"); err != nil {
-	// 	return "", fmt.Errorf("Chunk-CF: error writing closing bracket: %w", err)
-	// }
 	return outputFileName, nil
+}
+
+func isOverflow(err error) bool {
+	if err == nil {
+		return false
+	}
+	return err.Error() == "fsnotify: queue or buffer overflow"
 }
