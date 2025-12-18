@@ -192,8 +192,7 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 		return nil, fmt.Errorf("crawler not initialized")
 	}
 
-	// log.Info().Str("channel_id", target.ID).Msg("Fetching YouTube channel info")
-	log.Info().Str("channel_id", target.ID).Msg("GetChannelInfo-YoutubeCrawler: Fetching YouTube channel info")
+	log.Info().Str("channel_id", target.ID).Msg("Fetching YouTube channel info")
 
 	// Fetch channel info from the YouTube API
 	channel, err := c.client.GetChannelInfo(ctx, target.ID)
@@ -847,7 +846,6 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			Str("channel_name", channelName).
 			Msg("Using limited channel data without engagement metrics")
 	}
-	// TODO: maybe validate post.ChannelData here
 	return post
 }
 

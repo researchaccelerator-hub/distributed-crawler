@@ -111,7 +111,6 @@ func (c *YouTubeDataClient) Disconnect(ctx context.Context) error {
 
 // GetChannelInfo retrieves information about a YouTube channel
 func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string) (*youtubemodel.YouTubeChannel, error) {
-	log.Info().Msg("GetChannelInfo-YoutubeDataClient: Getting Youtube channel info")
 
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
@@ -229,8 +228,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		Int64("view_count", channel.ViewCount).
 		Int64("video_count", channel.VideoCount).
 		Str("country", channel.Country).
-		// Msg("YouTube channel info retrieved - all engagement data populated")
-		Msg("GetChannelInfo-YoutubeDataClient: YouTube channel info retrieved - all engagement data populated")
+		Msg("YouTube channel info retrieved - all engagement data populated")
 
 	return channel, nil
 }
@@ -849,7 +847,6 @@ func (a *YouTubeClientAdapter) Disconnect(ctx context.Context) error {
 
 // GetChannelInfo retrieves information about a YouTube channel
 func (a *YouTubeClientAdapter) GetChannelInfo(ctx context.Context, channelID string) (Channel, error) {
-	log.Info().Str("channel_id", channelID).Msg("GetChannelInfo-YoutubeClientAdaptor: Getting YouTube channel info")
 	channelInfo, err := a.client.GetChannelInfo(ctx, channelID)
 	if err != nil {
 		return nil, err

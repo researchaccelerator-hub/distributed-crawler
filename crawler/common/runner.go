@@ -129,7 +129,6 @@ func (r *CrawlRunner) Close() error {
 
 // GetChannelInfo retrieves information about a channel
 func (r *CrawlRunner) GetChannelInfo(ctx context.Context, target crawler.CrawlTarget) (*state.ChannelInfo, error) {
-	log.Info().Msg("GetChannelInfo-CrawlRunner: Getting YouTube channel info")
 	// Get the appropriate crawler
 	c, err := r.getCrawler(ctx, target.Type)
 	if err != nil {

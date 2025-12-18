@@ -389,8 +389,7 @@ func (y *YouTubeClient) Disconnect(ctx context.Context) error {
 
 // GetChannelInfo implements Client
 func (y *YouTubeClient) GetChannelInfo(ctx context.Context, channelID string) (Channel, error) {
-	// log.Info().Str("channel_id", channelID).Msg("Getting YouTube channel info")
-	log.Info().Str("channel_id", channelID).Msg("GetChannelInfo-YoutubeClient: Getting YouTube channel info")
+	log.Info().Str("channel_id", channelID).Msg("Getting YouTube channel info")
 
 	// In a real implementation, this would call the YouTube API
 	// to fetch channel details using the channels.list endpoint
