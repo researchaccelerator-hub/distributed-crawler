@@ -60,11 +60,12 @@ func (a *ClientAdapter) GetChannelInfo(ctx context.Context, channelID string) (*
 		ID:              channelID,
 		Title:           channel.GetName(),
 		Description:     channel.GetDescription(),
-		SubscriberCount: int64(channel.GetMemberCount()),
-		ViewCount:       0,           // Not directly available
-		VideoCount:      0,           // Not directly available
-		PublishedAt:     time.Time{}, // Not directly available
-		Thumbnails:      make(map[string]string),
+		Thumbnails:      channel.GetThumbnails(),
+		SubscriberCount: channel.GetMemberCount(),
+		ViewCount:       channel.GetViewCount(), // Not directly available
+		VideoCount:      channel.GetPostCount(), // Not directly available
+		Country:         channel.GetCountry(),
+		PublishedAt:     channel.GetPublishedAt(), // Not directly available
 	}
 
 	return ytChannel, nil

@@ -199,12 +199,12 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		ID:              item.Id,
 		Title:           item.Snippet.Title,
 		Description:     item.Snippet.Description,
-		SubscriberCount: subscriberCount,
-		ViewCount:       viewCount,
-		VideoCount:      videoCount,
-		PublishedAt:     publishedAt,
 		Thumbnails:      thumbnails,
+		SubscriberCount: subscriberCount,
+		VideoCount:      videoCount,
+		ViewCount:       viewCount,
 		Country:         item.Snippet.Country, // Add country information
+		PublishedAt:     publishedAt,
 	}
 
 	// Store in cache with write lock
@@ -860,8 +860,12 @@ func (a *YouTubeClientAdapter) GetChannelInfo(ctx context.Context, channelID str
 		ID:          channelInfo.ID,
 		Name:        channelInfo.Title,
 		Description: channelInfo.Description,
+		Thumbnails:  channelInfo.Thumbnails,
 		MemberCount: channelInfo.SubscriberCount,
+		VideoCount:  channelInfo.VideoCount,
+		ViewCount:   channelInfo.ViewCount,
 		Country:     channelInfo.Country,
+		PublishedAt: channelInfo.PublishedAt,
 	}, nil
 }
 

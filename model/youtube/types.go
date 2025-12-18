@@ -11,12 +11,12 @@ type YouTubeChannel struct {
 	ID              string
 	Title           string
 	Description     string
+	Thumbnails      map[string]string
 	SubscriberCount int64
 	ViewCount       int64
 	VideoCount      int64
-	PublishedAt     time.Time
-	Thumbnails      map[string]string
 	Country         string // Country code of the channel
+	PublishedAt     time.Time
 }
 
 // YouTubeVideo represents a YouTube video

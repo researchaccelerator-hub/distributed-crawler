@@ -2,6 +2,8 @@ package client
 
 import (
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // Channel models
@@ -45,13 +47,41 @@ func (c *TelegramChannel) GetType() string {
 	return "telegram"
 }
 
+// GetViewCount implements Channel
+func (c *TelegramChannel) GetViewCount() int64 {
+	log.Warn().Msg("GetViewCount not implemented in TelegramChannel")
+	return int64(0)
+}
+
+// GetPostCount implements Channel
+func (c *TelegramChannel) GetPostCount() int64 {
+	log.Warn().Msg("GetPostCount not implemented in TelegramChannel")
+	return int64(0)
+}
+
+// GetPublishedAt implements Channel
+func (c *TelegramChannel) GetPublishedAt() time.Time {
+	log.Warn().Msg("GetPublishedAt not implemented in TelegramChannel")
+	return time.Time{}
+}
+
+// GetThumbnails implements Channel
+func (c *TelegramChannel) GetThumbnails() map[string]string {
+	log.Warn().Msg("GetThumbnails not implemented in TelegramChannel")
+	return map[string]string{}
+}
+
 // YouTubeChannel implements Channel for YouTube
 type YouTubeChannel struct {
 	ID          string
 	Name        string
 	Description string
+	Thumbnails  map[string]string
 	MemberCount int64
+	VideoCount  int64
+	ViewCount   int64
 	Country     string // Country code of the channel
+	PublishedAt time.Time
 }
 
 // GetID implements Channel
@@ -82,6 +112,26 @@ func (c *YouTubeChannel) GetCountry() string {
 // GetType implements Channel
 func (c *YouTubeChannel) GetType() string {
 	return "youtube"
+}
+
+// GetViewCount implements Channel
+func (c *YouTubeChannel) GetViewCount() int64 {
+	return c.ViewCount
+}
+
+// GetPostCount implements Channel
+func (c *YouTubeChannel) GetPostCount() int64 {
+	return c.VideoCount
+}
+
+// GetPublishedAt implements Channel
+func (c *YouTubeChannel) GetPublishedAt() time.Time {
+	return c.PublishedAt
+}
+
+// GetThumbnails implements Channel
+func (c *YouTubeChannel) GetThumbnails() map[string]string {
+	return c.Thumbnails
 }
 
 // Message models
@@ -181,14 +231,14 @@ type YouTubeMessage struct {
 	SenderID     string
 	SenderName   string
 	Text         string
-	Title        string             // Video title
-	Description  string             // Video description
+	Title        string // Video title
+	Description  string // Video description
 	Timestamp    time.Time
 	Views        int64
 	Reactions    map[string]int64
-	Thumbnails   map[string]string  // Video thumbnails
-	CommentCount int64              // Video comment count
-	Language     string             // Video language
+	Thumbnails   map[string]string // Video thumbnails
+	CommentCount int64             // Video comment count
+	Language     string            // Video language
 }
 
 // GetID implements Message
