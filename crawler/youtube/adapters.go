@@ -48,12 +48,13 @@ func (a *ClientAdapter) Disconnect(ctx context.Context) error {
 
 // GetChannelInfo retrieves information about a YouTube channel
 func (a *ClientAdapter) GetChannelInfo(ctx context.Context, channelID string) (*youtubemodel.YouTubeChannel, error) {
+	log.Info().Str("channel_id", channelID).Msg("GetChannelInfo-ClientAdapter: Getting YouTube channel info")
 	// Get channel info from the client
 	channel, err := a.client.GetChannelInfo(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
-	log.Info().Str("channel_id", channelID).Msg("Converting YouTube channel info using adaptor")
+	log.Info().Str("channel_id", channelID).Msg("GetChannelInfo-ClientAdapter: Converting YouTube channel info")
 	// Convert client.Channel to YouTubeChannel
 	ytChannel := &youtubemodel.YouTubeChannel{
 		ID:              channelID,

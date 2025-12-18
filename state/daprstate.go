@@ -3235,8 +3235,6 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 		return fmt.Errorf("Chunk: error creating storage path %s: %w", filename, err)
 	}
 
-	log.Info().Str("storage_path", storagePath).Msg("Chunk: Storage path created REMOVE")
-
 	// Encode data for Dapr binding
 	encodedData := base64.StdEncoding.EncodeToString(postData)
 	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)

@@ -129,6 +129,7 @@ func (r *CrawlRunner) Close() error {
 
 // GetChannelInfo retrieves information about a channel
 func (r *CrawlRunner) GetChannelInfo(ctx context.Context, target crawler.CrawlTarget) (*state.ChannelInfo, error) {
+	log.Info().Msg("GetChannelInfo-CrawlRunner: Getting YouTube channel info")
 	// Get the appropriate crawler
 	c, err := r.getCrawler(ctx, target.Type)
 	if err != nil {
@@ -145,7 +146,7 @@ func (r *CrawlRunner) GetChannelInfo(ctx context.Context, target crawler.CrawlTa
 	info := &state.ChannelInfo{
 		ChannelID:   target.ID,
 		Name:        channelData.ChannelName,
-		Description: "",  // This would be populated from channelData if available
+		Description: "", // This would be populated from channelData if available
 		MemberCount: int64(channelData.ChannelEngagementData.FollowerCount),
 		URL:         channelData.ChannelURL,
 		Platform:    string(target.Type),
