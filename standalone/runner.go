@@ -236,6 +236,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	tempCfg := state.Config{
 		StorageRoot: crawlCfg.StorageRoot,
 		CrawlID:     crawlCfg.CrawlID,
+		CrawlLabel:  crawlCfg.CrawlLabel,
 		Platform:    crawlCfg.Platform, // Pass the platform information
 
 		// Configure DAPR if we're using it (this ensures proper state lookup)
@@ -292,6 +293,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
+		CrawlLabel:       crawlCfg.CrawlLabel,
 		CrawlExecutionID: crawlexecid,
 		Platform:         crawlCfg.Platform, // Pass the platform information
 

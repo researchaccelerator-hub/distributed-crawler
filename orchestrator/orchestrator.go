@@ -19,29 +19,28 @@ type Orchestrator struct {
 	config       common.CrawlerConfig
 	stateManager state.StateManagementInterface
 	pubsub       *distributed.PubSubClient
-	
-	// Internal state
-	workers      map[string]*WorkerInfo
-	isRunning    bool
-	mu           sync.RWMutex // Protects workers map and other shared state
-	
-	// Work tracking
-	activeWork     map[string]*distributed.WorkItem // work_item_id -> WorkItem
-	completedWork  map[string]*distributed.WorkResult
-	workMu         sync.RWMutex // Protects work tracking maps
-	
-	// Processing state
-	currentDepth   int
-	maxDepthReached int
-	
-	// Statistics
-	totalWorkItems    int
-	completedItems    int
-	errorItems        int
-	discoveredPages   int
-	startTime         time.Time
-}
 
+	// Internal state
+	workers   map[string]*WorkerInfo
+	isRunning bool
+	mu        sync.RWMutex // Protects workers map and other shared state
+
+	// Work tracking
+	activeWork    map[string]*distributed.WorkItem // work_item_id -> WorkItem
+	completedWork map[string]*distributed.WorkResult
+	workMu        sync.RWMutex // Protects work tracking maps
+
+	// Processing state
+	currentDepth    int
+	maxDepthReached int
+
+	// Statistics
+	totalWorkItems  int
+	completedItems  int
+	errorItems      int
+	discoveredPages int
+	startTime       time.Time
+}
 
 // WorkerInfo tracks information about active workers
 type WorkerInfo struct {
@@ -64,6 +63,7 @@ func NewOrchestrator(crawlID string, config common.CrawlerConfig) (*Orchestrator
 	cfg := state.Config{
 		StorageRoot:      config.StorageRoot,
 		CrawlID:          crawlID,
+		CrawlLabel:       config.CrawlLabel,
 		CrawlExecutionID: common.GenerateCrawlID(),
 		Platform:         config.Platform,
 		DaprConfig: &state.DaprConfig{
@@ -87,15 +87,15 @@ func NewOrchestrator(crawlID string, config common.CrawlerConfig) (*Orchestrator
 	}
 
 	orchestrator := &Orchestrator{
-		crawlID:         crawlID,
-		config:          config,
-		stateManager:    sm,
-		pubsub:          pubsub,
-		workers:         make(map[string]*WorkerInfo),
-		isRunning:       false,
-		activeWork:      make(map[string]*distributed.WorkItem),
-		completedWork:   make(map[string]*distributed.WorkResult),
-		startTime:       time.Now(),
+		crawlID:       crawlID,
+		config:        config,
+		stateManager:  sm,
+		pubsub:        pubsub,
+		workers:       make(map[string]*WorkerInfo),
+		isRunning:     false,
+		activeWork:    make(map[string]*distributed.WorkItem),
+		completedWork: make(map[string]*distributed.WorkResult),
+		startTime:     time.Now(),
 	}
 
 	log.Info().Str("crawl_id", crawlID).Msg("Orchestrator instance created successfully")
@@ -159,7 +159,7 @@ func (o *Orchestrator) Stop(ctx context.Context) error {
 // workDistributor manages the distribution of work items to workers
 func (o *Orchestrator) workDistributor(ctx context.Context) {
 	log.Info().Msg("Starting work distributor")
-	
+
 	ticker := time.NewTicker(5 * time.Second) // Check for work every 5 seconds
 	defer ticker.Stop()
 
@@ -235,7 +235,7 @@ func (o *Orchestrator) distributeWork(ctx context.Context) error {
 	// Create and publish work items
 	for _, page := range pendingPages {
 		workItem := o.createWorkItem(page)
-		
+
 		// Track the work item
 		o.workMu.Lock()
 		o.activeWork[workItem.ID] = &workItem
@@ -253,16 +253,16 @@ func (o *Orchestrator) distributeWork(ctx context.Context) error {
 		err = o.pubsub.PublishWorkItem(ctx, workItem, distributed.PriorityMedium, 3600)
 		if err != nil {
 			log.Error().Err(err).Str("work_item_id", workItem.ID).Msg("Failed to publish work item")
-			
+
 			// Revert page status
 			page.Status = "unfetched"
 			o.stateManager.UpdatePage(*page)
-			
+
 			// Remove from active work
 			o.workMu.Lock()
 			delete(o.activeWork, workItem.ID)
 			o.workMu.Unlock()
-			
+
 			continue
 		}
 
@@ -307,14 +307,14 @@ func (o *Orchestrator) shouldRetry(page *state.Page) bool {
 	// Simple retry logic - could be enhanced with backoff, error analysis, etc.
 	maxRetries := 3
 	retryCount := 0 // This would need to be tracked in page metadata
-	
+
 	return retryCount < maxRetries
 }
 
 // handleResultMessage processes work results from workers
 func (o *Orchestrator) handleResultMessage(ctx context.Context, message distributed.ResultMessage) error {
 	result := message.WorkResult
-	
+
 	log.Info().
 		Str("work_item_id", result.WorkItemID).
 		Str("worker_id", result.WorkerID).
@@ -330,7 +330,7 @@ func (o *Orchestrator) handleResultMessage(ctx context.Context, message distribu
 	if exists {
 		delete(o.activeWork, result.WorkItemID)
 		o.completedWork[result.WorkItemID] = &result
-		
+
 		if result.Status == distributed.StatusSuccess {
 			o.completedItems++
 		} else {
@@ -357,11 +357,11 @@ func (o *Orchestrator) handleResultMessage(ctx context.Context, message distribu
 			if result.Status == distributed.StatusSuccess {
 				pages[i].Status = "fetched"
 			} else {
-				pages[i].Status = "error" 
+				pages[i].Status = "error"
 				pages[i].Error = result.Error
 			}
 			pages[i].Timestamp = result.CompletedAt
-			
+
 			if err := o.stateManager.UpdatePage(pages[i]); err != nil {
 				log.Error().Err(err).Str("url", pages[i].URL).Msg("Failed to update page after result")
 			}
@@ -471,7 +471,7 @@ func (o *Orchestrator) markCrawlCompleted() {
 // healthMonitor tracks worker health and reassigns failed work
 func (o *Orchestrator) healthMonitor(ctx context.Context) {
 	log.Info().Msg("Starting health monitor")
-	
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -571,9 +571,9 @@ func (o *Orchestrator) logCrawlProgress() {
 	workerCount := len(o.workers)
 	activeWorkers := 0
 	for _, worker := range o.workers {
-		if worker.Status == distributed.WorkerStatusActive || 
-		   worker.Status == distributed.WorkerStatusBusy || 
-		   worker.Status == distributed.WorkerStatusIdle {
+		if worker.Status == distributed.WorkerStatusActive ||
+			worker.Status == distributed.WorkerStatusBusy ||
+			worker.Status == distributed.WorkerStatusIdle {
 			activeWorkers++
 		}
 	}
@@ -627,7 +627,7 @@ func (o *Orchestrator) GetStatus() map[string]interface{} {
 			"error_items":      errorItems,
 			"discovered_pages": discoveredPages,
 		},
-		"uptime":    time.Since(o.startTime),
+		"uptime":     time.Since(o.startTime),
 		"start_time": o.startTime,
 	}
 }

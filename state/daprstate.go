@@ -989,9 +989,9 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 	}
 
 	// TODO: Inject missing crawl label here. Need to add it to crawl config to access it
-	// if post.CrawlLabel == "" {
-
-	// }
+	if post.CrawlLabel == "" {
+		post.CrawlLabel = dsm.BaseStateManager.config.CrawlLabel
+	}
 
 	if dsm.BaseStateManager.config.CombineFiles {
 		jsonData, err := json.Marshal(post)

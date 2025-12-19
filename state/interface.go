@@ -133,6 +133,9 @@ type Config struct {
 	// CrawlID identifies a logical crawl operation across runs
 	CrawlID string
 
+	// // User-defined label for the crawl (e.g., "youtube-snowball")
+	CrawlLabel string
+
 	// CrawlExecutionID identifies a specific execution instance
 	// This allows for multiple executions of the same logical crawl
 	CrawlExecutionID string

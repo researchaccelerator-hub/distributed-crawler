@@ -518,6 +518,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 		cfg = state.Config{
 			StorageRoot:     crawlCfg.StorageRoot,
 			CrawlID:         crawlCfg.CrawlID,
+			CrawlLabel:      crawlCfg.CrawlLabel,
 			Platform:        crawlCfg.Platform, // Pass the platform information
 			SamplingMethod:  crawlCfg.SamplingMethod,
 			SeedSize:        crawlCfg.SeedSize,
@@ -528,6 +529,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 		cfg = state.Config{
 			StorageRoot:      crawlCfg.StorageRoot,
 			CrawlID:          crawlCfg.CrawlID,
+			CrawlLabel:       crawlCfg.CrawlLabel,
 			CrawlExecutionID: crawlexecid,
 			Platform:         crawlCfg.Platform, // Pass the platform information
 			SamplingMethod:   crawlCfg.SamplingMethod,
