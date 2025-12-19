@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -520,10 +521,34 @@ func getChannelInfoWithDeps(
 	cfg common.CrawlerConfig,
 ) (*channelInfo, []*client.Message, error) {
 	// Search for the channel
-	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
-		Username: page.URL,
-	})
-	if err != nil {
+	// chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+	// 	Username: page.URL,
+	// })
+	// if err != nil {
+	// 	log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
+	// 	return nil, nil, err
+	// }
+
+	var chat *client.Chat
+	var err error
+
+	for i := 0; i < 3; i++ {
+		chat, err = tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+			Username: page.URL,
+		})
+
+		if err == nil {
+			break
+		}
+
+		if strings.Contains(err.Error(), "response catching timeout") && i < 2 {
+			delay := time.Duration(10+rand.IntN(6)) * time.Second
+			log.Warn().Msgf("Timeout on attempt %d. Retrying in %v...", i+1, delay)
+
+			time.Sleep(delay)
+			continue
+		}
+
 		log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
 		return nil, nil, err
 	}
