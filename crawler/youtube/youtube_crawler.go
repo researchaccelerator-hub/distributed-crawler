@@ -691,7 +691,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	}
 
 	// Extra debug log specifically for post title
-	log.Info().
+	log.Debug().
 		Str("video_id", video.ID).
 		Str("title_from_api", video.Title).
 		Str("first_50_chars_title", func() string {

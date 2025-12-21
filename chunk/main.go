@@ -90,7 +90,7 @@ func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 	}
 	defer watcher.Close()
 	if err := watcher.Add(c.watchDir); err != nil {
-		log.Fatal().Err(err).Msg("Failed to add watch dir to watcher")
+		log.Fatal().Err(err).Msg("Chunk-WF: Failed to add watch dir to watcher")
 	}
 	log.Info().Str("watch_dir", c.watchDir).Msg("Chunk-WF: Watching directory for crawl data")
 
@@ -109,7 +109,7 @@ func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 			}
 			log.Error().Err(err).Msg("Chunk-WF: Encountered error in file watcher Errors. Ok")
 			if isOverflow(err) {
-				log.Error().Msg("Kernel buffer full! Triggering rescan")
+				log.Error().Msg("Chunk-WF: Kernel buffer full! Triggering rescan")
 				// TODO: Trigger rescan coroutine
 			}
 		}
