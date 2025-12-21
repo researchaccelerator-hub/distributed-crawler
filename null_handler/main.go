@@ -336,10 +336,10 @@ func (v *Validator) ValidateChannelData(data *model.ChannelData) *ValidationResu
 	v.validateStruct("ChannelData", "channel", reflect.ValueOf(data).Elem(), result)
 
 	if result.Valid {
-		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Strs("unavailable_fields", result.UnavailableUsed).
+		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Str("channel_id", data.ChannelID).Strs("unavailable_fields", result.UnavailableUsed).
 			Strs("non_essential_missing_fields", result.Warnings).Msgf("null_validation: Valid channel data")
 	} else {
-		log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Strs("critical_missing_fields", result.Errors).
+		log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Str("channel_id", data.ChannelID).Strs("critical_missing_fields", result.Errors).
 			Strs("unavailable_fields", result.UnavailableUsed).Strs("non_essential_missing_fields", result.Warnings).
 			Msgf("null_validation: Invalid channel data")
 	}
@@ -360,10 +360,10 @@ func (v *Validator) ValidatePost(data *model.Post) *ValidationResult {
 	v.validateStruct("", "post", reflect.ValueOf(data).Elem(), result)
 
 	if result.Valid {
-		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Strs("unavailable_fields", result.UnavailableUsed).
+		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Str("post_link", data.PostLink).Strs("unavailable_fields", result.UnavailableUsed).
 			Strs("non_essential_missing_fields", result.Warnings).Msgf("null_validation: Valid post data")
 	} else {
-		log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Strs("critical_missing_fields", result.Errors).
+		log.Error().Str("platform", fmt.Sprint(v.config.Platform)).Str("post_link", data.PostLink).Strs("critical_missing_fields", result.Errors).
 			Strs("unavailable_fields", result.UnavailableUsed).Strs("non_essential_missing_fields", result.Warnings).
 			Msgf("null_validation: Invalid post data")
 	}
