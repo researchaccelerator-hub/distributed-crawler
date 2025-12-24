@@ -345,8 +345,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	var connect crawler.TDLibClient
 	var ytClient clientpkg.Client
 	var ytCrawler crawler.Crawler
-	
-	// Setup cleanup for YouTube resources if needed
+	var blueskyClient clientpkg.Client
+	var blueskyCrawler crawler.Crawler
+
+	// Setup cleanup for platform-specific resources
 	defer func() {
 		if ytCrawler != nil {
 			log.Info().Msg("Cleaning up YouTube crawler resources")
@@ -354,9 +356,74 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				log.Warn().Err(err).Msg("Error while closing YouTube crawler")
 			}
 		}
+		if blueskyCrawler != nil {
+			log.Info().Msg("Cleaning up Bluesky crawler resources")
+			if err := blueskyCrawler.Close(); err != nil {
+				log.Warn().Err(err).Msg("Error while closing Bluesky crawler")
+			}
+		}
 	}()
-	
-	if crawlCfg.Platform == "youtube" {
+
+	if crawlCfg.Platform == "bluesky" {
+		// Bluesky platform initialization
+		log.Info().Msg("Initializing Bluesky crawler components")
+
+		// Create Bluesky client using factory
+		clientCtx := context.Background()
+		clientFactory := clientpkg.NewDefaultClientFactory()
+
+		// Build configuration for Bluesky client
+		config := map[string]interface{}{
+			"jetstream_url": "wss://jetstream2.us-east.bsky.network/subscribe",
+			"buffer_size":   10000,
+		}
+
+		// Add collection filters if needed (posts only by default)
+		config["collections"] = []string{"app.bsky.feed.post"}
+
+		var err error
+		blueskyClient, err = clientFactory.CreateClient(clientCtx, "bluesky", config)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to create Bluesky client")
+			return
+		}
+
+		// Connect to Bluesky JetStream
+		err = blueskyClient.Connect(clientCtx)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to connect to Bluesky JetStream")
+			return
+		}
+
+		// Create and initialize Bluesky crawler factory
+		factory := crawler.NewCrawlerFactory()
+		if err = crawlercommon.RegisterAllCrawlers(factory); err != nil {
+			log.Error().Err(err).Msg("Failed to register crawlers")
+			return
+		}
+
+		// Create Bluesky crawler
+		blueskyCrawler, err = factory.GetCrawler(crawler.PlatformBluesky)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to create Bluesky crawler")
+			return
+		}
+
+		// Initialize the Bluesky crawler
+		crawlerConfig := map[string]interface{}{
+			"client":        blueskyClient,
+			"state_manager": sm,
+			"crawl_label":   crawlCfg.CrawlLabel, // Pass the crawl label to be added to posts
+		}
+
+		err = blueskyCrawler.Initialize(clientCtx, crawlerConfig)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to initialize Bluesky crawler")
+			return
+		}
+
+		log.Info().Msg("Bluesky crawler components initialized successfully")
+	} else if crawlCfg.Platform == "youtube" {
 		// YouTube platform initialization
 		log.Info().Msg("Initializing YouTube crawler components")
 		
@@ -608,7 +675,73 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				ctx := context.Background()
 				
 				// Process based on selected platform
-				if crawlCfg.Platform == "youtube" {
+				if crawlCfg.Platform == "bluesky" {
+					log.Info().Str("url", la.URL).Msg("Processing Bluesky target")
+
+					// Create a crawl target for Bluesky
+					target := crawler.CrawlTarget{
+						Type: crawler.PlatformBluesky,
+						ID:   la.URL, // Bluesky DID, handle, or "firehose"
+					}
+
+					// Fetch channel/user information first
+					channelInfo, err := blueskyCrawler.GetChannelInfo(ctx, target)
+					if err != nil {
+						log.Error().Err(err).Str("target", la.URL).Msg("Failed to get Bluesky channel info")
+						runErr = err
+					} else {
+						log.Info().
+							Str("channel_name", channelInfo.ChannelName).
+							Str("channel_id", channelInfo.ChannelID).
+							Msg("Retrieved Bluesky channel info")
+
+						// Construct crawl job with appropriate time filters
+						var fromTime, toTime time.Time
+						if !crawlCfg.DateBetweenMin.IsZero() && !crawlCfg.DateBetweenMax.IsZero() {
+							// Use date-between range
+							fromTime = crawlCfg.DateBetweenMin
+							toTime = crawlCfg.DateBetweenMax
+							log.Info().
+								Time("date_between_min", fromTime).
+								Time("date_between_max", toTime).
+								Msg("Using date-between filter for Bluesky crawl")
+						} else {
+							// Use traditional min post date with current time as upper bound
+							fromTime = crawlCfg.MinPostDate
+							toTime = time.Now()
+						}
+
+						job := crawler.CrawlJob{
+							Target:     target,
+							FromTime:   fromTime,
+							ToTime:     toTime,
+							Limit:      crawlCfg.MaxPosts,
+							SampleSize: crawlCfg.SampleSize,
+						}
+
+						log.Debug().
+							Time("from_time", fromTime).
+							Time("to_time", toTime).
+							Int("limit", job.Limit).
+							Msg("Bluesky crawl job configured")
+
+						// Execute the crawl
+						result, err := blueskyCrawler.FetchMessages(ctx, job)
+						if err != nil {
+							log.Error().Err(err).Str("target", la.URL).Msg("Failed to fetch Bluesky posts")
+							runErr = err
+						} else {
+							log.Info().
+								Int("post_count", len(result.Posts)).
+								Str("target", la.URL).
+								Msg("Successfully crawled Bluesky target")
+
+							// For now, we don't handle outlinks from Bluesky posts
+							// (could be added later to follow mentioned users)
+							discoveredChannels = []*state.Page{}
+						}
+					}
+				} else if crawlCfg.Platform == "youtube" {
 					log.Info().Str("url", la.URL).Msg("Processing YouTube channel")
 					
 					// Create a crawl target for the YouTube channel
