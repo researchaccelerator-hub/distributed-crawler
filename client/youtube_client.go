@@ -235,14 +235,12 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 
 // GetVideos retrieves videos from a YouTube channel using the default method
 func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	log.Info().Msg("GetVideos REMOVE: Starting YouTubeDataClient.GetVideos in youtube_client.go")
 	return c.GetVideosFromChannel(ctx, channelID, fromTime, toTime, limit)
 }
 
 // GetVideosFromChannel retrieves videos from a specific YouTube channel
 func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 
-	log.Info().Msg("GetVideos REMOVE: Starting YouTubeDataClient.GetVideosFromChannel in youtube_client.go")
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
 	}
@@ -792,7 +790,6 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				Msg(fmt.Sprintf("Sample video %d/%d", i+1, sampleSize))
 		}
 	}
-	log.Info().Msg("GetVideos REMOVE: Exiting YouTubeDataClient.GetVideosFromChannel in youtube_client.go")
 	return videos, nil
 }
 
@@ -872,7 +869,6 @@ func (a *YouTubeClientAdapter) GetChannelInfo(ctx context.Context, channelID str
 // GetMessages retrieves videos from a YouTube channel (adapting to the Message interface)
 func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]Message, error) {
 
-	log.Info().Msg("GetVideos REMOVE: Starting YouTubeClientAdapter.GetMessages in youtube_client.go")
 	videos, err := a.client.GetVideos(ctx, channelID, fromTime, toTime, limit)
 	if err != nil {
 		return nil, err
@@ -905,7 +901,6 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 
 		messages = append(messages, message)
 	}
-	log.Info().Msg("GetVideos REMOVE: Exiting YouTubeClientAdapter.GetMessages in youtube_client.go")
 	return messages, nil
 }
 
