@@ -95,4 +95,7 @@ type Message interface {
 
 	// GetType returns the platform type ("telegram", "youtube")
 	GetType() string
+
+	// GetDuration returns the duration string. This is youtube specific
+	GetDuration() string
 }

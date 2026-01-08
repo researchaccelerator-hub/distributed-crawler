@@ -94,6 +94,7 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 			CommentCount: msg.GetCommentCount(),
 			Thumbnails:   msg.GetThumbnails(),
 			Language:     msg.GetLanguage(),
+			Duration:     msg.GetDuration(),
 		}
 
 		// Extract like count from reactions if available

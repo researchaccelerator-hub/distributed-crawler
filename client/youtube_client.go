@@ -900,6 +900,7 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 			Thumbnails:   video.Thumbnails,
 			CommentCount: video.CommentCount,
 			Language:     video.Language,
+			Duration:     video.Duration,
 		}
 
 		messages = append(messages, message)

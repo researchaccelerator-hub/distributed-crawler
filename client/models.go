@@ -224,6 +224,11 @@ func (m *TelegramMessage) GetType() string {
 	return "telegram"
 }
 
+func (m *TelegramMessage) GetDuration() string {
+	log.Warn().Msg("GetDuration not implemented in TelegramChannel")
+	return ""
+}
+
 // YouTubeMessage implements Message for YouTube
 type YouTubeMessage struct {
 	ID           string
@@ -239,6 +244,7 @@ type YouTubeMessage struct {
 	Thumbnails   map[string]string // Video thumbnails
 	CommentCount int64             // Video comment count
 	Language     string            // Video language
+	Duration     string            // Duration string from youtube api
 }
 
 // GetID implements Message
@@ -309,4 +315,8 @@ func (m *YouTubeMessage) GetLanguage() string {
 // GetType implements Message
 func (m *YouTubeMessage) GetType() string {
 	return "youtube"
+}
+
+func (m *YouTubeMessage) GetDuration() string {
+	return m.Duration
 }
