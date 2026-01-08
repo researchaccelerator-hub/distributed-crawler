@@ -8,6 +8,7 @@ import (
 
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
+	"github.com/rs/zerolog/log"
 )
 
 // ClientAdapter adapts a client.Client to the YouTubeClient interface
@@ -71,6 +72,8 @@ func (a *ClientAdapter) GetChannelInfo(ctx context.Context, channelID string) (*
 // GetVideos retrieves videos from a YouTube channel
 func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	// Get messages (videos) from the client
+	log.Info().Msg("GetVideos REMOVE: Starting ClientAdapter.GetVideos in adapters.go")
+
 	messages, err := a.client.GetMessages(ctx, channelID, fromTime, toTime, limit)
 	if err != nil {
 		return nil, err
@@ -102,12 +105,13 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 
 		videos = append(videos, video)
 	}
-
+	log.Info().Msg("GetVideos REMOVE: Exiting ClientAdapter.GetVideos in adapters.go")
 	return videos, nil
 }
 
 // GetVideosFromChannel retrieves videos from a specific YouTube channel
 func (a *ClientAdapter) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	log.Info().Msg("GetVideos REMOVE: Starting ClientAdapter.GetVideosFromChannel in adapters.go. Just a return to GetVideos")
 	// Reuse the GetVideos implementation since they do the same thing
 	return a.GetVideos(ctx, channelID, fromTime, toTime, limit)
 }

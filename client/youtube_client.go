@@ -235,6 +235,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 
 // GetVideos retrieves videos from a YouTube channel using the default method
 func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+	log.Info().Msg("GetVideos REMOVE: Starting YouTubeDataClient in youtube_client.go")
 	return c.GetVideosFromChannel(ctx, channelID, fromTime, toTime, limit)
 }
 
