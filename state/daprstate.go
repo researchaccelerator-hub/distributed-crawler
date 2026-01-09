@@ -681,6 +681,10 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 		dsm.layerMap[depth] = make([]string, 0)
 	}
 
+	// to avoid overwhelming statestore for large seed counts
+	const maxConcurrentDaprCalls = 100
+	sem := make(chan struct{}, maxConcurrentDaprCalls)
+
 	// Update in-memory structures for each page
 	for i := range pagesToAdd {
 		page := pagesToAdd[i]
@@ -699,6 +703,11 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 
 		// Launch a goroutine to save this page to Dapr
 		eg.Go(func() error {
+
+			// acquire slot in semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
 			// Marshal page data for Dapr
 			pageData, err := json.Marshal(pageCopy)
 			if err != nil {
@@ -715,6 +724,7 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 				nil,
 			)
 			if err != nil {
+				// TODO: Replace with dapr resiliency: https://docs.dapr.io/operations/resiliency/resiliency-overview/
 				sleepMilliseconds := 3000 + rand.IntN(4000)
 				log.Info().Str("page_id", pageCopy.ID).Int("sleep_milliseconds", sleepMilliseconds).Err(err).
 					Msg("Encountered error saving page. Waiting between 3 and 7 seconds and retrying")
