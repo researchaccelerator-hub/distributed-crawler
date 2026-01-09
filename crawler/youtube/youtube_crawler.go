@@ -648,12 +648,10 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", video.ID)
 
 	// Parse duration string to seconds
-	// var videoLengthSeconds int
 	var videoLengthPtr *int
 	if durationStr := video.Duration; durationStr != "" {
 		duration, err := parseISO8601Duration(durationStr)
 		if err == nil {
-			// videoLengthSeconds = duration
 			videoLengthPtr = &duration
 			log.Debug().Int("video_length_seconds", duration).Msg("Parsed video duration")
 		} else {
@@ -742,10 +740,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 		// IsAd unavailable
 		// TranscriptText unavailable
 		// ImageText unavailable
-
-		// VideoLength: &videoLengthSeconds,
 		VideoLength: videoLengthPtr,
-
 		// IsVerified unavailable
 		// ChannelData added below
 		PlatformName: "youtube",
