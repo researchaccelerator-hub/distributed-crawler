@@ -3226,9 +3226,6 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 		return fmt.Errorf("Chunk: error reading combined file %s: %w", filename, err)
 	}
 
-	// Append newline for JSONL format
-	// postData = append(postData, '\n')
-
 	// Create storage path
 	storagePath, err := dsm.generateCrawlExecutableStoragePath(
 		"combined-posts",
