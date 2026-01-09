@@ -988,14 +988,19 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 		return nil
 	}
 
+	if post.CrawlLabel == "" {
+		post.CrawlLabel = dsm.BaseStateManager.config.CrawlLabel
+	}
+
 	if dsm.BaseStateManager.config.CombineFiles {
 		jsonData, err := json.Marshal(post)
-
+		// append \n for jsonl
+		jsonData = append(jsonData, '\n')
 		if err != nil {
 			return fmt.Errorf("Chunk: Unable to marshall data for writing to file: %w", err)
 		}
 
-		filename := fmt.Sprintf("%s/post_%s_%d.json", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
+		filename := fmt.Sprintf("%s/post_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
 
 		err = os.WriteFile(filename, jsonData, 0644)
 		if err != nil {
@@ -3221,9 +3226,6 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 		return fmt.Errorf("Chunk: error reading combined file %s: %w", filename, err)
 	}
 
-	// Append newline for JSONL format
-	postData = append(postData, '\n')
-
 	// Create storage path
 	storagePath, err := dsm.generateCrawlExecutableStoragePath(
 		"combined-posts",
@@ -3233,8 +3235,6 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 	if err != nil {
 		return fmt.Errorf("Chunk: error creating storage path %s: %w", filename, err)
 	}
-
-	log.Info().Str("storage_path", storagePath).Msg("Chunk: Storage path created REMOVE")
 
 	// Encode data for Dapr binding
 	encodedData := base64.StdEncoding.EncodeToString(postData)

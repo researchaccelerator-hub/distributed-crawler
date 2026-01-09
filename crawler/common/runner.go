@@ -145,7 +145,7 @@ func (r *CrawlRunner) GetChannelInfo(ctx context.Context, target crawler.CrawlTa
 	info := &state.ChannelInfo{
 		ChannelID:   target.ID,
 		Name:        channelData.ChannelName,
-		Description: "",  // This would be populated from channelData if available
+		Description: "", // This would be populated from channelData if available
 		MemberCount: int64(channelData.ChannelEngagementData.FollowerCount),
 		URL:         channelData.ChannelURL,
 		Platform:    string(target.Type),

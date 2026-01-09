@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/researchaccelerator-hub/telegram-scraper/null_handler"
 	"github.com/rs/zerolog/log"
 )
 
@@ -35,21 +36,22 @@ type CrawlerConfig struct {
 	MaxComments        int
 	MaxPosts           int
 	MaxDepth           int
-	MaxPages           int    // Maximum number of pages to crawl (default: 108000)
-	TDLibVerbosity     int    // TDLib verbosity level for logging (default: 1)
-	SkipMediaDownload  bool   // Skip downloading media files (only process metadata)
-	Platform           string // Platform to crawl: "telegram", "youtube", etc.
-	YouTubeAPIKey      string // API key for YouTube Data API
-	SamplingMethod     string // Sampling method: "channel", "random", "snowball", "random-walk"
-	SeedSize           int    // Number of discovered channels to use as seed channels in random-walk crawl
-	WalkbackRate       int    // Rate to walkback using random-walk sampling method
-	MinChannelVideos   int64  // Minimum videos per channel for inclusion
-	CombineFiles       bool   // Flag to turn on combining files before upload
-	CombineWatchDir    string // Location to write crawl data to and watch for combining files once they reach the trigger size
-	CombineWriteDir    string // Location to write combined files to before upload
-	CombineTriggerSize int64  // Total file size hreshold for creating a new combined file
-	CombineHardCap     int64  // File size cap that can not be exceeded in creation of combined file
-
+	MaxPages           int                    // Maximum number of pages to crawl (default: 108000)
+	TDLibVerbosity     int                    // TDLib verbosity level for logging (default: 1)
+	SkipMediaDownload  bool                   // Skip downloading media files (only process metadata)
+	Platform           string                 // Platform to crawl: "telegram", "youtube", etc.
+	YouTubeAPIKey      string                 // API key for YouTube Data API
+	SamplingMethod     string                 // Sampling method: "channel", "random", "snowball", "random-walk"
+	SeedSize           int                    // Number of discovered channels to use as seed channels in random-walk crawl
+	WalkbackRate       int                    // Rate to walkback using random-walk sampling method
+	MinChannelVideos   int64                  // Minimum videos per channel for inclusion
+	CombineFiles       bool                   // Flag to turn on combining files before upload
+	CombineWatchDir    string                 // Location to write crawl data to and watch for combining files once they reach the trigger size
+	CombineWriteDir    string                 // Location to write combined files to before upload
+	CombineTriggerSize int64                  // Total file size hreshold for creating a new combined file
+	CombineHardCap     int64                  // File size cap that can not be exceeded in creation of combined file
+	NullConfig         string                 // JSON string for user defined changes to handling of null crawl data
+	NullValidator      null_handler.Validator // Null Validator object
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

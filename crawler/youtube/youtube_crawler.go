@@ -383,6 +383,11 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 				// Convert the video to a post
 				post := c.convertVideoToPost(video)
 
+				result := job.NullValidator.ValidatePost(&post)
+				if !result.Valid {
+					log.Error().Strs("errors", result.Errors).Msg("Missing critical fields in youtube post data")
+				}
+
 				// Store the post in state manager
 				if err := c.stateManager.StorePost(video.ChannelID, post); err != nil {
 					log.Error().
@@ -643,15 +648,17 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	videoURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", video.ID)
 
 	// Parse duration string to seconds
-	var videoLengthSeconds int
+	var videoLengthPtr *int
 	if durationStr := video.Duration; durationStr != "" {
 		duration, err := parseISO8601Duration(durationStr)
 		if err == nil {
-			videoLengthSeconds = duration
-			log.Debug().Int("video_length_seconds", videoLengthSeconds).Msg("Parsed video duration")
+			videoLengthPtr = &duration
+			log.Debug().Int("video_length_seconds", duration).Msg("Parsed video duration")
 		} else {
 			log.Warn().Err(err).Str("duration", durationStr).Msg("Failed to parse video duration")
 		}
+	} else {
+		log.Warn().Msg("durationStr is empty")
 	}
 
 	// Set HasEmbedMedia flag
@@ -686,7 +693,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	}
 
 	// Extra debug log specifically for post title
-	log.Info().
+	log.Debug().
 		Str("video_id", video.ID).
 		Str("title_from_api", video.Title).
 		Str("first_50_chars_title", func() string {
@@ -705,49 +712,78 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 
 	// Create the post object
 	post := model.Post{
-		PostUID:        video.ID,
-		ChannelName:    channelName,
-		ChannelID:      video.ChannelID, // Set the proper YouTube channel ID
-		URL:            videoURL,
-		PublishedAt:    video.PublishedAt,
-		CreatedAt:      time.Now(),
-		Engagement:     engagement,
-		PostTitle:      &title,
-		Description:    video.Description,
-		ViewsCount:     int(video.ViewCount),
-		LikesCount:     int(video.LikeCount),
-		CommentsCount:  int(video.CommentCount),
-		ViewCount:      int(video.ViewCount),
-		LikeCount:      int(video.LikeCount),
-		CommentCount:   int(video.CommentCount),
-		PlatformName:   "youtube",
-		SearchableText: video.Title + " " + video.Description,
-		AllText:        video.Title + " " + video.Description,
-		PostType:       []string{"video"},
-		CrawlLabel:     c.crawlLabel, // Add the crawl label to identify crawl source
-		CaptureTime:    time.Now(),
-		ThumbURL:       thumbURL,
-		MediaURL:       videoURL,
-		Handle:         video.ChannelID,
-		PostLink:       videoURL,
-		// Additional fields
-		VideoLength:   &videoLengthSeconds,
-		HasEmbedMedia: &hasEmbedMedia,
+		PostLink:     videoURL,
+		ChannelID:    video.ChannelID, // Set the proper YouTube channel ID
+		PostUID:      video.ID,
+		URL:          videoURL,
+		PublishedAt:  video.PublishedAt,
+		CreatedAt:    time.Now(),
+		LanguageCode: video.Language,
+		Engagement:   engagement,
+		ViewCount:    int(video.ViewCount),
+		LikeCount:    int(video.LikeCount),
+		// ShareCount unavailable
+		CommentCount: int(video.CommentCount),
+		CrawlLabel:   c.crawlLabel, // Add the crawl label to identify crawl source
+		// ListIDs
+		ChannelName: channelName,
+		// SearchTerms unavailable
+		// SearchTermIDs unavailable
+		// ProjectIDs unavailable
+		// ExerciseIDs unavailable
+		// LabelData unavailable
+		// LabelsMetadata unavailable
+		// ProjectLabeledPostIDs unavailable
+		// LabelerIDs unavailable
+		// AllLabels unavailable
+		// LabelIDs unavailable
+		// IsAd unavailable
+		// TranscriptText unavailable
+		// ImageText unavailable
+		VideoLength: videoLengthPtr,
+		// IsVerified unavailable
+		// ChannelData added below
+		PlatformName: "youtube",
+		// SharedID unavailable
+		// QuotedID unavailable
+		// RepliedID unavailable
+		// AILabel unavailable
+		// RootPostID unavailable
+		// EngagementStepsCount unavailable
+		OCRData: ocrData, // Add the OCR data with thumbnail information
 		PerformanceScores: model.PerformanceScores{
 			Likes:    &likesCount,
 			Comments: &commentsCount,
 			Views:    viewsCount,
 		},
-		// Add the outlinks
-		Outlinks: outlinks,
-		// Add the OCR data with thumbnail information
-		OCRData: ocrData,
+		HasEmbedMedia: &hasEmbedMedia,
+		Description:   video.Description,
+		// RepostChannelData unavailable
+		PostType: []string{"video"},
+		// InnerLink unavailable
+		PostTitle: &title,
 		// Create media data
 		MediaData: model.MediaData{
 			DocumentName: fmt.Sprintf("%s-%s.mp4", video.ID, sanitizeFilename(video.Title)),
 		},
-		// Add reactions as a map
-		Reactions: map[string]int{"like": int(video.LikeCount)},
+		// IsReply unavailable
+		// AdFields unavailable
+		LikesCount: int(video.LikeCount),
+		// SharesCount unavailable
+		CommentsCount:  int(video.CommentCount),
+		ViewsCount:     int(video.ViewCount),
+		SearchableText: video.Title + " " + video.Description,
+		AllText:        video.Title + " " + video.Description,
+		// ContrastAgentProjectIDs unavailable
+		// AgentIDs unavailable
+		// SegmentIDs unavailable
+		ThumbURL: thumbURL,
+		MediaURL: videoURL,
+		// Comments not available yet
+		Reactions:   map[string]int{"like": int(video.LikeCount)}, // Add reactions as a map
+		Outlinks:    outlinks,                                     // Add the outlinks
+		CaptureTime: time.Now(),
+		Handle:      video.ChannelID,
 	}
 
 	// Construct channel URL based on ID format
@@ -767,16 +803,20 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			ChannelID:           video.ChannelID, // Set the proper YouTube channel ID
 			ChannelName:         channel.Title,
 			ChannelDescription:  channel.Description, // Add channel description
-			ChannelURL:          channelURL,
-			ChannelURLExternal:  channelURL,
 			ChannelProfileImage: channel.Thumbnails["default"],
-			CountryCode:         channel.Country,     // Add country code from YouTube data
-			PublishedAt:         channel.PublishedAt, // Add channel creation date
 			ChannelEngagementData: model.EngagementData{
 				FollowerCount: int(channel.SubscriberCount),
-				ViewsCount:    int(channel.ViewCount),
-				PostCount:     int(channel.VideoCount),
+				// FollowingCount unavailable
+				// LikeCount unavailable
+				PostCount:  int(channel.VideoCount),
+				ViewsCount: int(channel.ViewCount),
+				// CommentCount unavailable
+				// ShareCount unavailable
 			},
+			ChannelURLExternal: channelURL,
+			ChannelURL:         channelURL,
+			CountryCode:        channel.Country,     // Add country code from YouTube data
+			PublishedAt:        channel.PublishedAt, // Add channel creation date
 		}
 	} else {
 		// Fallback to basic data if channel info isn't available
@@ -785,10 +825,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			ChannelID:          video.ChannelID, // Set the proper YouTube channel ID
 			ChannelName:        channelName,
 			ChannelDescription: "", // Empty description when not available
-			ChannelURL:         channelURL,
-			ChannelURLExternal: channelURL,
-			CountryCode:        "",                // No country data available when channel info is missing
-			PublishedAt:        video.PublishedAt, // Use video's publish date as fallback
+			// ChannelProfileImage unavailable
 			ChannelEngagementData: model.EngagementData{
 				// Use the video's data to provide some engagement metrics
 				ViewsCount:   int(video.ViewCount),
@@ -800,6 +837,10 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 				PostCount:      0,
 				ShareCount:     0,
 			},
+			ChannelURLExternal: channelURL,
+			ChannelURL:         channelURL,
+			CountryCode:        "",                // No country data available when channel info is missing
+			PublishedAt:        video.PublishedAt, // Use video's publish date as fallback
 		}
 
 		log.Warn().
@@ -807,7 +848,6 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			Str("channel_name", channelName).
 			Msg("Using limited channel data without engagement metrics")
 	}
-
 	return post
 }
 

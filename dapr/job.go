@@ -756,6 +756,7 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
+		CrawlLabel:       crawlCfg.CrawlLabel,
 		CrawlExecutionID: crawlexecid,
 		Platform:         crawlCfg.Platform, // Pass the platform information
 		SamplingMethod:   crawlCfg.SamplingMethod,

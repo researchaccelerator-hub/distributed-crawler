@@ -52,17 +52,17 @@ func (a *ClientAdapter) GetChannelInfo(ctx context.Context, channelID string) (*
 	if err != nil {
 		return nil, err
 	}
-
 	// Convert client.Channel to YouTubeChannel
 	ytChannel := &youtubemodel.YouTubeChannel{
 		ID:              channelID,
 		Title:           channel.GetName(),
 		Description:     channel.GetDescription(),
-		SubscriberCount: int64(channel.GetMemberCount()),
-		ViewCount:       0,           // Not directly available
-		VideoCount:      0,           // Not directly available
-		PublishedAt:     time.Time{}, // Not directly available
-		Thumbnails:      make(map[string]string),
+		Thumbnails:      channel.GetThumbnails(),
+		SubscriberCount: channel.GetMemberCount(),
+		ViewCount:       channel.GetViewCount(),
+		VideoCount:      channel.GetPostCount(),
+		Country:         channel.GetCountry(),
+		PublishedAt:     channel.GetPublishedAt(),
 	}
 
 	return ytChannel, nil
@@ -91,6 +91,7 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 			CommentCount: msg.GetCommentCount(),
 			Thumbnails:   msg.GetThumbnails(),
 			Language:     msg.GetLanguage(),
+			Duration:     msg.GetDuration(),
 		}
 
 		// Extract like count from reactions if available
@@ -102,7 +103,6 @@ func (a *ClientAdapter) GetVideos(ctx context.Context, channelID string, fromTim
 
 		videos = append(videos, video)
 	}
-
 	return videos, nil
 }
 

@@ -4,6 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"syscall"
+	"time"
+
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
@@ -16,12 +23,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"strconv"
-	"syscall"
-	"time"
 )
 
 // StartStandaloneMode initializes and starts the crawler in standalone mode. It collects URLs from the provided list or file,
@@ -110,15 +111,15 @@ func generatePCode() {
 		ApplicationVersion:  "1.0.0",
 	}
 
-	// Set up authentication environment variables 
+	// Set up authentication environment variables
 	telegramhelper.SetupAuth(phoneNumber, phoneCode)
-	
+
 	// Use the default CLI interactor
 	go client.CliInteractor(authorizer)
 
 	// Get verbosity level from configuration (default is 1, will use 0 if not specified)
 	verbosityLevel := 1 // Default
-	
+
 	log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level for code generation")
 	_, err = client.SetLogVerbosityLevel(&client.SetLogVerbosityLevelRequest{
 		NewVerbosityLevel: int32(verbosityLevel),
@@ -203,15 +204,15 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	
+
 	// Store the state manager in a package-level variable so signal handler can access it
 	var shutdownSM state.StateManagementInterface
-	
+
 	// Start a goroutine to handle shutdown signals
 	go func() {
 		sig := <-sigChan
 		log.Warn().Str("signal", sig.String()).Msg("Received shutdown signal, performing graceful shutdown")
-		
+
 		// If we have a state manager, close it to save any pending data
 		if shutdownSM != nil {
 			log.Info().Msg("Saving media cache and state during signal-triggered shutdown")
@@ -221,7 +222,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				log.Info().Msg("Successfully saved state during shutdown")
 			}
 		}
-		
+
 		log.Info().Msg("Shutdown complete, exiting")
 		os.Exit(0)
 	}()
@@ -235,8 +236,9 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	tempCfg := state.Config{
 		StorageRoot: crawlCfg.StorageRoot,
 		CrawlID:     crawlCfg.CrawlID,
+		CrawlLabel:  crawlCfg.CrawlLabel,
 		Platform:    crawlCfg.Platform, // Pass the platform information
-		
+
 		// Configure DAPR if we're using it (this ensures proper state lookup)
 		DaprConfig: &state.DaprConfig{
 			StateStoreName: "statestore", // Default DAPR state store name
@@ -278,7 +280,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		crawlexecid = common.GenerateCrawlID()
 		log.Info().Msgf("Starting new crawl execution: %s", crawlexecid)
 	}
-	
+
 	// Track whether we're resuming the same execution ID or starting a new one
 	var isResumingSameCrawlExecution bool
 	if tempSM != nil {
@@ -291,15 +293,16 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	cfg := state.Config{
 		StorageRoot:      crawlCfg.StorageRoot,
 		CrawlID:          crawlCfg.CrawlID,
+		CrawlLabel:       crawlCfg.CrawlLabel,
 		CrawlExecutionID: crawlexecid,
 		Platform:         crawlCfg.Platform, // Pass the platform information
-		
+
 		// Add the DAPR config here too to ensure proper state storage
 		DaprConfig: &state.DaprConfig{
 			StateStoreName: "statestore",
 			ComponentName:  "statestore",
 		},
-		
+
 		// Add the MaxPages config
 		MaxPagesConfig: &state.MaxPagesConfig{
 			MaxPages: crawlCfg.MaxPages,
@@ -311,13 +314,13 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		log.Error().Err(err).Msg("Failed to load progress")
 		return
 	}
-	
+
 	// Store reference to state manager for signal handler
 	shutdownSM = sm
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
 	// Initialize with seed URLs if this is a new crawl
-	// If resuming an existing crawl, this is a no-op 
+	// If resuming an existing crawl, this is a no-op
 	// as the state manager already has the data
 	err = sm.Initialize(stringList)
 	if err != nil {
@@ -345,7 +348,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	var connect crawler.TDLibClient
 	var ytClient clientpkg.Client
 	var ytCrawler crawler.Crawler
-	
+
 	// Setup cleanup for YouTube resources if needed
 	defer func() {
 		if ytCrawler != nil {
@@ -355,60 +358,60 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			}
 		}
 	}()
-	
+
 	if crawlCfg.Platform == "youtube" {
 		// YouTube platform initialization
 		log.Info().Msg("Initializing YouTube crawler components")
-		
+
 		// Validate YouTube API key
 		if crawlCfg.YouTubeAPIKey == "" {
 			log.Error().Msg("YouTube API key is required for YouTube platform. Please provide it with --youtube-api-key flag")
 			return
 		}
-		
+
 		// Create YouTube client using factory
 		clientCtx := context.Background()
 		clientFactory := clientpkg.NewDefaultClientFactory()
-		
+
 		// Debug API key passing
 		if crawlCfg.YouTubeAPIKey == "" {
 			log.Error().Msg("YouTube API key is empty - make sure you provided it with --youtube-api-key")
 		} else {
 			log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(crawlCfg.YouTubeAPIKey))).Msg("Using YouTube API key")
 		}
-		
+
 		config := map[string]interface{}{
 			"api_key": crawlCfg.YouTubeAPIKey,
 		}
-		
+
 		var err error
 		ytClient, err = clientFactory.CreateClient(clientCtx, "youtube", config)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to create YouTube client")
 			return
 		}
-		
+
 		// Connect to YouTube API
 		err = ytClient.Connect(clientCtx)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to connect to YouTube API")
 			return
 		}
-		
+
 		// Create and initialize YouTube crawler factory
 		factory := crawler.NewCrawlerFactory()
 		if err = crawlercommon.RegisterAllCrawlers(factory); err != nil {
 			log.Error().Err(err).Msg("Failed to register crawlers")
 			return
 		}
-		
+
 		// Create YouTube crawler
 		ytCrawler, err = factory.GetCrawler(crawler.PlatformYouTube)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to create YouTube crawler")
 			return
 		}
-		
+
 		// Initialize the YouTube crawler
 		// Create YouTubeClient adapter
 		ytAdapter, adapterErr := youtube.NewClientAdapter(ytClient)
@@ -417,34 +420,34 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			log.Error().Err(err).Msg("YouTube client adapter creation failed")
 			return
 		}
-		
+
 		// The adapter needs to be accessible as a youtubemodel.YouTubeClient
 		// The ClientAdapter struct implements this interface
 		var ytModelClient youtubemodel.YouTubeClient = ytAdapter
-		
+
 		crawlerConfig := map[string]interface{}{
-			"client": ytModelClient,
+			"client":        ytModelClient,
 			"state_manager": sm,
-			"crawl_label": crawlCfg.CrawlLabel, // Pass the crawl label to be added to posts
+			"crawl_label":   crawlCfg.CrawlLabel, // Pass the crawl label to be added to posts
 			"crawler_config": map[string]interface{}{
 				"sampling_method":    crawlCfg.SamplingMethod,
 				"min_channel_videos": crawlCfg.MinChannelVideos,
 			},
 		}
-		
+
 		err = ytCrawler.Initialize(clientCtx, crawlerConfig)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to initialize YouTube crawler")
 			return
 		}
-		
+
 		log.Info().Msg("YouTube crawler components initialized successfully")
 	} else {
 		// Telegram platform initialization (default)
 		// Initialize the connection pool
 		crawl.InitConnectionPool(poolSize, crawlCfg.StorageRoot, crawlCfg)
 		defer crawl.CloseConnectionPool()
-	
+
 		// Create a single non-pooled connection for backward compatibility
 		var connectErr error
 		connect, connectErr = crawl.Connect(crawlCfg.StorageRoot, crawlCfg)
@@ -453,22 +456,22 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			return
 		}
 	}
-	
+
 	// Process layers sequentially starting from depth 0
 	// and continuing until max depth is reached or no more layers exist
 	currentDepth := 0
-	maxDepthConfig := crawlCfg.MaxDepth 
-	
+	maxDepthConfig := crawlCfg.MaxDepth
+
 	// If maxDepth is -1 or 0, we'll just continue until no more layers are found
 	if maxDepthConfig <= 0 {
 		maxDepthConfig = 1000 // Set a very high number as default
 	}
-	
+
 	log.Info().Int("maxDepth", maxDepthConfig).Msg("Starting multi-layer crawl")
-	
+
 	// Track overall statistics
 	var totalPagesProcessed, totalPagesSkipped, totalPagesSuccess, totalPagesError int
-	
+
 	for currentDepth <= maxDepthConfig {
 		// Fetch the current layer of pages
 		currentLayer, err := sm.GetLayerByDepth(currentDepth)
@@ -476,15 +479,15 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			log.Error().Err(err).Int("depth", currentDepth).Msg("Failed to get layer pages")
 			break
 		}
-		
+
 		// If no pages at this depth, we've reached the end of the crawl
 		if len(currentLayer) == 0 {
 			log.Info().Int("depth", currentDepth).Msg("No pages found at this depth, crawl complete")
 			break
 		}
-		
+
 		log.Info().Msgf("Processing layer at depth %d with %d pages", currentDepth, len(currentLayer))
-		
+
 		// Print all page statuses before processing
 		log.Info().Int("page_count", len(currentLayer)).Int("depth", currentDepth).Msg("Page status summary before processing")
 		pageStatusCount := make(map[string]int)
@@ -503,12 +506,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		for status, count := range pageStatusCount {
 			log.Info().Str("status", status).Int("count", count).Int("depth", currentDepth).Msg("Page status count")
 		}
-		
+
 		// Track statistics for this layer
 		var layerPages, layerSkipped, layerSuccess, layerError int
 		layerPages = len(currentLayer)
 		totalPagesProcessed += layerPages
-		
+
 		// Process each page in the current layer
 		// Find the first page in the layer that needs processing
 		startIndex := 0
@@ -521,7 +524,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				Int("message_count", len(la.Messages)).
 				Bool("resuming_execution", isResumingSameCrawlExecution).
 				Msg("Page discovered during crawl restart")
-				
+
 			// Check the page status to determine if we need to process it
 			if la.Status == "fetched" {
 				if isResumingSameCrawlExecution {
@@ -539,17 +542,17 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 					break
 				}
 			}
-			
+
 			// If we found a page that's not fetched, this is where we want to start
 			break
 		}
-		
+
 		// Process from the first page that needs processing
 		log.Info().Int("starting_index", startIndex).Int("total_pages", len(currentLayer)).Msg("Starting processing from index")
-		
+
 		for i := startIndex; i < len(currentLayer); i++ {
 			la := currentLayer[i]
-			
+
 			// Double-check status since we're now using an index-based approach
 			if la.Status == "fetched" {
 				if isResumingSameCrawlExecution {
@@ -565,12 +568,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 					// Continue processing this page
 				}
 			}
-			
+
 			if la.Status == "processing" {
 				log.Info().Str("url", la.URL).Msg("Found page in 'processing' state - will retry")
 				// Continue to process it
 			}
-			
+
 			// Process this page in a self-contained function to handle panics
 			func() {
 				defer func() {
@@ -579,7 +582,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 						la.Status = "error" // Mark as error so we can retry later
 						layerError++
 						totalPagesError++
-						
+
 						// Make sure we save the state even after a panic
 						saveErr := sm.SaveState()
 						if saveErr != nil {
@@ -591,13 +594,13 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				// Update page status and timestamp before processing
 				la.Timestamp = time.Now()
 				la.Status = "processing" // Mark as in-progress
-				
+
 				// Save state before processing to record that we're working on this page
 				saveErr := sm.SaveState()
 				if saveErr != nil {
 					log.Warn().Err(saveErr).Str("url", la.URL).Msg("Failed to save state before processing page")
 				}
-				
+
 				// Try to use the connection pool
 				var discoveredChannels []*state.Page
 				var runErr error
@@ -606,17 +609,17 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 				// Create context for operations
 				ctx := context.Background()
-				
+
 				// Process based on selected platform
 				if crawlCfg.Platform == "youtube" {
 					log.Info().Str("url", la.URL).Msg("Processing YouTube channel")
-					
+
 					// Create a crawl target for the YouTube channel
 					target := crawler.CrawlTarget{
 						Type: crawler.PlatformYouTube,
 						ID:   la.URL, // YouTube channel ID/handle
 					}
-					
+
 					// Fetch channel information first
 					channelInfo, err := ytCrawler.GetChannelInfo(ctx, target)
 					if err != nil {
@@ -627,7 +630,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 							Str("channel_name", channelInfo.ChannelName).
 							Int("subscribers", channelInfo.ChannelEngagementData.FollowerCount).
 							Msg("Retrieved YouTube channel info")
-							
+
 						// Construct crawl job with appropriate time filters
 						var fromTime, toTime time.Time
 						if !crawlCfg.DateBetweenMin.IsZero() && !crawlCfg.DateBetweenMax.IsZero() {
@@ -643,34 +646,43 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 							fromTime = crawlCfg.MinPostDate
 							toTime = time.Now()
 						}
-						
+
 						job := crawler.CrawlJob{
-							Target:     target,
-							FromTime:   fromTime,
-							ToTime:     toTime,
-							Limit:      crawlCfg.MaxPosts,
-							SampleSize: crawlCfg.SampleSize,
+							Target:        target,
+							FromTime:      fromTime,
+							ToTime:        toTime,
+							Limit:         crawlCfg.MaxPosts,
+							SampleSize:    crawlCfg.SampleSize,
+							NullValidator: crawlCfg.NullValidator,
 						}
-						
+
 						log.Debug().
 							Time("from_time", fromTime).
 							Time("to_time", toTime).
 							Int("limit", job.Limit).
 							Msg("YouTube crawl job configured")
-						
-						// Execute the crawl
-						result, err := ytCrawler.FetchMessages(ctx, job)
-						if err != nil {
-							log.Error().Err(err).Str("channel", la.URL).Msg("Failed to fetch YouTube videos")
+
+						validationResult := crawlCfg.NullValidator.ValidateChannelData(channelInfo)
+
+						if !validationResult.Valid {
+							err = fmt.Errorf("Missing critical fields: %v", validationResult.Errors)
+							log.Error().Str("channel", la.URL).Strs("validation_errors", validationResult.Errors).Msg("Missing critical fields in youtube channel data. Skipping")
 							runErr = err
 						} else {
-							log.Info().
-								Int("video_count", len(result.Posts)).
-								Str("channel", la.URL).
-								Msg("Successfully crawled YouTube channel")
-								
-							// For now, we don't handle outlinks from YouTube channels
-							discoveredChannels = []*state.Page{}
+							// Execute the crawl
+							result, err := ytCrawler.FetchMessages(ctx, job)
+							if err != nil {
+								log.Error().Err(err).Str("channel", la.URL).Msg("Failed to fetch YouTube videos")
+								runErr = err
+							} else {
+								log.Info().
+									Int("video_count", len(result.Posts)).
+									Str("channel", la.URL).
+									Msg("Successfully crawled YouTube channel")
+
+								// For now, we don't handle outlinks from YouTube channels
+								discoveredChannels = []*state.Page{}
+							}
 						}
 					}
 				} else {
@@ -678,7 +690,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 					// Try to get the connection pool stats
 					poolStats := crawl.GetConnectionPoolStats()
 					log.Info().Interface("poolStats", poolStats).Msg("Connection pool status")
-					
+
 					// Use the connection pool if it's initialized
 					if crawl.IsConnectionPoolInitialized() {
 						log.Info().Msg("Using connection pool for channel processing")
@@ -703,14 +715,14 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 					// Handle any discovered channels from this page
 					if len(discoveredChannels) > 0 {
 						log.Info().Msgf("Discovered %d new channels from %s", len(discoveredChannels), la.URL)
-						
+
 						// Convert to Page structs needed for AddLayer
 						newPages := make([]state.Page, 0, len(discoveredChannels))
 						for _, channel := range discoveredChannels {
 							// Use the existing Page struct directly
 							newPages = append(newPages, *channel)
 						}
-						
+
 						// Add the new channels as a layer
 						if err := sm.AddLayer(newPages); err != nil {
 							log.Error().Err(err).Msg("Failed to add discovered channels as new layer")
@@ -727,7 +739,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				}
 			}()
 		}
-		
+
 		// Log statistics about the layer processing
 		log.Info().
 			Int("depth", currentDepth).
@@ -736,11 +748,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			Int("successPages", layerSuccess).
 			Int("errorPages", layerError).
 			Msg("Layer processing statistics")
-		
+
 		// Move to the next depth
 		currentDepth++
 	}
-	
+
 	// Log overall statistics
 	log.Info().
 		Int("totalPagesProcessed", totalPagesProcessed).
@@ -749,7 +761,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		Int("totalPagesError", totalPagesError).
 		Int("maxDepthReached", currentDepth-1).
 		Msg("Overall crawl statistics")
-			
+
 	// Update crawl metadata to mark as completed if all pages were processed successfully
 	if totalPagesError == 0 {
 		// Explicitly call Close() to save any unsaved cache data
@@ -758,7 +770,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		if closeErr := sm.Close(); closeErr != nil {
 			log.Warn().Err(closeErr).Msg("Error during final state save, but will continue with crawl completion")
 		}
-		
+
 		metadata := map[string]interface{}{
 			"status":  "completed",
 			"endTime": time.Now(),

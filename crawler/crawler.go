@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
+	"github.com/researchaccelerator-hub/telegram-scraper/null_handler"
 	tdlibclient "github.com/zelenin/go-tdlib/client"
 )
 
@@ -41,6 +42,7 @@ type CrawlJob struct {
 	Limit            int
 	SampleSize       int // Number of posts to randomly sample (0 means no sampling)
 	SamplesRemaining int // Number of samples left
+	NullValidator    null_handler.Validator
 }
 
 // Crawler defines the interface that all crawler implementations must satisfy

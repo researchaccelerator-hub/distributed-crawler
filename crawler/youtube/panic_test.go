@@ -8,6 +8,7 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
+	"github.com/researchaccelerator-hub/telegram-scraper/null_handler"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 )
 
@@ -119,10 +120,11 @@ func TestPanicRecovery(t *testing.T) {
 			ID:   "test-channel",
 			Type: crawler.PlatformYouTube,
 		},
-		FromTime:   time.Now().Add(-24 * time.Hour),
-		ToTime:     time.Now(),
-		Limit:      10,
-		SampleSize: 0, // No sampling for tests
+		FromTime:      time.Now().Add(-24 * time.Hour),
+		ToTime:        time.Now(),
+		Limit:         10,
+		SampleSize:    0, // No sampling for tests
+		NullValidator: *null_handler.NewValidator(null_handler.PlatformYouTube),
 	}
 
 	// Call FetchMessages which should panic but be recovered

@@ -73,6 +73,7 @@ type Post struct {
 	CaptureTime             time.Time         `json:"capture_time"`
 	Handle                  string            `json:"handle"`
 }
+
 // Comment represents a single comment on a Telegram post, including
 // its text content, reaction counts, and metadata.
 type Comment struct {
@@ -82,6 +83,7 @@ type Comment struct {
 	ReplyCount int            `json:"reply_count"`
 	Handle     string         `json:"handle"`
 }
+
 // ChannelData contains information about a Telegram or YouTube channel, including
 // its identifying information, engagement metrics, and URLs.
 type ChannelData struct {
@@ -134,4 +136,14 @@ type InnerLink struct {
 type MediaData struct {
 	// DocumentName is the filename of the document as stored in the system
 	DocumentName string `json:"document_name"`
+}
+
+// Structured output for monitoring nulls in Channel and Post data
+type NullLogEvent struct {
+	Platform        string
+	DataType        string // e.g., "channel", "post"
+	FieldName       string
+	StrategyUsed    string // Use string for simplicity here
+	IsPlatformLimit bool
+	Message         string
 }

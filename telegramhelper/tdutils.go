@@ -563,37 +563,38 @@ var ParseMessage = func(
 	if supergroupInfo != nil {
 		memberCount = int(supergroupInfo.MemberCount)
 	}
-
+	// TODO: verify some of these are available like CrawlLabel
 	post = model.Post{
-		PostLink:       mlr.Link,
-		ChannelID:      fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
-		PostUID:        postUid,
-		URL:            mlr.Link,
-		PublishedAt:    publishedAt,
-		CreatedAt:      createdAt,
-		LanguageCode:   "",
-		Engagement:     vc,
-		ViewCount:      vc,
-		LikeCount:      0,
-		ShareCount:     sharecount,
-		CommentCount:   len(comments),
-		ChannelName:    chat.Title,
-		Description:    description,
+		PostLink:     mlr.Link,
+		ChannelID:    fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
+		PostUID:      postUid,
+		URL:          mlr.Link,
+		PublishedAt:  publishedAt,
+		CreatedAt:    createdAt,
+		LanguageCode: "",
+		Engagement:   vc,
+		ViewCount:    vc,
+		LikeCount:    0,
+		ShareCount:   sharecount,
+		CommentCount: len(comments),
+		// CrawlLabel unavailable
+		// ListIDs unavailable
+		ChannelName: chat.Title,
+		// SearchTerms unavailable
+		// SearchTermIDs unavailable
+		// ProjectIDs unavailable
+		// ExerciseIDs unavailable
+		// LabelData unavailable
+		// LabelsMetadata unavailable
+		// ProjectLabeledPostIDs unavailable
+		// LabelerIDs unavailable
+		// AllLabels unavailable
+		// LabelIDs unavailable
 		IsAd:           false,
-		PostType:       posttype,
 		TranscriptText: "",
 		ImageText:      "",
-		PlatformName:   "Telegram",
-		LikesCount:     0,
-		SharesCount:    sharecount,
-		CommentsCount:  len(comments),
-		ViewsCount:     vc,
-		SearchableText: "",
-		AllText:        "",
-		ThumbURL:       thumbnailPath,
-		MediaURL:       videoPath,
-		Outlinks:       outlinks,
-		CaptureTime:    time.Now(),
+		// VideoLength unavailable
+		// IsVerified unavailable
 		ChannelData: model.ChannelData{
 			ChannelID:           fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
 			ChannelName:         chat.Title,
@@ -611,11 +612,47 @@ var ParseMessage = func(
 				ShareCount:     0,
 			},
 			ChannelURLExternal: fmt.Sprintf("https://t.me/c/%s", channelName),
-			ChannelURL:         "",
+			ChannelURL:         fmt.Sprintf("https://t.me/c/%s", channelName),
 		},
-		Comments:  comments,
-		Reactions: reactions,
-		Handle:    username,
+		PlatformName: "Telegram",
+		// SharedID unavailable
+		// QuotedID unavailable
+		// RepliedID unavailable
+		// AILabel unavailable
+		// RootPostID unavailable
+		// EngagementStepsCount unavailable
+		// OCRData unavailable
+		// PerformanceScores unavailable
+		// HasEmbedMedia unavailable
+		Description: description,
+		// RepostChannelData unavailable
+		PostType: posttype,
+		// InnerLink unavailable
+		// PostTitle unavailable
+		// MediaData unavailable
+		// IsReply unavailable
+		// AdFields unavailable
+		LikesCount:     0,
+		SharesCount:    sharecount,
+		CommentsCount:  len(comments),
+		ViewsCount:     vc,
+		SearchableText: "",
+		AllText:        "",
+		// ContrastAgentProjectIDs unavailable
+		// AgentIDs unavailable
+		// SegmentIDs unavailable
+		ThumbURL:    thumbnailPath,
+		MediaURL:    videoPath,
+		Comments:    comments,
+		Reactions:   reactions,
+		Outlinks:    outlinks,
+		CaptureTime: time.Now(),
+		Handle:      username,
+	}
+
+	result := cfg.NullValidator.ValidatePost(&post)
+	if !result.Valid {
+		log.Error().Strs("errors", result.Errors).Msg("ParseMessage: Missing critical fields in telegram post data")
 	}
 
 	// Store the post but don't return an error if storage fails
@@ -822,7 +859,6 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 					log.Info().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 					channelNamesMap[channelName] = true
 				}
-
 			case *client.TextEntityTypeMention:
 				// Extract mention
 				offset := entity.Offset
@@ -830,11 +866,6 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				if int(offset+length) <= len(messageText.Text.Text) {
 					mention := messageText.Text.Text[offset : offset+length]
 					if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
-						// if strings.HasPrefix(mention, "@") {
-						// 	// Remove the @ prefix
-						// log.Info().Str("mention", mention).Msg("random-walk-links: adding TextEntityTypeMention")
-						// 	channelNamesMap[mention[1:]] = true
-						// }
 						channelName := matches[1]
 						log.Info().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 						channelNamesMap[channelName] = true

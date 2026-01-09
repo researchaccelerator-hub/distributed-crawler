@@ -111,6 +111,7 @@ func (c *YouTubeDataClient) Disconnect(ctx context.Context) error {
 
 // GetChannelInfo retrieves information about a YouTube channel
 func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string) (*youtubemodel.YouTubeChannel, error) {
+
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
 	}
@@ -197,12 +198,12 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		ID:              item.Id,
 		Title:           item.Snippet.Title,
 		Description:     item.Snippet.Description,
-		SubscriberCount: subscriberCount,
-		ViewCount:       viewCount,
-		VideoCount:      videoCount,
-		PublishedAt:     publishedAt,
 		Thumbnails:      thumbnails,
+		SubscriberCount: subscriberCount,
+		VideoCount:      videoCount,
+		ViewCount:       viewCount,
 		Country:         item.Snippet.Country, // Add country information
+		PublishedAt:     publishedAt,
 	}
 
 	// Store in cache with write lock
@@ -239,6 +240,7 @@ func (c *YouTubeDataClient) GetVideos(ctx context.Context, channelID string, fro
 
 // GetVideosFromChannel retrieves videos from a specific YouTube channel
 func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
 	}
@@ -788,7 +790,6 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 				Msg(fmt.Sprintf("Sample video %d/%d", i+1, sampleSize))
 		}
 	}
-
 	return videos, nil
 }
 
@@ -856,13 +857,18 @@ func (a *YouTubeClientAdapter) GetChannelInfo(ctx context.Context, channelID str
 		ID:          channelInfo.ID,
 		Name:        channelInfo.Title,
 		Description: channelInfo.Description,
+		Thumbnails:  channelInfo.Thumbnails,
 		MemberCount: channelInfo.SubscriberCount,
+		VideoCount:  channelInfo.VideoCount,
+		ViewCount:   channelInfo.ViewCount,
 		Country:     channelInfo.Country,
+		PublishedAt: channelInfo.PublishedAt,
 	}, nil
 }
 
 // GetMessages retrieves videos from a YouTube channel (adapting to the Message interface)
 func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string, fromTime, toTime time.Time, limit int) ([]Message, error) {
+
 	videos, err := a.client.GetVideos(ctx, channelID, fromTime, toTime, limit)
 	if err != nil {
 		return nil, err
@@ -890,11 +896,11 @@ func (a *YouTubeClientAdapter) GetMessages(ctx context.Context, channelID string
 			Thumbnails:   video.Thumbnails,
 			CommentCount: video.CommentCount,
 			Language:     video.Language,
+			Duration:     video.Duration,
 		}
 
 		messages = append(messages, message)
 	}
-
 	return messages, nil
 }
 
