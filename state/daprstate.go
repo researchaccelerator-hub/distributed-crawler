@@ -707,6 +707,9 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 			// acquire slot in semaphore
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			// page level context to avoid timeout for large seeds
+			saveCtx, saveCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer saveCancel()
 
 			// Marshal page data for Dapr
 			pageData, err := json.Marshal(pageCopy)
@@ -717,7 +720,7 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 			// Save page to Dapr
 			pageKey := fmt.Sprintf("%s/page/%s", dsm.config.CrawlExecutionID, pageCopy.ID)
 			err = (*dsm.client).SaveState(
-				ctx,
+				saveCtx,
 				dsm.stateStoreName,
 				pageKey,
 				pageData,
