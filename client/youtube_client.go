@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -85,13 +87,39 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 	//	Timeout: 30 * time.Second,
 	//}
 
+	// TODO: Expose options as config variables
+	// 1. Create a custom transport to fix connection churn
+	customTransport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+
+		// CRITICAL: Increase this from the default of 2 to handle concurrency
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+
+		// ALIGNMENT: Keep this higher than Istio's idleTimeout (e.g., Istio 80s)
+		IdleConnTimeout: 90 * time.Second,
+
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true, // Recommended for Google APIs
+	}
+
+	// 2. Create the client using the custom transport
+	httpClient := &http.Client{
+		Transport: customTransport,
+		Timeout:   60 * time.Second, // Total request timeout
+	}
+
 	// Create YouTube service
 	log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Creating YouTube service with API key")
 	if c.apiKey == "" {
 		log.Error().Msg("YouTube API key is empty! This will cause authentication errors")
 	}
 
-	service, err := ytapi.NewService(ctx, option.WithAPIKey(c.apiKey))
+	service, err := ytapi.NewService(ctx, option.WithHTTPClient(httpClient), option.WithAPIKey(c.apiKey))
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create YouTube service")
 		return fmt.Errorf("failed to create YouTube service: %w", err)
