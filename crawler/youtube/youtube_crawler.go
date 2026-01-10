@@ -365,7 +365,7 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 	close(videoCh)
 
 	// Log the start of parallel processing
-	log.Info().
+	log.Debug().
 		Int("total_videos", len(videos)).
 		Int("max_workers", maxPostWorkers).
 		Msg("Starting parallel post conversion")
@@ -656,7 +656,7 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			log.Warn().Err(err).Str("duration", durationStr).Msg("Failed to parse video duration")
 		}
 	} else {
-		log.Warn().Msg("durationStr is empty")
+		log.Warn().Str("video_id", video.ID).Str("log_tag", "FOCUS").Msg("Duration is empty")
 	}
 
 	// Set HasEmbedMedia flag
