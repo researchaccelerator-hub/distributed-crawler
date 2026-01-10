@@ -153,7 +153,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 
 	response, err := call.MaxResults(1).Context(ctx).Do()
 	if err != nil {
-		log.Error().Err(err).Str("channel_id", channelID).Msg("Failed to get channel from YouTube API")
+		log.Error().Err(err).Str("channel_id", channelID).Str("log_tag", "FOCUS").Msg("Failed to get channel from YouTube API")
 		return nil, fmt.Errorf("failed to get channel from YouTube API: %w", err)
 	}
 
@@ -400,7 +400,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 
 		playlistResponse, err := playlistCall.Do()
 		if err != nil {
-			log.Error().Err(err).Str("playlist_id", uploadsPlaylistID).Msg("Failed to get videos from playlist")
+			log.Error().Err(err).Str("playlist_id", uploadsPlaylistID).Str("log_tag", "FOCUS").Msg("Failed to get videos from playlist")
 			return nil, fmt.Errorf("failed to get videos from playlist: %w", err)
 		}
 
@@ -596,7 +596,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 
 				videosResponse, err := videosCall.Do()
 				if err != nil {
-					log.Error().Err(err).Strs("video_ids", uncachedVideoIDs).Msg("Failed to get video statistics for uncached batch")
+					log.Error().Err(err).Strs("video_ids", uncachedVideoIDs).Str("log_tag", "FOCUS").Msg("Failed to get video statistics for uncached batch")
 					// Continue with basic information only
 
 					// Even without statistics, add the videos to the results to avoid losing them
