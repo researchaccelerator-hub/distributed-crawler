@@ -86,30 +86,30 @@ func (c *Chunker) Start() error {
 func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Chunk-WF: Failed to create watcher")
+		log.Fatal().Err(err).Str("log_tag", "chunk_wf").Msg("Failed to create watcher")
 	}
 	defer watcher.Close()
 	if err := watcher.Add(c.watchDir); err != nil {
-		log.Fatal().Err(err).Msg("Chunk-WF: Failed to add watch dir to watcher")
+		log.Fatal().Err(err).Str("log_tag", "chunk_wf").Msg("Failed to add watch dir to watcher")
 	}
-	log.Info().Str("watch_dir", c.watchDir).Msg("Chunk-WF: Watching directory for crawl data")
+	log.Info().Str("watch_dir", c.watchDir).Str("log_tag", "chunk_wf").Msg("Watching directory for crawl data")
 
 	for {
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
-				log.Error().Err(err).Msg("Chunk-WF: Encountered error in watchFilesInternalBuffer Events")
+				log.Error().Err(err).Str("log_tag", "chunk_wf").Msg("Encountered error in watchFilesInternalBuffer Events")
 				return
 			}
 			out <- event
 		case err, ok := <-watcher.Errors:
 			if !ok {
-				log.Error().Err(err).Msg("Chunk-WF: Encountered error in file watcher Errors. Not ok")
+				log.Error().Err(err).Str("log_tag", "chunk_wf").Msg("Encountered error in file watcher Errors. Not ok")
 				return
 			}
-			log.Error().Err(err).Msg("Chunk-WF: Encountered error in file watcher Errors. Ok")
+			log.Error().Err(err).Str("log_tag", "chunk_wf").Msg("Encountered error in file watcher Errors. Ok")
 			if isOverflow(err) {
-				log.Error().Msg("Chunk-WF: Kernel buffer full! Triggering rescan")
+				log.Error().Str("log_tag", "chunk_wf").Msg("Kernel buffer full! Triggering rescan. NOT IMPLEMENTED YET")
 				// TODO: Trigger rescan coroutine
 			}
 		}
@@ -124,11 +124,11 @@ func (c *Chunker) processEvents(internalBuffer <-chan fsnotify.Event, out chan<-
 
 			info, err := os.Stat(event.Name)
 			if err != nil {
-				log.Warn().Err(err).Str("new_file", event.Name).Msg("Chunk-PE: Could not stat file. Skipping")
+				log.Warn().Err(err).Str("new_file", event.Name).Str("log_tag", "chunk_pe").Msg("Could not stat file. Skipping")
 				continue
 			}
 			out <- FileEntry{Path: event.Name, Size: info.Size()}
-			log.Info().Str("file_name", filepath.Base(event.Name)).Int64("file_size", info.Size()).Msg("Chunk-PE: New file entry added")
+			log.Debug().Str("file_name", filepath.Base(event.Name)).Int64("file_size", info.Size()).Str("log_tag", "chunk_pe").Msg("New file entry added")
 		}
 	}
 }
@@ -140,7 +140,7 @@ func (c *Chunker) processBatches(in <-chan FileEntry, out chan<- []FileEntry) {
 	// Helper to send current batch to output when new files haven't been added
 	flush := func() {
 		if len(state.Files) > 0 {
-			log.Info().Int("batch_count", len(state.Files)).Int64("total_bytes", state.Size).Msg("Chunk-PB: Flushing batch")
+			log.Info().Int("batch_count", len(state.Files)).Int64("total_bytes", state.Size).Str("log_tag", "chunk_pb").Msg("Flushing batch")
 
 			batchToSend := make([]FileEntry, len(state.Files))
 			copy(batchToSend, state.Files)
@@ -160,28 +160,30 @@ func (c *Chunker) processBatches(in <-chan FileEntry, out chan<- []FileEntry) {
 
 			// delete files we can't upload
 			if file.Size > c.hardCapSize {
-				log.Warn().Str("file_name", file.Path).Int64("total_bytes", file.Size).Msg("Chunk-PB: File exceeds hard cap. Deleting")
+				log.Warn().Str("file_name", file.Path).Int64("total_bytes", file.Size).Str("log_tag", "chunk_pb").Msg("File exceeds hard cap. Deleting")
 				if err := os.Remove(file.Path); err != nil {
-					log.Error().Err(err).Str("file_name", file.Path).Msg("Chunk-PB: failed to remove file")
+					log.Error().Err(err).Str("file_name", file.Path).Str("log_tag", "chunk_pb").Msg("failed to remove file")
 				}
 				continue
 			}
 			// flush the buffer when we hit the hard cap
 			if state.Size > 0 && state.Size+file.Size > c.hardCapSize {
-				log.Info().Msg("Chunk-PB: Hard cap forced flush")
+				log.Info().Str("log_tag", "chunk_pb").Msg("Hard cap forced flush")
 				flush()
 			}
 
 			state.Files = append(state.Files, file)
 			state.Size += file.Size
-			log.Info().Int("file_count", len(state.Files)).Int64("buffer_size_bytes", state.Size).Msg("Chunk-PB: Current buffer")
+			if state.Size%100 == 0 {
+				log.Info().Int("file_count", len(state.Files)).Int64("buffer_size_bytes", state.Size).Str("log_tag", "chunk_pb").Msg("Current buffer")
+			}
 			if state.Size >= c.triggerSize {
-				log.Info().Msg("Chunk-PB: trigger size reached. Flushing batch")
+				log.Info().Str("log_tag", "chunk_pb").Msg("Trigger size reached. Flushing batch")
 				flush()
 			}
 		case <-timer.C:
 			if len(state.Files) > 0 {
-				log.Info().Msg("Chunk-PB: timeout reached. Flushing partial batch")
+				log.Info().Str("log_tag", "chunk_pb").Msg("Timeout reached. Flushing partial batch")
 				flush()
 			} else {
 				resetTimer(timer, c.batchTimeout)
@@ -194,33 +196,34 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 	for batch := range jobs {
 		outputName, err := c.combineFiles(batch)
 		if err != nil {
-			log.Error().Err(err).Msg("Chunk-CB: failed to combine batch. Files not deleted")
+			log.Error().Err(err).Str("log_tag", "chunk_cb").Msg("Failed to combine batch. Files not deleted")
 			continue
 		}
 
 		info, err := os.Stat(outputName)
 		if err != nil {
-			log.Warn().Err(err).Str("combined_file", outputName).Msg("Chunk-CB: Could not stat file in file combined")
+			log.Warn().Err(err).Str("combined_file", outputName).Str("log_tag", "chunk_cb").Msg("Could not stat file in file combined")
 		}
-		log.Info().Str("combined_file", outputName).Int64("total_bytes", info.Size()).Msg("Chunk-CB: Batch combined. Uploading to storage")
+		log.Info().Str("combined_file", outputName).Int64("total_bytes", info.Size()).Str("log_tag", "chunk_cb").
+			Msg("Batch combined. Uploading to storage")
 
 		err = c.sm.UploadCombinedFile(outputName)
 
 		if err != nil {
-			log.Error().Err(err).Msg("Chunk-CB: Failed to upload combined file")
+			log.Error().Err(err).Str("log_tag", "chunk_cb").Msg("Failed to upload combined file")
 			continue
 		}
 
-		log.Info().Str("combined_file", outputName).Msg("Chunk-CB: Upload completed. Deleting source files")
+		log.Info().Str("combined_file", outputName).Str("log_tag", "chunk_cb").Msg("Upload completed. Deleting source files")
 
 		for _, file := range batch {
 			if err := os.Remove(file.Path); err != nil {
-				log.Error().Err(err).Str("file_name", file.Path).Msg("Chunk-CB: failed to remove file")
+				log.Error().Err(err).Str("file_name", file.Path).Str("log_tag", "chunk_cb").Msg("Failed to remove file")
 			}
 		}
 
 		if err := os.Remove(outputName); err != nil {
-			log.Error().Err(err).Str("file_name", outputName).Msg("Chunk-CB: failed to delete combined file")
+			log.Error().Err(err).Str("file_name", outputName).Str("log_tag", "chunk_cb").Msg("Failed to delete combined file")
 		}
 
 	}
@@ -228,10 +231,11 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 
 func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 	outputFileName := fmt.Sprintf("%s/combined_%d.jsonl", c.combineDir, time.Now().UnixNano())
-	log.Info().Str("combined_file", outputFileName).Msg("Chunk-CF: Combining batch into files")
+	log.Info().Str("combined_file", outputFileName).Str("log_tag", "chunk_cf").Msg("Combining batch into files")
 	outfile, err := os.Create(outputFileName)
 	if err != nil {
-		return "", fmt.Errorf("Chunk-CF: unable to create output file %s: %w", outputFileName, err)
+		log.Error().Err(err).Str("output_file", outputFileName).Str("log_tag", "chunk_cf").Msg("Unable to create output file")
+		return "", fmt.Errorf("Unable to create output file %s: %w", outputFileName, err)
 	}
 	defer outfile.Close()
 
@@ -240,20 +244,23 @@ func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
 		// Check file size hasn't changed
 		info, err := os.Stat(entry.Path)
 		if err != nil {
-			log.Warn().Err(err).Str("new_file", entry.Path).Msg("Chunk-CF: Could not stat file in file combined")
+			log.Warn().Err(err).Str("new_file", entry.Path).Str("log_tag", "chunk_cf").Msg("Could not stat file in file combined")
 		} else if info.Size() != entry.Size {
-			log.Error().Str("file", entry.Path).Int64("initial_size", entry.Size).Int64("current_size", info.Size()).Msg("Chunk-CF: File sizes do not match before combining")
+			log.Error().Str("file", entry.Path).Int64("initial_size", entry.Size).Int64("current_size", info.Size()).Str("log_tag", "chunk_cf").
+				Msg("File sizes do not match before combining")
 		}
 
 		inFile, err := os.Open(entry.Path)
 		if err != nil {
-			return "", fmt.Errorf("Chunk-CF: error opening file %s: %w", entry.Path, err)
+			log.Error().Err(err).Str("path", entry.Path).Str("log_tag", "chunk_cf").Msg("Error opening file")
+			return "", fmt.Errorf("Error opening file %s: %w", entry.Path, err)
 		}
 
 		_, err = io.Copy(outfile, inFile)
 		inFile.Close()
 		if err != nil {
-			return "", fmt.Errorf("Chunk-CF: error copying from file %s: %w", entry.Path, err)
+			log.Error().Err(err).Str("path", entry.Path).Str("log_tag", "chunk_cf").Msg("Error copying from file")
+			return "", fmt.Errorf("Error copying from file %s: %w", entry.Path, err)
 		}
 	}
 	return outputFileName, nil

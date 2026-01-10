@@ -78,7 +78,7 @@ func NewYouTubeDataClient(apiKey string) (*YouTubeDataClient, error) {
 
 // Connect establishes a connection to the YouTube API
 func (c *YouTubeDataClient) Connect(ctx context.Context) error {
-	log.Info().Msg("Connecting to YouTube API")
+	log.Debug().Msg("Connecting to YouTube API")
 
 	//// Create a new HTTP client with default timeout
 	//httpClient := &http.Client{
@@ -98,7 +98,7 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 	}
 
 	c.service = service
-	log.Info().Msg("Connected to YouTube API successfully")
+	log.Debug().Msg("Connected to YouTube API successfully")
 	return nil
 }
 
@@ -129,7 +129,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		return cachedChannel, nil
 	}
 
-	log.Info().Str("channel_id", channelID).Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Fetching YouTube channel info")
+	log.Debug().Str("channel_id", channelID).Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Fetching YouTube channel info")
 
 	// Check if API key is present
 	if c.apiKey == "" {
@@ -221,7 +221,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 	}
 	c.cacheMutex.Unlock()
 
-	log.Info().
+	log.Debug().
 		Str("channel_id", channel.ID).
 		Str("title", channel.Title).
 		Int64("subscribers", channel.SubscriberCount).
@@ -535,7 +535,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 			itemsAccepted++
 		}
 
-		log.Info().
+		log.Debug().
 			Int("total_items", len(playlistResponse.Items)).
 			Int("items_accepted", itemsAccepted).
 			Int("items_skipped_before_from_time", itemsSkippedBeforeFromTime).
@@ -677,7 +677,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 						}
 					}
 
-					log.Info().
+					log.Debug().
 						Int("total_videos_processed", len(batchVideoMap)).
 						Int("stats_found", statsFound).
 						Int("stats_missing", len(batchVideoMap)-statsFound).

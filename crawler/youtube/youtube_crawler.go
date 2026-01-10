@@ -106,7 +106,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 			if methodObj, ok := crawlerConfigMap["sampling_method"]; ok {
 				if methodStr, ok := methodObj.(string); ok {
 					crawlerConfig.SamplingMethod = SamplingMethod(methodStr)
-					log.Info().Str("sampling_method", methodStr).Msg("Using configured sampling method")
+					log.Debug().Str("sampling_method", methodStr).Msg("Using configured sampling method")
 				}
 			}
 
@@ -134,7 +134,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 				case float64:
 					crawlerConfig.MinChannelVideos = int64(v)
 				}
-				log.Info().Int64("min_channel_videos", crawlerConfig.MinChannelVideos).Msg("Using configured minimum channel videos")
+				log.Debug().Int64("min_channel_videos", crawlerConfig.MinChannelVideos).Msg("Using configured minimum channel videos")
 			}
 		}
 	}
@@ -159,7 +159,7 @@ func (c *YouTubeCrawler) Initialize(ctx context.Context, config map[string]inter
 	c.config = crawlerConfig
 	c.initialized = true
 
-	log.Info().
+	log.Debug().
 		Str("sampling_method", string(c.config.SamplingMethod)).
 		Int64("min_channel_videos", c.config.MinChannelVideos).
 		Int("seed_channels_count", len(c.config.SeedChannels)).
@@ -191,8 +191,6 @@ func (c *YouTubeCrawler) GetChannelInfo(ctx context.Context, target crawler.Craw
 	if !c.initialized {
 		return nil, fmt.Errorf("crawler not initialized")
 	}
-
-	log.Info().Str("channel_id", target.ID).Msg("Fetching YouTube channel info")
 
 	// Fetch channel info from the YouTube API
 	channel, err := c.client.GetChannelInfo(ctx, target.ID)
@@ -289,7 +287,7 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 			return crawler.CrawlResult{}, err
 		}
 
-		log.Info().
+		log.Debug().
 			Str("channel_id", job.Target.ID).
 			Int("video_count", len(videos)).
 			Msg("Retrieved videos from specific YouTube channel")

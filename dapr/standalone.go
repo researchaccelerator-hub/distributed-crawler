@@ -802,7 +802,7 @@ func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common
 		log.Error().Err(err).Msg("Failed to fetch YouTube videos")
 		return []*state.Page{}, err
 	} else {
-		log.Info().
+		log.Debug().
 			Int("video_count", len(result.Posts)).
 			Str("channel", page.URL).
 			Msg("Successfully crawled YouTube channel")
