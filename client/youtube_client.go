@@ -111,7 +111,7 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 	httpClient, _, err := htransport.NewClient(ctx,
 		option.WithHTTPClient(&http.Client{
 			Transport: customTransport,
-			Timeout:   60,
+			Timeout:   60 * time.Second,
 		}),
 		option.WithAPIKey(c.apiKey),
 	)
