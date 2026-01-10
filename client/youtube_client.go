@@ -13,7 +13,8 @@ import (
 
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 	"github.com/rs/zerolog/log"
-	"google.golang.org/api/option"
+	"google.golang.org/api/option"                    // Use the transport helper
+	htransport "google.golang.org/api/transport/http" // Use the transport helper
 	ytapi "google.golang.org/api/youtube/v3"
 )
 
@@ -107,11 +108,19 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 		ForceAttemptHTTP2:     true, // Recommended for Google APIs
 	}
 
-	// 2. Create the client using the custom transport
-	httpClient := &http.Client{
-		Transport: customTransport,
-		Timeout:   60 * time.Second, // Total request timeout
-	}
+	httpClient, _, err := htransport.NewClient(ctx,
+		option.WithHTTPClient(&http.Client{
+			Transport: customTransport,
+			Timeout:   60,
+		}),
+		option.WithAPIKey(c.apiKey),
+	)
+
+	// // 2. Create the client using the custom transport
+	// httpClient := &http.Client{
+	// 	Transport: customTransport,
+	// 	Timeout:   60 * time.Second, // Total request timeout
+	// }
 
 	// Create YouTube service
 	log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Creating YouTube service with API key")
