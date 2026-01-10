@@ -13,8 +13,9 @@ import (
 
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 	"github.com/rs/zerolog/log"
-	"google.golang.org/api/option"                    // Use the transport helper
-	htransport "google.golang.org/api/transport/http" // Use the transport helper
+	"google.golang.org/api/option" // Use the transport helper
+
+	// Use the transport helper
 	ytapi "google.golang.org/api/youtube/v3"
 )
 
@@ -50,6 +51,21 @@ type RandomPrefix struct {
 	InvalidVideoIDs  []string
 	ResultCount      int
 	TotalResultCount int64
+}
+
+// apiKeyTransport is a custom RoundTripper that appends the API Key
+type apiKeyTransport struct {
+	Underlying http.RoundTripper
+	APIKey     string
+}
+
+func (t *apiKeyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Append the API key to the URL query parameters
+	q := req.URL.Query()
+	q.Set("key", t.APIKey)
+	req.URL.RawQuery = q.Encode()
+
+	return t.Underlying.RoundTrip(req)
 }
 
 // NewYouTubeDataClient creates a new YouTube data client
@@ -108,19 +124,30 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 		ForceAttemptHTTP2:     true, // Recommended for Google APIs
 	}
 
-	httpClient, _, err := htransport.NewClient(ctx,
-		option.WithHTTPClient(&http.Client{
-			Transport: customTransport,
-			Timeout:   60 * time.Second,
-		}),
-		option.WithAPIKey(c.apiKey),
-	)
+	// httpClient, _, err := htransport.NewClient(ctx,
+	// 	option.WithHTTPClient(&http.Client{
+	// 		Transport: customTransport,
+	// 		Timeout:   60 * time.Second,
+	// 	}),
+	// 	option.WithAPIKey(c.apiKey),
+	// )
 
 	// // 2. Create the client using the custom transport
 	// httpClient := &http.Client{
 	// 	Transport: customTransport,
 	// 	Timeout:   60 * time.Second, // Total request timeout
 	// }
+
+	// Wrap custom transport with the API Key logic
+	authenticatedTransport := &apiKeyTransport{
+		Underlying: customTransport,
+		APIKey:     c.apiKey,
+	}
+
+	httpClient := &http.Client{
+		Transport: authenticatedTransport,
+		Timeout:   60 * time.Second,
+	}
 
 	// Create YouTube service
 	log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Creating YouTube service with API key")
