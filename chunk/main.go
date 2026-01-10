@@ -174,7 +174,7 @@ func (c *Chunker) processBatches(in <-chan FileEntry, out chan<- []FileEntry) {
 
 			state.Files = append(state.Files, file)
 			state.Size += file.Size
-			if state.Size%100 == 0 {
+			if len(state.Files)%1000 == 0 {
 				log.Info().Int("file_count", len(state.Files)).Int64("buffer_size_bytes", state.Size).Str("log_tag", "chunk_pb").Msg("Current buffer")
 			}
 			if state.Size >= c.triggerSize {

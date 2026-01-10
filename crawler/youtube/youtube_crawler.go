@@ -653,7 +653,8 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 			videoLengthPtr = &duration
 			log.Debug().Int("video_length_seconds", duration).Msg("Parsed video duration")
 		} else {
-			log.Warn().Err(err).Str("duration", durationStr).Str("log_tag", "FOCUS").Msg("Failed to parse video duration")
+			log.Warn().Err(err).Str("duration", durationStr).Str("video_id", video.ID).Str("log_tag", "FOCUS").
+				Msg("Failed to parse video duration")
 		}
 	} else {
 		log.Warn().Str("video_id", video.ID).Str("log_tag", "FOCUS").Msg("Duration is empty")

@@ -361,7 +361,7 @@ func (v *Validator) ValidatePost(data *model.Post) *ValidationResult {
 	v.validateStruct("", "post", reflect.ValueOf(data).Elem(), result)
 
 	if result.Valid {
-		log.Info().Str("platform", fmt.Sprint(v.config.Platform)).Str("post_link", data.PostLink).Strs("unavailable_fields", result.UnavailableUsed).
+		log.Debug().Str("platform", fmt.Sprint(v.config.Platform)).Str("post_link", data.PostLink).Strs("unavailable_fields", result.UnavailableUsed).
 			Strs("non_essential_missing_fields", result.Warnings).Str("log_tag", "null_validation").
 			Msg("Valid post data")
 	} else {
