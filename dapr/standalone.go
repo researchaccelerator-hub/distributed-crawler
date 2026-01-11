@@ -285,16 +285,36 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	// Log the original count of pages
 	originalCount := len(layer.Pages)
 
-	var ytCrawler crawler.Crawler
-	var ytClient clientpkg.Client
-	var clientCtx context.Context
-	var ytInitErr error
+	// var ytCrawler crawler.Crawler
+	// var ytClient clientpkg.Client
+	// var clientCtx context.Context
+	// var ytInitErr error
+
+	// if crawlCfg.Platform == "youtube" {
+	// 	ytCrawler, ytClient, clientCtx, ytInitErr = InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+	// 	if ytInitErr != nil {
+	// 		err := ytInitErr
+	// 		log.Fatal().Err(err).Msg("Unable to initialize Youtube crawler")
+	// 	}
+	// }
+
+	ytPool := make(chan struct {
+		crawler crawler.Crawler
+		client  clientpkg.Client
+		ctx     context.Context
+	}, maxWorkers)
 
 	if crawlCfg.Platform == "youtube" {
-		ytCrawler, ytClient, clientCtx, ytInitErr = InitializeYoutubeCrawlerComponents(sm, crawlCfg)
-		if ytInitErr != nil {
-			err := ytInitErr
-			log.Fatal().Err(err).Msg("Unable to initialize Youtube crawler")
+		for i := 0; i < maxWorkers; i++ {
+			c, cl, ctx, err := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+			if err != nil {
+				log.Fatal().Err(err).Msg("Failed to initialize a pool worker")
+			}
+			ytPool <- struct {
+				crawler crawler.Crawler
+				client  clientpkg.Client
+				ctx     context.Context
+			}{c, cl, ctx}
 		}
 	}
 
@@ -396,8 +416,9 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				// 		log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
 				// 	}
 				// }
-
-				discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler, crawlCfg, page, ctx)
+				ytCrawler := <-ytPool
+				discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler.crawler, crawlCfg, page, ctx)
+				ytPool <- ytCrawler
 			} else {
 				// Telegram platform processing (default)
 				// Use the pooled channel processing
@@ -444,15 +465,21 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Wait for all pages to be processed
 	wg.Wait()
+	close(ytPool)
 
 	if crawlCfg.Platform == "youtube" {
-		// Disconnect YouTube client
-		if ytClient != nil {
-			log.Info().Msg("Disconnecting Youtube client")
-			if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
+		for ytCrawler := range ytPool {
+			if disconnectErr := ytCrawler.client.Disconnect(ytCrawler.ctx); disconnectErr != nil {
 				log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
 			}
 		}
+		// // Disconnect YouTube client
+		// if ytClient != nil {
+		// 	log.Info().Msg("Disconnecting Youtube client")
+		// 	if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
+		// 		log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
+		// 	}
+		// }
 	}
 
 	// Log summary of unique pages processed
