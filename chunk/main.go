@@ -3,9 +3,12 @@ package chunk
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -21,6 +24,11 @@ type Chunker struct {
 	triggerSize  int64         // size in mb to trigger an upload
 	hardCapSize  int64         // size in mb to not exceed
 	batchTimeout time.Duration // length in seconds to wait after last created file before flushing batch
+	fileChan     chan FileEntry
+
+	// New fields for overflow recovery
+	rescanSignal chan struct{}
+	processed    sync.Map // Map[string]time.Time to prevent duplicates
 }
 
 type FileEntry struct {
@@ -46,7 +54,6 @@ func resetTimer(t *time.Timer, duration time.Duration) {
 }
 
 func NewChunker(sm state.StateManagementInterface, tempDir string, watchDir string, combineDir string, triggerSize int64, hardCapSize int64) *Chunker {
-
 	return &Chunker{
 		sm:           sm,
 		tempDir:      tempDir,
@@ -54,7 +61,9 @@ func NewChunker(sm state.StateManagementInterface, tempDir string, watchDir stri
 		combineDir:   combineDir,
 		triggerSize:  triggerSize,
 		hardCapSize:  hardCapSize,
-		batchTimeout: 300 * time.Second, // 5 minutes
+		batchTimeout: 300 * time.Second,           // 5 minutes
+		fileChan:     make(chan FileEntry, 10000), // Increased buffer for bursts
+		rescanSignal: make(chan struct{}, 1),
 	}
 }
 
@@ -66,21 +75,29 @@ func (c *Chunker) Start() error {
 		return fmt.Errorf("failed to create combine directory: %s", c.combineDir)
 	}
 
-	fileChan := make(chan FileEntry, 1000)
 	jobsChan := make(chan []FileEntry, 100)
 	internalBuffer := make(chan fsnotify.Event, 100000)
 
+	// 1. Start the Recovery Worker (Independent)
+	go c.recoveryWorker()
+
+	// 2. Start the Event Watcher
 	go c.watchFilesWithInternalBuffer(internalBuffer)
 
-	go c.processEvents(internalBuffer, fileChan)
+	// 3. Start the Event Processor (Moves events from buffer to fileChan)
+	go c.processEvents(internalBuffer)
 
-	// Greedy Knapsack Heuristic -> jobsChan
-	go c.processBatches(fileChan, jobsChan)
+	// 4. Start the Batcher (Aggregates files into jobs)
+	go c.processBatches(jobsChan)
 
+	// 5. Start the Consumer (Combines and Uploads)
 	go c.consumeBatches(jobsChan)
 
-	log.Info().Int64("trigger_mb", c.triggerSize/1024/1024).Int64("hardcap_mb", c.hardCapSize/1024/1024).Timestamp().Dur("timeout_seconds", c.batchTimeout/1000).
-		Msg("Chunker started. Waiting for files")
+	log.Info().
+		Int64("trigger_mb", c.triggerSize/1024/1024).
+		Int64("hardcap_mb", c.hardCapSize/1024/1024).
+		Timestamp().Dur("timeout_seconds", c.batchTimeout/1000).
+		Msg("Chunker started with automated overflow recovery.")
 
 	return nil
 }
@@ -92,7 +109,7 @@ func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 	}
 	defer watcher.Close()
 	if err := watcher.Add(c.watchDir); err != nil {
-		log.Fatal().Err(err).Str("log_tag", "chunk_wf").Msg("Failed to add watch dir to watcher")
+		log.Fatal().Err(err).Str("log_tag", "chunk_wf").Msg("Failed to add watch dir")
 	}
 	log.Info().Str("watch_dir", c.watchDir).Str("log_tag", "chunk_wf").Msg("Watching directory for crawl data")
 
@@ -111,44 +128,101 @@ func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 			}
 			log.Error().Err(err).Str("log_tag", "chunk_wf").Msg("Encountered error in file watcher Errors. Ok")
 			if isOverflow(err) {
-				log.Error().Str("log_tag", "chunk_wf").Msg("Kernel buffer full! Triggering rescan. NOT IMPLEMENTED YET")
-				// TODO: Trigger rescan coroutine
+				log.Error().Msg("Overflow detected! Signaling recovery worker.")
+				select {
+				case c.rescanSignal <- struct{}{}:
+				default:
+					// Signal already pending
+				}
 			}
 		}
 	}
-
 }
 
-func (c *Chunker) processEvents(internalBuffer <-chan fsnotify.Event, out chan<- FileEntry) {
+func (c *Chunker) processEvents(internalBuffer <-chan fsnotify.Event) {
 	for event := range internalBuffer {
-		if event.Op&fsnotify.Write == fsnotify.Write &&
-			strings.HasSuffix(event.Name, ".jsonl") {
+		// Only process writes/creates of jsonl files
+		if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Create)) && strings.HasSuffix(event.Name, ".jsonl") {
+
+			// Mark as seen immediately to prevent recovery worker from picking it up
+			c.processed.Store(event.Name, time.Now())
 
 			info, err := os.Stat(event.Name)
 			if err != nil {
-				log.Warn().Err(err).Str("new_file", event.Name).Str("log_tag", "chunk_pe").Msg("Could not stat file. Skipping")
 				continue
 			}
-			out <- FileEntry{Path: event.Name, Size: info.Size()}
-			log.Debug().Str("file_name", filepath.Base(event.Name)).Int64("file_size", info.Size()).Str("log_tag", "chunk_pe").Msg("New file entry added")
+
+			c.fileChan <- FileEntry{
+				Path: event.Name,
+				Size: info.Size(),
+			}
 		}
 	}
 }
 
-func (c *Chunker) processBatches(in <-chan FileEntry, out chan<- []FileEntry) {
+func (c *Chunker) recoveryWorker() {
+	for range c.rescanSignal {
+		// Cooldown to let the burst finish writing to disk
+		time.Sleep(5 * time.Second)
+
+		log.Info().Str("log_tag", "chunk_rw").Msg("Starting directory rescan for missed files...")
+
+		entries, err := os.ReadDir(c.watchDir)
+		if err != nil {
+			log.Error().Err(err).Str("log_tag", "chunk_rw").Msg("Recovery rescan failed to read directory")
+			continue
+		}
+
+		// Sort entries by ModTime to ensure chronological processing
+		var files []fs.FileInfo
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+				if info, err := entry.Info(); err == nil {
+					files = append(files, info)
+				}
+			}
+		}
+
+		slices.SortFunc(files, func(a, b fs.FileInfo) int {
+			return a.ModTime().Compare(b.ModTime())
+		})
+
+		for _, file := range files {
+			fullPath := filepath.Join(c.watchDir, file.Name())
+
+			// Deduplication check
+			if _, seen := c.processed.Load(fullPath); seen {
+				continue
+			}
+
+			c.fileChan <- FileEntry{
+				Path: fullPath,
+				Size: file.Size(),
+			}
+			c.processed.Store(fullPath, time.Now())
+		}
+
+		// Clean up the map: Remove entries older than 15 minutes to save memory
+		c.processed.Range(func(key, value any) bool {
+			if time.Since(value.(time.Time)) > 15*time.Minute {
+				c.processed.Delete(key)
+			}
+			return true
+		})
+
+		log.Info().Str("log_tag", "chunk_rw").Msg("Recovery rescan complete.")
+	}
+}
+
+func (c *Chunker) processBatches(out chan<- []FileEntry) {
 	state := BatchState{}
 	timer := time.NewTimer(c.batchTimeout)
 
-	// Helper to send current batch to output when new files haven't been added
 	flush := func() {
 		if len(state.Files) > 0 {
-			log.Info().Int("batch_count", len(state.Files)).Int64("total_bytes", state.Size).Str("log_tag", "chunk_pb").Msg("Flushing batch")
-
 			batchToSend := make([]FileEntry, len(state.Files))
 			copy(batchToSend, state.Files)
-
 			out <- batchToSend
-
 			state.Files = nil
 			state.Size = 0
 		}
@@ -157,7 +231,7 @@ func (c *Chunker) processBatches(in <-chan FileEntry, out chan<- []FileEntry) {
 
 	for {
 		select {
-		case file := <-in:
+		case file := <-c.fileChan:
 			resetTimer(timer, c.batchTimeout)
 
 			// delete files we can't upload
@@ -205,10 +279,10 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 		info, err := os.Stat(outputName)
 		if err != nil {
 			log.Warn().Err(err).Str("combined_file", outputName).Str("log_tag", "chunk_cb").Msg("Could not stat file in file combined")
+		} else {
+			log.Info().Str("combined_file", outputName).Int64("total_bytes", info.Size()).Str("log_tag", "chunk_cb").
+				Msg("Batch combined. Uploading to storage")
 		}
-		log.Info().Str("combined_file", outputName).Int64("total_bytes", info.Size()).Str("log_tag", "chunk_cb").
-			Msg("Batch combined. Uploading to storage")
-
 		err = c.sm.UploadCombinedFile(outputName)
 
 		if err != nil {
@@ -232,7 +306,7 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 }
 
 func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
-	outputFileName := fmt.Sprintf("%s/combined_%d.jsonl", c.combineDir, time.Now().UnixNano())
+	outputFileName := filepath.Join(c.combineDir, fmt.Sprintf("combined_%d.jsonl", time.Now().UnixNano()))
 	log.Info().Str("combined_file", outputFileName).Str("log_tag", "chunk_cf").Msg("Combining batch into files")
 	outfile, err := os.Create(outputFileName)
 	if err != nil {
