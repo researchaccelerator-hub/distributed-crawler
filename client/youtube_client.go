@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"math/rand"
 	"net"
@@ -13,6 +14,7 @@ import (
 
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/net/http2"
 	"google.golang.org/api/option" // Use the transport helper
 
 	// Use the transport helper
@@ -107,6 +109,9 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 	// TODO: Expose options as config variables
 	// 1. Create a custom transport to fix connection churn
 	customTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			ServerName: "youtube.googleapis.com", // Forces SNI on every handshake
+		},
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -114,12 +119,12 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 
 		// CRITICAL: Increase this from the default of 2 to handle concurrency
 		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 100,
+		MaxIdleConnsPerHost: 5,
 
 		// ALIGNMENT: Keep this higher than Istio's idleTimeout (e.g., Istio 80s)
 		IdleConnTimeout: 90 * time.Second,
 
-		TLSHandshakeTimeout:   10 * time.Second,
+		TLSHandshakeTimeout:   20 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		ForceAttemptHTTP2:     true, // Recommended for Google APIs
 	}
@@ -138,6 +143,16 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 	// 	Timeout:   60 * time.Second, // Total request timeout
 	// }
 
+	h2, err := http2.ConfigureTransports(customTransport)
+	if err == nil {
+		// This tells the Go client to check if the connection is still
+		// alive if it has been idle for this long.
+		// This prevents the "connection reset" when Istio closes at 80s.
+		h2.ReadIdleTimeout = 30 * time.Second
+		h2.PingTimeout = 5 * time.Second
+		h2.StrictMaxConcurrentStreams = false
+	}
+
 	// Wrap custom transport with the API Key logic
 	authenticatedTransport := &apiKeyTransport{
 		Underlying: customTransport,
@@ -155,7 +170,7 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 		log.Error().Msg("YouTube API key is empty! This will cause authentication errors")
 	}
 
-	service, err := ytapi.NewService(ctx, option.WithHTTPClient(httpClient), option.WithAPIKey(c.apiKey))
+	service, err := ytapi.NewService(ctx, option.WithHTTPClient(httpClient))
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create YouTube service")
 		return fmt.Errorf("failed to create YouTube service: %w", err)
