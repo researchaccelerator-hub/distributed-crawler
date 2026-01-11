@@ -1012,66 +1012,85 @@ func (dsm *DaprStateManager) SaveState() error {
 	// 	return fmt.Errorf("failed to save state: %w", err)
 	// }
 
-	metadataKeys := []struct {
-		key     string
-		keyType string
-	}{
-		{fmt.Sprintf("%s/metadata", dsm.config.CrawlID), "formatted key"},
-		{dsm.config.CrawlID, "direct key"},
-		{dsm.config.CrawlExecutionID, "execution ID"},
+	// Use errgroup to manage the three major grouping operations concurrently
+	var eg errgroup.Group
+
+	// 1. Concurrent Block: Save Metadata with Fallback Logic
+	eg.Go(func() error {
+		metadataKeys := []struct {
+			key     string
+			keyType string
+		}{
+			{fmt.Sprintf("%s/metadata", dsm.config.CrawlID), "formatted key"},
+			{dsm.config.CrawlID, "direct key"},
+			{dsm.config.CrawlExecutionID, "execution ID"},
+		}
+
+		for i, k := range metadataKeys {
+			err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, metadataData, nil)
+			if err == nil {
+				return nil // Success! Exit this goroutine
+			}
+
+			// Log the failure
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed metadata save attempt")
+
+			// If this was the last attempt and it failed, return the error to the group
+			if i == len(metadataKeys)-1 {
+				return fmt.Errorf("all metadata save attempts failed: %w", err)
+			}
+		}
+		return nil
+	})
+
+	// 2. Concurrent Block: Save Layer Map with Fallback Logic
+	eg.Go(func() error {
+		layerKeys := []struct {
+			key     string
+			keyType string
+		}{
+			{fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID), "primary key"},
+			{fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID), "alternate key"},
+		}
+
+		for i, k := range layerKeys {
+			err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, layerMapData, nil)
+			if err == nil {
+				return nil // Success!
+			}
+
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed layer map save attempt")
+
+			if i == len(layerKeys)-1 {
+				return fmt.Errorf("all layer map save attempts failed: %w", err)
+			}
+		}
+		return nil
+	})
+
+	// 3. Concurrent Block: Save Active Crawl Indicator
+	eg.Go(func() error {
+		activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
+		activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
+			dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
+
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
+		if err != nil {
+			log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator (non-critical)")
+		}
+		return nil
+	})
+
+	// Wait for all three groups to finish
+	if err := eg.Wait(); err != nil {
+		return fmt.Errorf("state persistence failed: %w", err)
 	}
 
-	// save metadata
-	for i, k := range metadataKeys {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, metadataData, nil)
-		if err == nil {
-			break
-		}
-		if i == 0 {
-			log.Warn().Err(err).Str("key", k.key).Msg("Failed to save metadata with primary key")
-		} else {
-			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed to save metadata with fallback key")
-		}
-		if i+1 == len(metadataKeys) {
-			return err
-		}
-	}
+	log.Debug().
+		Str("crawlID", dsm.config.CrawlID).
+		Str("executionID", dsm.config.CrawlExecutionID).
+		Msg("Successfully completed all concurrent DAPR state operations")
 
-	// save layer data
-	layerKeys := []struct {
-		key     string
-		keyType string
-	}{
-		{fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID), "primary key"},
-		{fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID), "alternate key"},
-	}
-	for i, k := range layerKeys {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, layerMapData, nil)
-		if err == nil {
-			break
-		}
-		if i == 0 {
-			log.Warn().Err(err).Str("key", k.key).Msg("Failed to save layer map data with primary key")
-		} else {
-			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed to save layer map data with fallback key")
-		}
-		if i+1 == len(layerKeys) {
-			return err
-		}
-	}
-
-	// save active crawl indicator
-	activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
-	activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
-		dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
-
-	err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
-	if err != nil {
-		log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator")
-	}
-
-	log.Debug().Str("crawlID", dsm.config.CrawlID).Str("executionID", dsm.config.CrawlExecutionID).
-		Msg("Successfully saved state to DAPR")
 	return nil
 }
 
