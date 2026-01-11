@@ -63,8 +63,8 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		}
 	}()
 
-	log.Info().Msg("Waiting 60 seconds for Dapr sidecar to initialize...")
-	time.Sleep(60 * time.Second)
+	log.Info().Msg("Waiting 15 seconds for Dapr sidecar to initialize...")
+	time.Sleep(15 * time.Second)
 	log.Info().Msg("Dapr sidecar initialization wait complete")
 
 	// Create a file cleaner that targets the same location as where connections are unzipped
@@ -396,6 +396,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				// 		log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
 				// 	}
 				// }
+
 				discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler, crawlCfg, page, ctx)
 			} else {
 				// Telegram platform processing (default)
@@ -441,17 +442,18 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		}(pageToProcess)
 	}
 
+	// Wait for all pages to be processed
+	wg.Wait()
+
 	if crawlCfg.Platform == "youtube" {
 		// Disconnect YouTube client
 		if ytClient != nil {
+			log.Info().Msg("Disconnecting Youtube client")
 			if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
 				log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
 			}
 		}
 	}
-
-	// Wait for all pages to be processed
-	wg.Wait()
 
 	// Log summary of unique pages processed
 	uniqueCount := len(uniquePages)

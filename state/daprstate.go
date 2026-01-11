@@ -682,7 +682,7 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 	}
 
 	// to avoid overwhelming statestore for large seed counts
-	const maxConcurrentDaprCalls = 100
+	const maxConcurrentDaprCalls = 1000
 	sem := make(chan struct{}, maxConcurrentDaprCalls)
 
 	// Update in-memory structures for each page
