@@ -839,10 +839,10 @@ func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common
 		discoveredChannels = []*state.Page{}
 	}
 
-	// Cleanup YouTube crawler resources
-	if closeErr := ytCrawler.Close(); closeErr != nil {
-		log.Warn().Err(closeErr).Msg("Error closing YouTube crawler")
-	}
+	// // Cleanup YouTube crawler resources
+	// if closeErr := ytCrawler.Close(); closeErr != nil {
+	// 	log.Warn().Err(closeErr).Msg("Error closing YouTube crawler")
+	// }
 	return discoveredChannels, nil
 }
 

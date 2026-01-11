@@ -74,6 +74,9 @@ func (c *Chunker) Start() error {
 	if err := os.MkdirAll(c.combineDir, 0755); err != nil {
 		return fmt.Errorf("failed to create combine directory: %s", c.combineDir)
 	}
+	if err := os.MkdirAll(c.tempDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %s", c.tempDir)
+	}
 
 	jobsChan := make(chan []FileEntry, 100)
 	internalBuffer := make(chan fsnotify.Event, 100000)
