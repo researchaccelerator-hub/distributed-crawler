@@ -186,6 +186,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if crawlCfg.CombineFiles {
 		chunker := chunk.NewChunker(
 			sm,
+			crawlCfg.CombineTempDir,
 			crawlCfg.CombineWatchDir,
 			crawlCfg.CombineWriteDir,
 			crawlCfg.CombineTriggerSize*1024*1024,
@@ -284,6 +285,19 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	// Log the original count of pages
 	originalCount := len(layer.Pages)
 
+	var ytCrawler crawler.Crawler
+	var ytClient clientpkg.Client
+	var clientCtx context.Context
+	var ytInitErr error
+
+	if crawlCfg.Platform == "youtube" {
+		ytCrawler, ytClient, clientCtx, ytInitErr = InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+		if ytInitErr != nil {
+			err := ytInitErr
+			log.Fatal().Err(err).Msg("Unable to initialize Youtube crawler")
+		}
+	}
+
 	// Process each page in the current layer, ensuring each URL is processed only once
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
 		pageToProcess := layer.Pages[pageIndex]
@@ -370,18 +384,19 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			if crawlCfg.Platform == "youtube" {
 				// YouTube platform processing
 				log.Info().Msgf("Processing YouTube channel: %s", page.URL)
-				ytCrawler, ytClient, clientCtx, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
-				if ytInitErr != nil {
-					err = ytInitErr
-				} else {
-					discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler, crawlCfg, page, ctx)
-				}
-				// Disconnect YouTube client
-				if ytClient != nil {
-					if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
-						log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
-					}
-				}
+				// ytCrawler, ytClient, clientCtx, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+				// if ytInitErr != nil {
+				// 	err = ytInitErr
+				// } else {
+				// 	discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler, crawlCfg, page, ctx)
+				// }
+				// // Disconnect YouTube client
+				// if ytClient != nil {
+				// 	if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
+				// 		log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
+				// 	}
+				// }
+				discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler, crawlCfg, page, ctx)
 			} else {
 				// Telegram platform processing (default)
 				// Use the pooled channel processing
@@ -424,6 +439,15 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				}
 			}
 		}(pageToProcess)
+	}
+
+	if crawlCfg.Platform == "youtube" {
+		// Disconnect YouTube client
+		if ytClient != nil {
+			if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
+				log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
+			}
+		}
 	}
 
 	// Wait for all pages to be processed
@@ -523,6 +547,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			SamplingMethod:  crawlCfg.SamplingMethod,
 			SeedSize:        crawlCfg.SeedSize,
 			CombineFiles:    crawlCfg.CombineFiles,
+			CombineTempDir:  crawlCfg.CombineTempDir,
 			CombineWatchDir: crawlCfg.CombineWatchDir,
 		}
 	} else {
@@ -535,6 +560,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			SamplingMethod:   crawlCfg.SamplingMethod,
 			SeedSize:         crawlCfg.SeedSize,
 			CombineFiles:     crawlCfg.CombineFiles,
+			CombineTempDir:   crawlCfg.CombineTempDir,
 			CombineWatchDir:  crawlCfg.CombineWatchDir,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
