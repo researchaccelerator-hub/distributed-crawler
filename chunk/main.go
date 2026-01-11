@@ -15,7 +15,8 @@ import (
 
 type Chunker struct {
 	sm           state.StateManagementInterface
-	watchDir     string        // directory where crawl files are written
+	tempDir      string        // directory where crawl files are written
+	watchDir     string        // directory where crawl files are moved after write is completed
 	combineDir   string        // directory where combined files are stored before upload
 	triggerSize  int64         // size in mb to trigger an upload
 	hardCapSize  int64         // size in mb to not exceed
@@ -44,10 +45,11 @@ func resetTimer(t *time.Timer, duration time.Duration) {
 	t.Reset(duration)
 }
 
-func NewChunker(sm state.StateManagementInterface, watchDir string, combineDir string, triggerSize int64, hardCapSize int64) *Chunker {
+func NewChunker(sm state.StateManagementInterface, tempDir string, watchDir string, combineDir string, triggerSize int64, hardCapSize int64) *Chunker {
 
 	return &Chunker{
 		sm:           sm,
+		tempDir:      tempDir,
 		watchDir:     watchDir,
 		combineDir:   combineDir,
 		triggerSize:  triggerSize,

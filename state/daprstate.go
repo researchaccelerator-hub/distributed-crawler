@@ -813,52 +813,75 @@ func (dsm *DaprStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Use errgroup to perform save operations concurrently
-	var eg errgroup.Group
+	// // Use errgroup to perform save operations concurrently
+	// var eg errgroup.Group
 
-	// 1. Save with formatted key
-	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
-		if err != nil {
-			log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
-			return err
-		}
-		return nil
-	})
+	// // 1. Save with formatted key
+	// metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
 
-	// 2. Save with direct crawl ID key
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
-		}
-		// Continue even if this fails as it's redundant
-		return nil
-	})
+	// // 2. Save with direct crawl ID key
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+	// 	}
+	// 	// Continue even if this fails as it's redundant
+	// 	return nil
+	// })
 
-	// 3. Save with execution ID key
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
-		}
-		// Continue even if this fails as it's redundant
-		return nil
-	})
+	// // 3. Save with execution ID key
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
+	// 	}
+	// 	// Continue even if this fails as it's redundant
+	// 	return nil
+	// })
 
-	// Wait for all operations to complete, fail only if the primary one fails
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("failed to update metadata: %w", err)
+	// // Wait for all operations to complete, fail only if the primary one fails
+	// if err := eg.Wait(); err != nil {
+	// 	return fmt.Errorf("failed to update metadata: %w", err)
+	// }
+
+	keys := []struct {
+		key     string
+		keyType string
+	}{
+		{fmt.Sprintf("%s/metadata", dsm.config.CrawlID), "formatted key"},
+		{dsm.config.CrawlID, "direct key"},
+		{dsm.config.CrawlExecutionID, "execution ID"},
 	}
 
-	log.Info().
-		Str("crawlID", crawlID).
-		Str("executionID", dsm.config.CrawlExecutionID).
-		Str("status", metadataCopy.Status).
-		Msg("Crawl metadata updated in DAPR")
+	for i, k := range keys {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, metadataData, nil)
+		if err == nil {
+			log.Info().
+				Str("crawlID", crawlID).
+				Str("executionID", dsm.config.CrawlExecutionID).
+				Str("status", metadataCopy.Status).
+				Str("key", k.key).
+				Str("key_type", k.keyType).
+				Msg("Crawl metadata updated in DAPR using")
+			return nil
+		}
+		if i == 0 {
+			log.Error().Err(err).Str("key", k.key).Msg("Primary key failed")
+		} else {
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Fallback key failed")
+		}
+	}
 
-	return nil
+	return fmt.Errorf("failed to save metadata with all attempted keys")
+
 }
 
 // SaveState persists the current state to Dapr
@@ -918,75 +941,133 @@ func (dsm *DaprStateManager) SaveState() error {
 		return fmt.Errorf("failed to marshal layer map: %w", err)
 	}
 
-	// Use errgroup to manage all concurrent DAPR operations
-	var eg errgroup.Group
+	// // Use errgroup to manage all concurrent DAPR operations
+	// var eg errgroup.Group
 
-	// 1. Save metadata with different key formats
-	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
-		if err != nil {
-			log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
+	// // 1. Save metadata with different key formats
+	// metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
+
+	// // Also save with direct crawl ID
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // Also save with execution ID
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // 2. Save layer map data
+	// layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, layerMapKey, layerMapData, nil)
+	// 	if err != nil {
+	// 		log.Error().Err(err).Str("key", layerMapKey).Msg("Failed to save layer map")
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
+
+	// // Save with alternate key format as well
+	// alternateLayerMapKey := fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, alternateLayerMapKey, layerMapData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", alternateLayerMapKey).Msg("Failed to save layer map with alternate key")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // 3. Save active crawl indicator
+	// activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
+	// activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
+	// 	dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
+
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // Wait for all operations to complete
+	// if err := eg.Wait(); err != nil {
+	// 	return fmt.Errorf("failed to save state: %w", err)
+	// }
+
+	metadataKeys := []struct {
+		key     string
+		keyType string
+	}{
+		{fmt.Sprintf("%s/metadata", dsm.config.CrawlID), "formatted key"},
+		{dsm.config.CrawlID, "direct key"},
+		{dsm.config.CrawlExecutionID, "execution ID"},
+	}
+
+	// save metadata
+	for i, k := range metadataKeys {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, metadataData, nil)
+		if err == nil {
+			break
+		}
+		if i == 0 {
+			log.Warn().Err(err).Str("key", k.key).Msg("Failed to save metadata with primary key")
+		} else {
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed to save metadata with fallback key")
+		}
+		if i+1 == len(metadataKeys) {
 			return err
 		}
-		return nil
-	})
+	}
 
-	// Also save with direct crawl ID
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+	// save layer data
+	layerKeys := []struct {
+		key     string
+		keyType string
+	}{
+		{fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID), "primary key"},
+		{fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID), "alternate key"},
+	}
+	for i, k := range layerKeys {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, layerMapData, nil)
+		if err == nil {
+			break
 		}
-		return nil // Non-critical, continue even if it fails
-	})
-
-	// Also save with execution ID
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
+		if i == 0 {
+			log.Warn().Err(err).Str("key", k.key).Msg("Failed to save layer map data with primary key")
+		} else {
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed to save layer map data with fallback key")
 		}
-		return nil // Non-critical, continue even if it fails
-	})
-
-	// 2. Save layer map data
-	layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, layerMapKey, layerMapData, nil)
-		if err != nil {
-			log.Error().Err(err).Str("key", layerMapKey).Msg("Failed to save layer map")
+		if i+1 == len(layerKeys) {
 			return err
 		}
-		return nil
-	})
+	}
 
-	// Save with alternate key format as well
-	alternateLayerMapKey := fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID)
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, alternateLayerMapKey, layerMapData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", alternateLayerMapKey).Msg("Failed to save layer map with alternate key")
-		}
-		return nil // Non-critical, continue even if it fails
-	})
-
-	// 3. Save active crawl indicator
+	// save active crawl indicator
 	activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
 	activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
 		dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
 
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator")
-		}
-		return nil // Non-critical, continue even if it fails
-	})
-
-	// Wait for all operations to complete
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
+	err = (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
+	if err != nil {
+		log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator")
 	}
 
 	log.Debug().Str("crawlID", dsm.config.CrawlID).Str("executionID", dsm.config.CrawlExecutionID).
@@ -1014,11 +1095,17 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 			return fmt.Errorf("Chunk: Unable to marshall data for writing to file: %w", err)
 		}
 
-		filename := fmt.Sprintf("%s/post_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
+		tempFilename := fmt.Sprintf("%s/temp_%s_%d.jsonl", dsm.BaseStateManager.config.CombineTempDir, post.PostUID, time.Now().UnixNano())
+		watchFilename := fmt.Sprintf("%s/post_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
 
-		err = os.WriteFile(filename, jsonData, 0644)
+		err = os.WriteFile(tempFilename, jsonData, 0644)
 		if err != nil {
-			return fmt.Errorf("Chunk: Unable to write to combined filename %s: %w", filename, err)
+			return fmt.Errorf("Chunk: Unable to write to combined filename %s: %w", tempFilename, err)
+		}
+
+		err = os.Rename(tempFilename, watchFilename)
+		if err != nil {
+			return fmt.Errorf("Chunk: Unable to move %s to %s: %w", tempFilename, watchFilename, err)
 		}
 
 		return nil
