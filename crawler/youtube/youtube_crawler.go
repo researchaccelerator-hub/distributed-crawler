@@ -630,14 +630,15 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	if durationStr := video.Duration; durationStr != "" {
 		if durationStr == "P0D" {
 			log.Info().Str("duration_str", durationStr).Msg("P0D found. Treating as null for now")
-		}
-		duration, err := parseISO8601Duration(durationStr)
-		if err == nil {
-			videoLengthPtr = &duration
-			log.Debug().Int("video_length_seconds", duration).Msg("Parsed video duration")
 		} else {
-			log.Warn().Err(err).Str("duration", durationStr).Str("video_id", video.ID).Str("log_tag", "FOCUS").
-				Msg("Failed to parse video duration")
+			duration, err := parseISO8601Duration(durationStr)
+			if err == nil {
+				videoLengthPtr = &duration
+				log.Debug().Int("video_length_seconds", duration).Msg("Parsed video duration")
+			} else {
+				log.Warn().Err(err).Str("duration", durationStr).Str("video_id", video.ID).Str("log_tag", "FOCUS").
+					Msg("Failed to parse video duration")
+			}
 		}
 	} else {
 		log.Warn().Str("video_id", video.ID).Str("log_tag", "FOCUS").Msg("Duration is empty")
