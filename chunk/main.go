@@ -28,6 +28,9 @@ type Chunker struct {
 	batchTimeout time.Duration // length in seconds to wait after last created file before flushing batch
 	fileChan     chan FileEntry
 
+	totalUploadSize int64
+	postsUploaded   int32
+
 	// New fields for overflow recovery
 	rescanSignal chan struct{}
 	// processed    sync.Map // Map[string]time.Time to prevent duplicates
@@ -301,6 +304,10 @@ func (c *Chunker) processBatches(out chan<- []FileEntry) {
 
 	flush := func() {
 		if len(state.Files) > 0 {
+			// track total posts and upload size
+			c.totalUploadSize += state.Size
+			c.postsUploaded += int32(len(state.Files))
+
 			batchToSend := make([]FileEntry, len(state.Files))
 			copy(batchToSend, state.Files)
 			out <- batchToSend
@@ -367,7 +374,8 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 			continue
 		}
 
-		log.Info().Str("combined_file", outputName).Str("log_tag", "chunk_cb").Msg("Upload completed. Deleting source files")
+		log.Info().Str("combined_file", outputName).Int64("total_uploaded_size_bytes", c.totalUploadSize).Int32("total_posts_uploaded", c.postsUploaded).
+			Str("log_tag", "chunk_cb").Msg("Upload completed. Deleting source files")
 
 		for _, file := range batch {
 			if err := os.Remove(file.Path); err != nil {
