@@ -1,11 +1,13 @@
 package chunk
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -28,7 +30,12 @@ type Chunker struct {
 
 	// New fields for overflow recovery
 	rescanSignal chan struct{}
-	processed    sync.Map // Map[string]time.Time to prevent duplicates
+	// processed    sync.Map // Map[string]time.Time to prevent duplicates
+	processed *processedMap
+	// for handling closing of chunker
+	ctx          context.Context
+	wg           sync.WaitGroup
+	shutdownOnce sync.Once
 }
 
 type FileEntry struct {
@@ -41,19 +48,28 @@ type BatchState struct {
 	Size  int64
 }
 
-func resetTimer(t *time.Timer, duration time.Duration) {
-	if !t.Stop() {
-		// Drain the channel to prevent an immediate, spurious wake-up.
-		select {
-		case <-t.C:
-		default:
-		}
-	}
-	// Reset the timer for the next interval.
-	t.Reset(duration)
+// processedMap implements a double-buffering strategy to prevent
+// map bucket bloat. By rotating maps, we allow the GC to reclaim
+// memory used by old map structures.
+type processedMap struct {
+	sync.RWMutex
+	current  map[string]struct{}
+	previous map[string]struct{}
 }
 
-func NewChunker(sm state.StateManagementInterface, tempDir string, watchDir string, combineDir string, triggerSize int64, hardCapSize int64) *Chunker {
+// func resetTimer(t *time.Timer, duration time.Duration) {
+// 	if !t.Stop() {
+// 		// Drain the channel to prevent an immediate, spurious wake-up.
+// 		select {
+// 		case <-t.C:
+// 		default:
+// 		}
+// 	}
+// 	// Reset the timer for the next interval.
+// 	t.Reset(duration)
+// }
+
+func NewChunker(ctx context.Context, sm state.StateManagementInterface, tempDir string, watchDir string, combineDir string, triggerSize int64, hardCapSize int64) *Chunker {
 	return &Chunker{
 		sm:           sm,
 		tempDir:      tempDir,
@@ -64,6 +80,11 @@ func NewChunker(sm state.StateManagementInterface, tempDir string, watchDir stri
 		batchTimeout: 300 * time.Second,           // 5 minutes
 		fileChan:     make(chan FileEntry, 10000), // Increased buffer for bursts
 		rescanSignal: make(chan struct{}, 1),
+		processed: &processedMap{
+			current:  make(map[string]struct{}),
+			previous: make(map[string]struct{}),
+		},
+		ctx: ctx,
 	}
 }
 
@@ -80,6 +101,8 @@ func (c *Chunker) Start() error {
 
 	jobsChan := make(chan []FileEntry, 100)
 	internalBuffer := make(chan fsnotify.Event, 100000)
+
+	c.wg.Add(5)
 
 	// 1. Start the Recovery Worker (Independent)
 	go c.recoveryWorker()
@@ -102,10 +125,26 @@ func (c *Chunker) Start() error {
 		Timestamp().Dur("timeout_seconds", c.batchTimeout/1000).
 		Msg("Chunker started with automated overflow recovery.")
 
+	// Monitor for shutdown signal
+	go func() {
+		<-c.ctx.Done()
+		log.Info().Msg("Chunker shutdown signal received. Starting graceful drain...")
+		// The drain happens naturally as we close the first pipe in the chain
+	}()
+
 	return nil
 }
 
+// Wait allows calling process to block until the Chunker has fully drained
+func (c *Chunker) Wait() {
+	c.wg.Wait()
+}
+
 func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
+	defer c.wg.Done()
+	defer close(out)            // closing this signals start of shutdown
+	defer close(c.rescanSignal) // closing this signals recoveryWorker to close
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal().Err(err).Str("log_tag", "chunk_wf").Msg("Failed to create watcher")
@@ -118,6 +157,9 @@ func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 
 	for {
 		select {
+		case <-c.ctx.Done():
+			log.Info().Str("log_tag", "chunk_wf").Msg("Chunk watcher shutting down...")
+			return
 		case event, ok := <-watcher.Events:
 			if !ok {
 				log.Error().Err(err).Str("log_tag", "chunk_wf").Msg("Encountered error in watchFilesInternalBuffer Events")
@@ -143,12 +185,35 @@ func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 }
 
 func (c *Chunker) processEvents(internalBuffer <-chan fsnotify.Event) {
-	for event := range internalBuffer {
-		// Only process writes/creates of jsonl files
-		if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Create)) && strings.HasSuffix(event.Name, ".jsonl") {
+	defer c.wg.Done()
+	defer close(c.fileChan) // signal processBatches to finish
+	// for event := range internalBuffer {
+	// 	// Only process writes/creates of jsonl files
+	// 	if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Create)) && strings.HasSuffix(event.Name, ".jsonl") {
 
-			// Mark as seen immediately to prevent recovery worker from picking it up
-			c.processed.Store(event.Name, time.Now())
+	// 		if c.isSeen(event.Name) {
+	// 			continue
+	// 		}
+	// 		c.markSeen(event.Name)
+
+	// 		info, err := os.Stat(event.Name)
+	// 		if err != nil {
+	// 			continue
+	// 		}
+
+	// 		c.fileChan <- FileEntry{
+	// 			Path: event.Name,
+	// 			Size: info.Size(),
+	// 		}
+	// 	}
+	// }
+
+	for event := range internalBuffer {
+		if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Create)) && strings.HasSuffix(event.Name, ".jsonl") {
+			if c.isSeen(event.Name) {
+				continue
+			}
+			c.markSeen(event.Name)
 
 			info, err := os.Stat(event.Name)
 			if err != nil {
@@ -161,65 +226,78 @@ func (c *Chunker) processEvents(internalBuffer <-chan fsnotify.Event) {
 			}
 		}
 	}
+	log.Info().Str("log_tag", "chunk_pe").Msg("Chunk internal buffer drained and closed.")
 }
 
 func (c *Chunker) recoveryWorker() {
-	for range c.rescanSignal {
-		// Cooldown to let the burst finish writing to disk
-		time.Sleep(5 * time.Second)
+	defer c.wg.Done()
+	// Rotate map every 15 minutes to prevent OOM
+	rotationTicker := time.NewTicker(15 * time.Minute)
+	defer rotationTicker.Stop()
 
-		log.Info().Str("log_tag", "chunk_rw").Msg("Starting directory rescan for missed files...")
+	for {
 
-		entries, err := os.ReadDir(c.watchDir)
-		if err != nil {
-			log.Error().Err(err).Str("log_tag", "chunk_rw").Msg("Recovery rescan failed to read directory")
-			continue
-		}
+		select {
 
-		// Sort entries by ModTime to ensure chronological processing
-		var files []fs.FileInfo
-		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
-				if info, err := entry.Info(); err == nil {
-					files = append(files, info)
-				}
+		case <-c.ctx.Done():
+			log.Info().Str("log_tag", "chunk_rw").Msg("Recovery worker shutting down from closed context")
+			return
+		case <-rotationTicker.C:
+			c.rotateMap()
+		case <-c.rescanSignal:
+			if c.ctx.Err() != nil {
+				log.Info().Str("log_tag", "chunk_rw").Msg("Recovery worker shutting down from closed rescan signal")
+				return
 			}
-		}
 
-		slices.SortFunc(files, func(a, b fs.FileInfo) int {
-			return a.ModTime().Compare(b.ModTime())
-		})
+			// Cooldown to let the burst finish writing to disk
+			time.Sleep(5 * time.Second)
+			log.Info().Str("log_tag", "chunk_rw").Msg("Starting directory rescan for missed files...")
 
-		for _, file := range files {
-			fullPath := filepath.Join(c.watchDir, file.Name())
-
-			// Deduplication check
-			if _, seen := c.processed.Load(fullPath); seen {
+			entries, err := os.ReadDir(c.watchDir)
+			if err != nil {
+				log.Error().Err(err).Str("log_tag", "chunk_rw").Msg("Recovery rescan failed to read directory")
 				continue
 			}
 
-			c.fileChan <- FileEntry{
-				Path: fullPath,
-				Size: file.Size(),
+			// Sort entries by ModTime to ensure chronological processing
+			var files []fs.FileInfo
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+					if info, err := entry.Info(); err == nil {
+						files = append(files, info)
+					}
+				}
 			}
-			c.processed.Store(fullPath, time.Now())
+
+			slices.SortFunc(files, func(a, b fs.FileInfo) int {
+				return a.ModTime().Compare(b.ModTime())
+			})
+
+			for _, file := range files {
+				fullPath := filepath.Join(c.watchDir, file.Name())
+				if c.isSeen(fullPath) {
+					continue
+				}
+
+				c.markSeen(fullPath)
+				c.fileChan <- FileEntry{
+					Path: fullPath,
+					Size: file.Size(),
+				}
+			}
+
+			log.Info().Str("log_tag", "chunk_rw").Msg("Recovery rescan complete.")
 		}
-
-		// Clean up the map: Remove entries older than 15 minutes to save memory
-		c.processed.Range(func(key, value any) bool {
-			if time.Since(value.(time.Time)) > 15*time.Minute {
-				c.processed.Delete(key)
-			}
-			return true
-		})
-
-		log.Info().Str("log_tag", "chunk_rw").Msg("Recovery rescan complete.")
 	}
 }
 
 func (c *Chunker) processBatches(out chan<- []FileEntry) {
+	defer c.wg.Done()
+	defer close(out) // Signal to consumeBatches to finish uploads
+
 	state := BatchState{}
-	timer := time.NewTimer(c.batchTimeout)
+	// timer := time.NewTimer(c.batchTimeout)
 
 	flush := func() {
 		if len(state.Files) > 0 {
@@ -229,49 +307,45 @@ func (c *Chunker) processBatches(out chan<- []FileEntry) {
 			state.Files = nil
 			state.Size = 0
 		}
-		resetTimer(timer, c.batchTimeout)
 	}
 
-	for {
-		select {
-		case file := <-c.fileChan:
-			resetTimer(timer, c.batchTimeout)
+	for file := range c.fileChan {
+		// delete files we can't upload
+		if file.Size > c.hardCapSize {
+			log.Warn().Str("file_name", file.Path).Int64("total_bytes", file.Size).Str("log_tag", "chunk_pb").Msg("File exceeds hard cap. Deleting")
+			if err := os.Remove(file.Path); err != nil {
+				log.Error().Err(err).Str("file_name", file.Path).Str("log_tag", "chunk_pb").Msg("failed to remove file")
+			}
+			continue
+		}
+		// flush the buffer when we hit the hard cap
+		if state.Size > 0 && state.Size+file.Size > c.hardCapSize {
+			log.Info().Str("log_tag", "chunk_pb").Msg("Hard cap forced flush")
+			flush()
+		}
 
-			// delete files we can't upload
-			if file.Size > c.hardCapSize {
-				log.Warn().Str("file_name", file.Path).Int64("total_bytes", file.Size).Str("log_tag", "chunk_pb").Msg("File exceeds hard cap. Deleting")
-				if err := os.Remove(file.Path); err != nil {
-					log.Error().Err(err).Str("file_name", file.Path).Str("log_tag", "chunk_pb").Msg("failed to remove file")
-				}
-				continue
-			}
-			// flush the buffer when we hit the hard cap
-			if state.Size > 0 && state.Size+file.Size > c.hardCapSize {
-				log.Info().Str("log_tag", "chunk_pb").Msg("Hard cap forced flush")
-				flush()
-			}
-
-			state.Files = append(state.Files, file)
-			state.Size += file.Size
-			if len(state.Files)%1000 == 0 {
-				log.Info().Int("file_count", len(state.Files)).Int64("buffer_size_bytes", state.Size).Str("log_tag", "chunk_pb").Msg("Current buffer")
-			}
-			if state.Size >= c.triggerSize {
-				log.Debug().Str("log_tag", "chunk_pb").Msg("Trigger size reached. Flushing batch")
-				flush()
-			}
-		case <-timer.C:
-			if len(state.Files) > 0 {
-				log.Info().Str("log_tag", "chunk_pb").Msg("Timeout reached. Flushing partial batch")
-				flush()
-			} else {
-				resetTimer(timer, c.batchTimeout)
-			}
+		state.Files = append(state.Files, file)
+		state.Size += file.Size
+		if len(state.Files)%1000 == 0 {
+			log.Info().Int("file_count", len(state.Files)).Int64("buffer_size_bytes", state.Size).Str("log_tag", "chunk_pb").Msg("Current buffer")
+		}
+		if state.Size >= c.triggerSize {
+			log.Debug().Str("log_tag", "chunk_pb").Msg("Trigger size reached. Flushing batch")
+			flush()
 		}
 	}
+	if len(state.Files) > 0 {
+		log.Info().Str("log_tag", "chunk_pb").Int("remaining_files", len(state.Files)).
+			Msg("Shutting down: Flushing final partial batch")
+		flush()
+	}
+
+	log.Info().Str("log_tag", "chunk_pb").Msg("Chunk process batches shutdown complete")
+
 }
 
 func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
+	defer c.wg.Done()
 	for batch := range jobs {
 		outputName, err := c.combineFiles(batch)
 		if err != nil {
@@ -304,8 +378,8 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 		if err := os.Remove(outputName); err != nil {
 			log.Error().Err(err).Str("file_name", outputName).Str("log_tag", "chunk_cb").Msg("Failed to delete combined file")
 		}
-
 	}
+	log.Info().Str("log_tag", "chunk_cb").Msg("All batches uploaded and deleted")
 }
 
 func (c *Chunker) combineFiles(batch []FileEntry) (string, error) {
@@ -350,4 +424,75 @@ func isOverflow(err error) bool {
 		return false
 	}
 	return err.Error() == "fsnotify: queue or buffer overflow"
+}
+
+// Processed Related functions
+
+// isSeen checks both current and previous maps for deduplication
+func (c *Chunker) isSeen(path string) bool {
+	c.processed.RLock()
+	defer c.processed.RUnlock()
+	_, inCurrent := c.processed.current[path]
+	if inCurrent {
+		return true
+	}
+	_, inPrevious := c.processed.previous[path]
+	return inPrevious
+}
+
+// markSeen adds a file to the current map
+func (c *Chunker) markSeen(path string) {
+	c.processed.Lock()
+	defer c.processed.Unlock()
+	c.processed.current[path] = struct{}{}
+}
+
+// rotateMap drops the oldest map and creates a fresh one to reclaim memory
+func (c *Chunker) rotateMap() {
+	c.processed.Lock()
+	log.Info().
+		Int("prev_size", len(c.processed.previous)).
+		Int("curr_size", len(c.processed.current)).
+		Msg("Rotating file tracker map to reclaim memory")
+
+	// The old 'previous' is now eligible for GC
+	c.processed.previous = c.processed.current
+	c.processed.current = make(map[string]struct{})
+	c.processed.Unlock()
+
+	// Explicitly trigger a GC and Return memory to OS
+	debug.FreeOSMemory()
+}
+
+func (c *Chunker) VerifyCleanup() {
+	dirs := map[string]string{
+		"Temp":    c.tempDir,
+		"Watch":   c.watchDir,
+		"Combine": c.combineDir,
+	}
+
+	log.Info().Str("log_tag", "chunk_vc").Msg("--- Final Cleanup Verification ---")
+	for label, path := range dirs {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			log.Error().Err(err).Str("dir", label).Msg("Failed to read directory during verification")
+			continue
+		}
+
+		if len(entries) == 0 {
+			log.Info().Str("dir", label).Str("log_tag", "chunk_vc").Msg("Directory is empty")
+		} else {
+			var fileNames []string
+			for _, e := range entries {
+				fileNames = append(fileNames, e.Name())
+			}
+			log.Warn().
+				Str("log_tag", "chunk_vc").
+				Str("dir", label).
+				Int("count", len(entries)).
+				Strs("files", fileNames).
+				Msg("Verification Warning: Directory still contains files!")
+		}
+	}
+	log.Info().Str("log_tag", "chunk_vc").Msg("--- Cleanup Verification Complete ---")
 }
