@@ -54,6 +54,8 @@ type YouTubeCrawler struct {
 	crawlLabel    string // Label for the crawl operation
 }
 
+var iso8601DurationRegex = regexp.MustCompile(`^P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?$`)
+
 // NewYouTubeCrawler creates a new YouTube crawler
 func NewYouTubeCrawler() crawler.Crawler {
 	// Set default configuration
@@ -452,52 +454,30 @@ func (c *YouTubeCrawler) Close() error {
 	return nil
 }
 
-// parseISO8601Duration parses YouTube's ISO 8601 duration format to seconds
-// Example: PT1H2M3S = 1 hour, 2 minutes, 3 seconds = 3723 seconds
 func parseISO8601Duration(duration string) (int, error) {
-	if duration == "" {
-		return 0, fmt.Errorf("empty duration string")
+	matches := iso8601DurationRegex.FindStringSubmatch(duration)
+	if matches == nil {
+		return 0, fmt.Errorf("invalid ISO 8601 duration: %s", duration)
 	}
 
-	// Remove PT prefix
-	if len(duration) < 2 || duration[:2] != "PT" {
-		return 0, fmt.Errorf("invalid duration format: %s, expected 'PT' prefix", duration)
-	}
-	duration = duration[2:]
-
-	var hours, minutes, seconds int
-	var currentValue string
-
-	// Parse each component
-	for _, c := range duration {
-		if c >= '0' && c <= '9' {
-			currentValue += string(c)
-		} else {
-			value := 0
-			if currentValue != "" {
-				var err error
-				value, err = strconv.Atoi(currentValue)
-				if err != nil {
-					return 0, fmt.Errorf("invalid duration value: %s", currentValue)
-				}
-				currentValue = ""
-			}
-
-			switch c {
-			case 'H':
-				hours = value
-			case 'M':
-				minutes = value
-			case 'S':
-				seconds = value
-			default:
-				return 0, fmt.Errorf("invalid duration component: %c", c)
+	var totalSeconds int
+	// Extract sub-matches using the precompiled index names
+	for i, name := range iso8601DurationRegex.SubexpNames() {
+		if i > 0 && i < len(matches) && matches[i] != "" {
+			val, _ := strconv.Atoi(matches[i])
+			switch name {
+			case "days":
+				totalSeconds += val * 86400
+			case "hours":
+				totalSeconds += val * 3600
+			case "minutes":
+				totalSeconds += val * 60
+			case "seconds":
+				totalSeconds += val
 			}
 		}
 	}
 
-	// Calculate total seconds
-	totalSeconds := hours*3600 + minutes*60 + seconds
 	return totalSeconds, nil
 }
 
@@ -648,6 +628,9 @@ func (c *YouTubeCrawler) convertVideoToPost(video *youtubemodel.YouTubeVideo) mo
 	// Parse duration string to seconds
 	var videoLengthPtr *int
 	if durationStr := video.Duration; durationStr != "" {
+		if durationStr == "P0D" {
+			log.Info().Str("duration_str", durationStr).Msg("P0D found. Treating as null for now")
+		}
 		duration, err := parseISO8601Duration(durationStr)
 		if err == nil {
 			videoLengthPtr = &duration

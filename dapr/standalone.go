@@ -439,6 +439,10 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 						ytCrawler.cancel() // Vital for OOM prevention
 					}
 
+					ytCrawler.client = nil
+					ytCrawler.crawler = nil
+					ytCrawler.ctx = nil
+
 					// Replace
 					newCrawler, err := createFreshWorker(sm, crawlCfg)
 					if err == nil {
