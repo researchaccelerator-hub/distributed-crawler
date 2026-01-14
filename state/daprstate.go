@@ -558,12 +558,17 @@ func (dsm *DaprStateManager) initializeURLCache() error {
 func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
 	// Load the layer map for this crawl
 	layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+
+	log.Info().Str("layer_map_key", layerMapKey).Msg("Getting layer map REMOVE")
+
 	layerMapResponse, err := (*dsm.client).GetState(
 		context.Background(),
 		dsm.stateStoreName,
 		layerMapKey,
 		nil,
 	)
+
+	log.Info().Str("layer_map_key", layerMapKey).Msg("Layer map received REMOVE")
 
 	if err != nil || layerMapResponse.Value == nil {
 		return fmt.Errorf("failed to load layer map for crawl %s: %w", crawlID, err)
@@ -574,6 +579,8 @@ func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse layer map for crawl %s: %w", crawlID, err)
 	}
+
+	log.Info().Str("layer_map_key", layerMapKey).Msg("Parsed layer map REMOVE")
 
 	// Track how many URLs we add
 	addedCount := 0
@@ -608,6 +615,11 @@ func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
 			dsm.urlCacheMutex.Unlock()
 
 			addedCount++
+
+			if addedCount == 1 || addedCount%10 == 0 {
+				log.Info().Int("added_pages", addedCount).Str("page_id", page.ID).Msg("Page added REMOVE")
+			}
+
 		}
 	}
 
