@@ -611,7 +611,7 @@ func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
 		}
 	}
 
-	log.Debug().Str("crawlID", crawlID).Int("urlCount", addedCount).Msg("Loaded URLs for crawl")
+	log.Info().Str("crawlID", crawlID).Int("urlCount", addedCount).Msg("Loaded URLs for crawl")
 	return nil
 }
 
