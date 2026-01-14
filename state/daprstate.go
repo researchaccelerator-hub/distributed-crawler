@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -582,48 +583,26 @@ func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
 
 	log.Info().Str("layer_map_key", layerMapKey).Msg("Parsed layer map REMOVE")
 
-	// Track how many URLs we add
-	addedCount := 0
-
-	// For each layer, get all page IDs
-	for _, pageIDs := range layerMap {
-		for _, pageID := range pageIDs {
-			// Fetch the page from Dapr
-			pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
-			pageResponse, err := (*dsm.client).GetState(
-				context.Background(),
-				dsm.stateStoreName,
-				pageKey,
-				nil,
-			)
-
-			if err != nil || pageResponse.Value == nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
-				continue
-			}
-
-			var page Page
-			err = json.Unmarshal(pageResponse.Value, &page)
-			if err != nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
-				continue
-			}
-
-			// Add URL to cache
-			dsm.urlCacheMutex.Lock()
-			dsm.urlCache[page.URL] = fmt.Sprintf("%s:%s", crawlID, page.ID)
-			dsm.urlCacheMutex.Unlock()
-
-			addedCount++
-
-			if addedCount == 1 || addedCount%10 == 0 {
-				log.Info().Int("added_pages", addedCount).Str("page_id", page.ID).Msg("Page added REMOVE")
-			}
-
-		}
+	// flatten page ids into list
+	var allIDs []string
+	for _, ids := range layerMap {
+		allIDs = append(allIDs, ids...)
 	}
 
-	log.Info().Str("crawlID", crawlID).Int("urlCount", addedCount).Msg("Loaded URLs for crawl")
+	pages, err := dsm.fetchAllPages(crawlID, allIDs)
+	if err != nil {
+		return err
+	}
+
+	// 4. Update Cache in one pass
+	dsm.urlCacheMutex.Lock()
+	for _, page := range pages {
+		dsm.urlCache[page.URL] = fmt.Sprintf("%s:%s", crawlID, page.ID)
+	}
+	dsm.urlCacheMutex.Unlock()
+
+	log.Info().Str("crawlID", crawlID).Int("urlCount", len(pages)).Msg("Loaded URLs for crawl")
+
 	return nil
 }
 
@@ -2771,7 +2750,7 @@ func (dsm *DaprStateManager) loadURLsFromPreviousCrawls() (map[string]string, er
 }
 
 func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) error {
-	loadedCount := 0
+	// loadedCount := 0
 
 	// Check if we're resuming the same crawl execution
 	// We consider it the same execution if we're using the exact same executionID
@@ -2782,82 +2761,127 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) erro
 		Str("loadingCrawlID", crawlID).
 		Msg("Loading pages with execution context")
 
-	// For each layer in the layer map
-	for _, pageIDs := range dsm.layerMap {
-		// For each page ID in the layer
-		for _, pageID := range pageIDs {
-			// Check if we already have this page in memory
-			if _, exists := dsm.pageMap[pageID]; exists {
-				continue
+	var allIDs []string
+	for _, ids := range dsm.layerMap {
+		for _, id := range ids {
+			if _, exists := dsm.pageMap[id]; !exists {
+				allIDs = append(allIDs, id)
 			}
-
-			// Fetch the page from Dapr
-			pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
-			pageResponse, err := (*dsm.client).GetState(
-				context.Background(),
-				dsm.stateStoreName,
-				pageKey,
-				nil,
-			)
-
-			if err != nil || pageResponse.Value == nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
-				continue
-			}
-
-			var page Page
-			err = json.Unmarshal(pageResponse.Value, &page)
-			if err != nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
-				continue
-			}
-
-			// Add page to in-memory page map
-			if !cont {
-				if !isResumingSameCrawlExecution {
-					// When not resuming the same execution, mark ALL pages as unfetched
-					// to ensure they get reprocessed with the new execution ID
-					oldStatus := page.Status
-					page.Status = "unfetched"
-					log.Debug().
-						Str("pageID", pageID).
-						Str("url", page.URL).
-						Str("old_status", oldStatus).
-						Bool("resuming_same_execution", isResumingSameCrawlExecution).
-						Msg("New execution: Marking page as unfetched regardless of previous status")
-				} else {
-					// When resuming same execution, preserve fetched status when loading from DAPR
-					if page.Status != "fetched" {
-						page.Status = "unfetched"
-						log.Debug().
-							Str("pageID", pageID).
-							Str("url", page.URL).
-							Str("old_status", page.Status).
-							Bool("resuming_same_execution", isResumingSameCrawlExecution).
-							Msg("Resetting non-fetched page status to unfetched in same execution")
-					} else {
-						log.Debug().
-							Str("pageID", pageID).
-							Str("url", page.URL).
-							Bool("resuming_same_execution", isResumingSameCrawlExecution).
-							Msg("Preserving fetched status from Dapr storage in same execution")
-					}
-				}
-				page.Timestamp = time.Now()
-			}
-
-			// Clear any previous messages or processing data
-			page.Messages = []Message{}
-
-			// Update the timestamp to current time
-			dsm.pageMap[pageID] = page
-			loadedCount++
 		}
 	}
 
+	pages, err := dsm.fetchAllPages(crawlID, allIDs)
+	if err != nil {
+		return err
+	}
+
+	for _, page := range pages {
+		if !cont {
+			if !isResumingSameCrawlExecution {
+				page.Status = "unfetched"
+				// When not resuming the same execution, mark ALL pages as unfetched
+				// to ensure they get reprocessed with the new execution ID
+				oldStatus := page.Status
+				page.Status = "unfetched"
+				log.Debug().
+					Str("pageID", page.ID).
+					Str("url", page.URL).
+					Str("old_status", oldStatus).
+					Bool("resuming_same_execution", isResumingSameCrawlExecution).
+					Msg("New execution: Marking page as unfetched regardless of previous status")
+			} else if page.Status != "fetched" {
+				page.Status = "unfetched"
+				log.Debug().
+					Str("pageID", page.ID).
+					Str("url", page.URL).
+					Str("old_status", page.Status).
+					Bool("resuming_same_execution", isResumingSameCrawlExecution).
+					Msg("Resetting non-fetched page status to unfetched in same execution")
+			} else {
+				// // When resuming same execution, preserve fetched status when loading from DAPR
+			}
+			page.Timestamp = time.Now()
+		}
+		page.Messages = []Message{}
+		dsm.pageMap[page.ID] = page
+	}
+
+	// // For each layer in the layer map
+	// for _, pageIDs := range dsm.layerMap {
+	// 	// For each page ID in the layer
+	// 	for _, pageID := range pageIDs {
+	// 		// Check if we already have this page in memory
+	// 		if _, exists := dsm.pageMap[pageID]; exists {
+	// 			continue
+	// 		}
+
+	// 		// Fetch the page from Dapr
+	// 		pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
+	// 		pageResponse, err := (*dsm.client).GetState(
+	// 			context.Background(),
+	// 			dsm.stateStoreName,
+	// 			pageKey,
+	// 			nil,
+	// 		)
+
+	// 		if err != nil || pageResponse.Value == nil {
+	// 			log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
+	// 			continue
+	// 		}
+
+	// 		var page Page
+	// 		err = json.Unmarshal(pageResponse.Value, &page)
+	// 		if err != nil {
+	// 			log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
+	// 			continue
+	// 		}
+
+	// 		// Add page to in-memory page map
+	// 		if !cont {
+	// 			if !isResumingSameCrawlExecution {
+	// 				// When not resuming the same execution, mark ALL pages as unfetched
+	// 				// to ensure they get reprocessed with the new execution ID
+	// 				oldStatus := page.Status
+	// 				page.Status = "unfetched"
+	// 				log.Debug().
+	// 					Str("pageID", pageID).
+	// 					Str("url", page.URL).
+	// 					Str("old_status", oldStatus).
+	// 					Bool("resuming_same_execution", isResumingSameCrawlExecution).
+	// 					Msg("New execution: Marking page as unfetched regardless of previous status")
+	// 			} else {
+	// 				// When resuming same execution, preserve fetched status when loading from DAPR
+	// 				if page.Status != "fetched" {
+	// 					page.Status = "unfetched"
+	// 					log.Debug().
+	// 						Str("pageID", pageID).
+	// 						Str("url", page.URL).
+	// 						Str("old_status", page.Status).
+	// 						Bool("resuming_same_execution", isResumingSameCrawlExecution).
+	// 						Msg("Resetting non-fetched page status to unfetched in same execution")
+	// 				} else {
+	// 					log.Debug().
+	// 						Str("pageID", pageID).
+	// 						Str("url", page.URL).
+	// 						Bool("resuming_same_execution", isResumingSameCrawlExecution).
+	// 						Msg("Preserving fetched status from Dapr storage in same execution")
+	// 				}
+	// 			}
+	// 			page.Timestamp = time.Now()
+	// 		}
+
+	// 		// Clear any previous messages or processing data
+	// 		page.Messages = []Message{}
+
+	// 		// Update the timestamp to current time
+	// 		dsm.pageMap[pageID] = page
+	// 		loadedCount++
+	// 	}
+	// }
+
 	log.Info().
 		Str("crawlID", crawlID).
-		Int("pageCount", loadedCount).
+		Int("pageCount", len(pages)).
 		Bool("resuming_same_execution", isResumingSameCrawlExecution).
 		Msg("Loaded pages into memory from DAPR")
 	return nil
@@ -3394,4 +3418,80 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 		return fmt.Errorf("failed to store post via Dapr: %w", err)
 	}
 	return nil
+}
+
+func (dsm *DaprStateManager) fetchAllPages(crawlID string, pageIDs []string) ([]Page, error) {
+	const (
+		batchSize   = 100
+		maxFailures = 3 // Exit entirely if 3 batches fail
+	)
+
+	pages := make([]Page, 0, len(pageIDs))
+	var mu sync.Mutex
+	var failureCount int32
+
+	// errgroup.WithContext handles the "Stop everything else" logic automatically
+	g, ctx := errgroup.WithContext(context.Background())
+
+	for i := 0; i < len(pageIDs); i += batchSize {
+		i := i
+		end := i + batchSize
+		if end > len(pageIDs) {
+			end = len(pageIDs)
+		}
+
+		g.Go(func() error {
+			// 1. Check if another goroutine already triggered a shutdown
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			keys := make([]string, 0, end-i)
+			for j := i; j < end; j++ {
+				keys = append(keys, fmt.Sprintf("%s/page/%s", crawlID, pageIDs[j]))
+			}
+
+			// 2. Attempt the Dapr call
+			resp, err := (*dsm.client).GetBulkState(ctx, dsm.stateStoreName, keys, nil, 10)
+
+			if err != nil {
+				newFailures := atomic.AddInt32(&failureCount, 1)
+				log.Error().Err(err).Int32("failure_count", newFailures).Msg("Batch fetch failed")
+
+				// 3. If we hit the limit, return the error to trigger errgroup cancellation
+				if newFailures >= maxFailures {
+					return fmt.Errorf("halted: reached %d batch failures", maxFailures)
+				}
+				// Otherwise, just return nil to let other batches try to finish
+				// (or return err if you want to stop on the very first failure)
+				return nil
+			}
+
+			// 4. Process successful results
+			localPages := make([]Page, 0, len(resp))
+			for _, item := range resp {
+				if len(item.Value) == 0 {
+					continue
+				}
+				var p Page
+				if err := json.Unmarshal(item.Value, &p); err == nil {
+					localPages = append(localPages, p)
+				}
+			}
+
+			mu.Lock()
+			pages = append(pages, localPages...)
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	// Wait returns the first error returned by any goroutine
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return pages, nil
 }

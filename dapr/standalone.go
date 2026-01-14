@@ -877,11 +877,6 @@ func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common
 		// For now, we don't discover channels from YouTube
 		discoveredChannels = []*state.Page{}
 	}
-
-	// // Cleanup YouTube crawler resources
-	// if closeErr := ytCrawler.Close(); closeErr != nil {
-	// 	log.Warn().Err(closeErr).Msg("Error closing YouTube crawler")
-	// }
 	return discoveredChannels, nil
 }
 
@@ -942,14 +937,12 @@ type ytWorker struct {
 }
 
 func createFreshWorker(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (*ytWorker, error) {
-	// Note: You might need to modify InitializeYoutubeCrawlerComponents
-	// to return the cancel function if it creates a new context internally.
 	c, cl, cCtx, cCtxCancel, err := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	// Define a base life (e.g., 50 requests) and add ±20% jitter
+	// Define a base life and add ±20% jitter
 	base := 50
 	jitter := rand.Intn(21) - 10 // range -10 to +10
 
