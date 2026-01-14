@@ -305,12 +305,13 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 					Msg("Successfully loaded layer map for execution ID")
 
 				// Also load the URL cache
+				log.Info().Msg("Loading URLS for crawl")
 				err = dsm.loadURLsForCrawl(dsm.config.CrawlExecutionID)
 				if err != nil {
 					log.Warn().Err(err).Str("executionID", dsm.config.CrawlExecutionID).
 						Msg("Failed to load URLs for execution ID, but continuing")
 				}
-
+				log.Info().Msg("Loading Pages into memory")
 				// Load all the pages from this layer map into memory with "unfetched" status
 				err = dsm.loadPagesIntoMemory(dsm.config.CrawlExecutionID, false)
 				if err != nil {
