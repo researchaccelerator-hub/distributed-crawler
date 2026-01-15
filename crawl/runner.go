@@ -226,7 +226,8 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 		// Ensure we return the pooled connection when done
 		defer ReleaseConnectionToPool(connID)
 	}
-	log.Info().Str("connection_id", connID).Str("channel", p.URL).Msg("random-walk-connection-pool: Started connection")
+	p.ConnectionID = connID
+	log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Msg("random-walk-connection-pool: Started connection")
 	// Continue with the regular channel processing
 	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }

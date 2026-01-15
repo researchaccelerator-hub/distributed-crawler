@@ -63,7 +63,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			return
 		}
 	}()
-
+	// TODO: use DAPR api to ascertain when it's ready. maybe a read of small file from statestore
 	log.Info().Msg("Waiting 30 seconds for Dapr sidecar to initialize...")
 	time.Sleep(30 * time.Second)
 	log.Info().Msg("Dapr sidecar initialization wait complete")
@@ -303,10 +303,13 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 	originalCount := len(layer.Pages)
 
 	// create pool of youtube clients
-	ytPool := make(chan *ytWorker, maxWorkers)
-	for i := 0; i < maxWorkers; i++ {
-		w, _ := createFreshWorker(sm, crawlCfg)
-		ytPool <- w
+	var ytPool chan *ytWorker
+	if crawlCfg.Platform == "youtube" {
+		ytPool = make(chan *ytWorker, maxWorkers)
+		for i := 0; i < maxWorkers; i++ {
+			w, _ := createFreshWorker(sm, crawlCfg)
+			ytPool <- w
+		}
 	}
 
 	// Process each page in the current layer, ensuring each URL is processed only once
@@ -473,21 +476,14 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Wait for all pages to be processed
 	wg.Wait()
-	close(ytPool)
 
 	if crawlCfg.Platform == "youtube" {
+		close(ytPool)
 		for ytCrawler := range ytPool {
 			if disconnectErr := ytCrawler.client.Disconnect(ytCrawler.ctx); disconnectErr != nil {
 				log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
 			}
 		}
-		// // Disconnect YouTube client
-		// if ytClient != nil {
-		// 	log.Info().Msg("Disconnecting Youtube client")
-		// 	if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
-		// 		log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
-		// 	}
-		// }
 	}
 
 	// Log summary of unique pages processed
