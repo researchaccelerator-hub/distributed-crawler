@@ -61,6 +61,9 @@ type apiKeyTransport struct {
 	APIKey     string
 }
 
+// Look for handle-based channels (@xxxx)
+var handlePattern = regexp.MustCompile(`youtube\.com/@([a-zA-Z0-9_.-]+)`)
+
 func (t *apiKeyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Append the API key to the URL query parameters
 	q := req.URL.Query()
@@ -1844,7 +1847,6 @@ func extractChannelIDsFromText(text string) []string {
 	}
 
 	// Look for handle-based channels (@xxxx)
-	handlePattern := regexp.MustCompile(`youtube\.com/@([a-zA-Z0-9_.-]+)`)
 	handleMatches := handlePattern.FindAllStringSubmatch(text, -1)
 	for _, match := range handleMatches {
 		if len(match) > 1 {

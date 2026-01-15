@@ -56,6 +56,10 @@ type YouTubeCrawler struct {
 
 var iso8601DurationRegex = regexp.MustCompile(`^P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?$`)
 
+// Define a regex pattern to find URLs
+// This is a simplified pattern - for production, consider a more robust solution
+var urlPattern = regexp.MustCompile(`(https?://\S+)`)
+
 // NewYouTubeCrawler creates a new YouTube crawler
 func NewYouTubeCrawler() crawler.Crawler {
 	// Set default configuration
@@ -483,12 +487,9 @@ func parseISO8601Duration(duration string) (int, error) {
 
 // extractURLs extracts URLs from a string using a simple regex
 func extractURLs(text string) []string {
-	// Define a regex pattern to find URLs
-	// This is a simplified pattern - for production, consider a more robust solution
-	pattern := regexp.MustCompile(`(https?://\S+)`)
 
 	// Find all matches
-	matches := pattern.FindAllString(text, -1)
+	matches := urlPattern.FindAllString(text, -1)
 
 	// Remove trailing punctuation that may have been captured
 	for i, url := range matches {

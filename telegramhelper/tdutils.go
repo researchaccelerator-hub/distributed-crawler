@@ -16,6 +16,12 @@ import (
 	"github.com/zelenin/go-tdlib/client"
 )
 
+// Regex to identify Telegram channel links in text
+var channelLinkRegex = regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
+
+// Regex to identify names that fit username requirements
+var usernameRegex = regexp.MustCompile(`(?:@)?([a-zA-Z0-9_]{4,32})`)
+
 //// removeMultimedia removes all files and subdirectories in the specified directory.
 //// If the directory does not exist, it does nothing.
 ////
@@ -828,12 +834,6 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 func extractChannelLinksFromMessage(message *client.Message) []string {
 	// Hold unique channel names
 	channelNamesMap := make(map[string]bool)
-
-	// Regex to identify Telegram channel links in text
-	channelLinkRegex := regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
-
-	// Regex to identify names that fit username requirements
-	usernameRegex := regexp.MustCompile(`(?:@)?([a-zA-Z0-9_]{4,32})`)
 
 	// Check if it's a text message
 	var messageText *client.MessageText
