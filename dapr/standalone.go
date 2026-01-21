@@ -437,7 +437,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				discoveredChannels, err = crawl.RunForChannelWithPool(ctx, &page, crawlCfg.StorageRoot, sm, crawlCfg)
 			}
 
-			log.Info().Msgf("Page processed for %s", page.URL)
+			log.Info().Str("page_url", page.URL).Str("connection_id", page.ConnectionID).Msg("Page processed")
 
 			if err != nil {
 				log.Error().Stack().Err(err).Msgf("Error processing item %s", page.URL)

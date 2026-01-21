@@ -335,6 +335,12 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 	// offset=0 means no offset from the chosen message
 	// limit=1 means get only one message
 	// Use 0 for the fromMessageID parameter to get the most recent message
+
+	// TODO: Replace with client level rate limiting
+	sleepMS := 1600 + rand.IntN(900)
+	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
+	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+
 	messages, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 		ChatId:        chatID,
 		FromMessageId: 0, // 0 means get from the latest message
@@ -445,12 +451,14 @@ type MessageCountGetter func(client crawler.TDLibClient, messages []*client.Mess
 //
 // Parameters:
 //   - client: TDLib client connection
-//   - channelUsername: Username of the channel to check
+//   - channelId: ChatID of the channel to to check
 //
 // Returns:
 //   - Number of channel members/subscribers
 //   - Error if member count retrieval fails
-type MemberCountGetter func(client crawler.TDLibClient, channelUsername string) (int, error)
+//
+
+type MemberCountGetter func(client crawler.TDLibClient, channelId int64) (int, error)
 
 // getChannelInfo retrieves comprehensive information about a Telegram channel.
 // This is a convenience wrapper around getChannelInfoWithDeps that supplies
@@ -512,6 +520,11 @@ func getChannelInfoWithDeps(
 	getMemberCountFn MemberCountGetter,
 	cfg common.CrawlerConfig,
 ) (*channelInfo, []*client.Message, error) {
+
+	// TODO: Replace with client level rate limiting
+	sleepMS := 9600 + rand.IntN(900)
+	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
+	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 	// Search for the channel
 	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 		Username: page.URL,
@@ -520,7 +533,7 @@ func getChannelInfoWithDeps(
 		log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
 		return nil, nil, err
 	}
-
+	// should be cached. not sleeping
 	chatDetails, err := tdlibClient.GetChat(&client.GetChatRequest{
 		ChatId: chat.Id,
 	})
@@ -561,7 +574,8 @@ func getChannelInfoWithDeps(
 
 	memberCount := 0
 	if getMemberCountFn != nil {
-		memberCountVal, err := getMemberCountFn(tdlibClient, page.URL)
+		// memberCountVal, err := getMemberCountFn(tdlibClient, page.URL)
+		memberCountVal, err := getMemberCountFn(tdlibClient, chat.Id)
 		if err != nil {
 			log.Warn().Err(err).Msgf("Failed to get member count for channel: %v", page.URL)
 		} else {
@@ -1145,6 +1159,12 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 			// Return empty outlinks to continue processing other messages
 		}
 	}()
+
+	// TODO: Replace with client level rate limiting
+	sleepMS := 600 + rand.IntN(900)
+	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessageLink").Msg("Telegram API Call Sleep")
+	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+
 	// Get message link - handle this error specifically
 	var messageLink *client.MessageLink
 	messageLink, err = tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
