@@ -341,6 +341,7 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
 	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
+	getChatHistoryStart := time.Now()
 	messages, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 		ChatId:        chatID,
 		FromMessageId: 0, // 0 means get from the latest message
@@ -348,6 +349,7 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 		Limit:         1, // Only need 1 message (the latest one)
 		OnlyLocal:     false,
 	})
+	telegramhelper.DetectCacheOrServer(getChatHistoryStart, "GetChatHistory")
 
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get chat history: %v", err)
@@ -525,18 +527,23 @@ func getChannelInfoWithDeps(
 	sleepMS := 9600 + rand.IntN(900)
 	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
 	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+
+	searchPublicChatStart := time.Now()
 	// Search for the channel
 	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 		Username: page.URL,
 	})
+	telegramhelper.DetectCacheOrServer(searchPublicChatStart, "SearchPublicChat")
 	if err != nil {
 		log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
 		return nil, nil, err
 	}
 	// should be cached. not sleeping
+	getChatStart := time.Now()
 	chatDetails, err := tdlibClient.GetChat(&client.GetChatRequest{
 		ChatId: chat.Id,
 	})
+	telegramhelper.DetectCacheOrServer(getChatStart, "GetChat")
 	if err != nil {
 		log.Error().Err(err).Stack().Msgf("Failed to get chat details for: %v", page.URL)
 		return nil, nil, err
@@ -1166,11 +1173,14 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
 	// Get message link - handle this error specifically
+
 	var messageLink *client.MessageLink
+	getMessageLinkStart := time.Now()
 	messageLink, err = tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
 		ChatId:    chatId,
 		MessageId: messageId,
 	})
+	telegramhelper.DetectCacheOrServer(getMessageLinkStart, "GetMessageLink")
 	if err != nil {
 		log.Warn().Err(err).Msgf("Failed to get link for message %d", messageId)
 		// Instead of continuing, return an empty slice and the error

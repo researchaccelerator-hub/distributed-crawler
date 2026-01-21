@@ -46,11 +46,15 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
 		log.Debug().Msgf("Fetching message batch for channel %s starting from ID %d at depth: %v", page.URL, fromMessageId, page.Depth)
+
+		getChatHistoryStart := time.Now()
 		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 			ChatId:        chatID,
 			FromMessageId: fromMessageId,
 			Limit:         100, // Fetch up to 100 messages at a time
 		})
+		DetectCacheOrServer(getChatHistoryStart, "GetChatHistory")
+
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", page.URL)
 			return nil, err
@@ -158,10 +162,11 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelId int64) (in
 	// chatDetails, err := tdlibClient.GetChat(&client.GetChatRequest{
 	// 	ChatId: chat.Id,
 	// })
-
+	getChatStart := time.Now()
 	chat, err := tdlibClient.GetChat(&client.GetChatRequest{
 		ChatId: channelId,
 	})
+	DetectCacheOrServer(getChatStart, "GetChat")
 
 	if err != nil {
 		return 0, fmt.Errorf("failed to resolve channel username: %w", err)
@@ -182,9 +187,11 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelId int64) (in
 		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetSuperGroupFullInfo").Msg("Telegram API Call Sleep")
 		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 		// Get supergroup full info
+		getSuperGroupFullInfoStart := time.Now()
 		fullInfo, err := tdlibClient.GetSupergroupFullInfo(&client.GetSupergroupFullInfoRequest{
 			SupergroupId: supergroupId,
 		})
+		DetectCacheOrServer(getSuperGroupFullInfoStart, "GetSupergroupFullInfo")
 		if err != nil {
 			return 0, fmt.Errorf("failed to get supergroup info: %w", err)
 		}
@@ -197,9 +204,11 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelId int64) (in
 		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetBasicGroupFullInfo").Msg("Telegram API Call Sleep")
 		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 		// Get basic group full info
+		getBasicGroupFullInfoStart := time.Now()
 		fullInfo, err := tdlibClient.GetBasicGroupFullInfo(&client.GetBasicGroupFullInfoRequest{
 			BasicGroupId: basicGroupId,
 		})
+		DetectCacheOrServer(getBasicGroupFullInfoStart, "GetBasicGroupFullInfo")
 		if err != nil {
 			return 0, fmt.Errorf("failed to get basic group info: %w", err)
 		}
@@ -255,10 +264,12 @@ func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int
 
 	// Fetch the message details
 	log.Debug().Msgf("Getting message share count for channel %s", channelname)
+	getMessageStart := time.Now()
 	message, err := tdlibClient.GetMessage(&client.GetMessageRequest{
 		ChatId:    chatID,
 		MessageId: messageID,
 	})
+	DetectCacheOrServer(getMessageStart, "GetMessage")
 	if err != nil {
 		return 0, err
 	}
@@ -853,4 +864,20 @@ func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 	}
 
 	return username
+}
+
+func DetectCacheOrServer(start time.Time, endpoint string) {
+	duration := time.Since(start)
+
+	var source string
+
+	if duration < 15*time.Millisecond {
+		source = "LOCAL_CACHE"
+	} else if duration < 35*time.Millisecond {
+		source = "GREY_AREA"
+	} else {
+		source = "TELEGRAM_SERVER"
+	}
+
+	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
 }
