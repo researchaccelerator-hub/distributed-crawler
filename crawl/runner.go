@@ -1179,7 +1179,14 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 		ChatId:    chatId,
 		MessageId: messageId,
 	})
-	telegramhelper.DetectCacheOrServer(getMessageLinkStart, "GetMessageLink")
+	cacheHit := telegramhelper.DetectCacheOrServer(getMessageLinkStart, "GetMessageLink")
+
+	if !cacheHit {
+		sleepMS := 600 + rand.IntN(900)
+		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessageLink").Msg("Retroactive Telegram API Call Sleep")
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	}
+
 	if err != nil {
 		log.Warn().Err(err).Msgf("Failed to get link for message %d", messageId)
 		// Instead of continuing, return an empty slice and the error

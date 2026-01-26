@@ -370,8 +370,13 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 		err = c.sm.UploadCombinedFile(outputName)
 
 		if err != nil {
-			log.Error().Err(err).Str("log_tag", "chunk_cb").Msg("Failed to upload combined file")
-			continue
+			log.Error().Err(err).Str("log_tag", "chunk_cb").Msg("Failed to upload combined file. Sleeping for 30 seconds and retrying")
+			time.Sleep(30 * time.Second)
+			err = c.sm.UploadCombinedFile(outputName)
+			if err != nil {
+				log.Error().Err(err).Str("log_tag", "chunk_cb").Msg("Retry failed to upload combined file")
+				continue
+			}
 		}
 
 		log.Info().Str("combined_file", outputName).Int64("total_uploaded_size_bytes", c.totalUploadSize).Int32("total_posts_uploaded", c.postsUploaded).

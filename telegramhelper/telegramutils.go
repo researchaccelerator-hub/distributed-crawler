@@ -270,7 +270,14 @@ func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int
 		ChatId:    chatID,
 		MessageId: messageID,
 	})
-	DetectCacheOrServer(getMessageStart, "GetMessage")
+	cacheHit := DetectCacheOrServer(getMessageStart, "GetMessage")
+
+	if !cacheHit {
+		sleepMS := 600 + rand.Intn(900)
+		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessage").Msg("Retroactive Telegram API Call Sleep")
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	}
+
 	if err != nil {
 		return 0, err
 	}
@@ -867,18 +874,23 @@ func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 	return username
 }
 
-func DetectCacheOrServer(start time.Time, endpoint string) {
+func DetectCacheOrServer(start time.Time, endpoint string) bool {
 	duration := time.Since(start)
 
 	var source string
+	var cacheHit bool
 
 	if duration < 15*time.Millisecond {
 		source = "LOCAL_CACHE"
+		cacheHit = true
 	} else if duration < 35*time.Millisecond {
 		source = "GREY_AREA"
+		cacheHit = false
 	} else {
 		source = "TELEGRAM_SERVER"
+		cacheHit = false
 	}
 
 	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	return cacheHit
 }
