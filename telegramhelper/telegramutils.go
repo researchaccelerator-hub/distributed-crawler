@@ -184,9 +184,10 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelId int64) (in
 		// For channels and supergroups
 		supergroupId := v.SupergroupId
 
-		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetSuperGroupFullInfo").Msg("Telegram API Call Sleep")
-		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
-		// Get supergroup full info
+		// log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetSuperGroupFullInfo").Msg("Telegram API Call Sleep")
+		// time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+
+		// Get supergroup full info CACHED_CALL
 		getSuperGroupFullInfoStart := time.Now()
 		fullInfo, err := tdlibClient.GetSupergroupFullInfo(&client.GetSupergroupFullInfoRequest{
 			SupergroupId: supergroupId,
@@ -258,11 +259,11 @@ func GetViewCount(message *client.Message, channelname string) int {
 func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) (int, error) {
 
 	// TODO: Replace with client level rate limiting
-	sleepMS := 600 + rand.Intn(900)
-	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessage").Msg("Telegram API Call Sleep")
-	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	// sleepMS := 600 + rand.Intn(900)
+	// log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessage").Msg("Telegram API Call Sleep")
+	// time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
-	// Fetch the message details
+	// Fetch the message details CACHED_CALL
 	log.Debug().Msgf("Getting message share count for channel %s", channelname)
 	getMessageStart := time.Now()
 	message, err := tdlibClient.GetMessage(&client.GetMessageRequest{

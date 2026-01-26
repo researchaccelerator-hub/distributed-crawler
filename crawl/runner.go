@@ -1167,13 +1167,12 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 		}
 	}()
 
-	// TODO: Replace with client level rate limiting
-	sleepMS := 600 + rand.IntN(900)
-	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessageLink").Msg("Telegram API Call Sleep")
-	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	// // TODO: Replace with client level rate limiting
+	// sleepMS := 600 + rand.IntN(900)
+	// log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessageLink").Msg("Telegram API Call Sleep")
+	// time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
-	// Get message link - handle this error specifically
-
+	// Get message link - handle this error specifically CACHED_CALL
 	var messageLink *client.MessageLink
 	getMessageLinkStart := time.Now()
 	messageLink, err = tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
