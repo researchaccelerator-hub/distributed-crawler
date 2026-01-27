@@ -49,8 +49,9 @@ type Page struct {
 	Platform  string    `json:"platform,omitempty"` // Added for multi-platform support
 
 	// Relationships
-	ParentID string    `json:"parentId,omitempty"`
-	Messages []Message `json:"messages,omitempty"`
+	ParentID     string    `json:"parentId,omitempty"`
+	Messages     []Message `json:"messages,omitempty"`
+	ConnectionID string    `json:"LastConnectionID,omitempty"` // Connection ID of last Telegram çonnection to crawl page
 }
 
 // Message represents a message associated with a page

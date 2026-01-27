@@ -374,7 +374,7 @@ func NewYouTubeClient(config map[string]interface{}) (*YouTubeClient, error) {
 
 // Connect implements Client
 func (y *YouTubeClient) Connect(ctx context.Context) error {
-	log.Info().Msg("Connecting to YouTube API")
+	log.Debug().Msg("Connecting to YouTube API")
 	// Initialize YouTube API client if needed
 	// This would typically validate the API key
 	return nil

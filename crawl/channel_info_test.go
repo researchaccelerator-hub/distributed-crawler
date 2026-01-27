@@ -3,12 +3,13 @@ package crawl
 
 import (
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
-	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -59,7 +60,7 @@ func TestGetChannelInfo(t *testing.T) {
 			getMessageCountFn: func(client crawler.TDLibClient, messages []*client.Message, chatID int64, channelUsername string) (int, error) {
 				return 0, nil
 			},
-			getMemberCountFn: func(client crawler.TDLibClient, channelUsername string) (int, error) {
+			getMemberCountFn: func(client crawler.TDLibClient, channelId int64) (int, error) {
 				return 0, nil
 			},
 			expectedError:    true,
@@ -138,7 +139,7 @@ func TestGetChannelInfo(t *testing.T) {
 					{Id: 2, ChatId: chatID},
 					{Id: 3, ChatId: chatID},
 				}
-				
+
 				// We need to mock the message fetching calls
 				// This is a simplification since the actual function might make multiple calls
 				m.On("GetChatHistory", mock.Anything).Return(&client.Messages{
@@ -152,7 +153,7 @@ func TestGetChannelInfo(t *testing.T) {
 			getMessageCountFn: func(client crawler.TDLibClient, messages []*client.Message, chatID int64, channelUsername string) (int, error) {
 				return 100, nil
 			},
-			getMemberCountFn: func(client crawler.TDLibClient, channelUsername string) (int, error) {
+			getMemberCountFn: func(client crawler.TDLibClient, channelId int64) (int, error) {
 				return 1000, nil
 			},
 			expectedError: false,

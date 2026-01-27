@@ -163,8 +163,10 @@ type Config struct {
 
 	// Boolean for whether or not to combine crawl data before upload
 	CombineFiles bool
-	// Directory to write crawl data to for combining
+	// Directory to move crawl data to for combining
 	CombineWatchDir string
+	// Directory to write crawl data to (reduces number of file events)
+	CombineTempDir string
 }
 
 // AzureConfig contains Azure Blob Storage-specific configuration options

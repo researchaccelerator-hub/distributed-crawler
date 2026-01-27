@@ -2,8 +2,11 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"math/rand"
+	"net"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -11,7 +14,10 @@ import (
 
 	youtubemodel "github.com/researchaccelerator-hub/telegram-scraper/model/youtube"
 	"github.com/rs/zerolog/log"
-	"google.golang.org/api/option"
+	"golang.org/x/net/http2"
+	"google.golang.org/api/option" // Use the transport helper
+
+	// Use the transport helper
 	ytapi "google.golang.org/api/youtube/v3"
 )
 
@@ -49,6 +55,24 @@ type RandomPrefix struct {
 	TotalResultCount int64
 }
 
+// apiKeyTransport is a custom RoundTripper that appends the API Key
+type apiKeyTransport struct {
+	Underlying http.RoundTripper
+	APIKey     string
+}
+
+// Look for handle-based channels (@xxxx)
+var handlePattern = regexp.MustCompile(`youtube\.com/@([a-zA-Z0-9_.-]+)`)
+
+func (t *apiKeyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Append the API key to the URL query parameters
+	q := req.URL.Query()
+	q.Set("key", t.APIKey)
+	req.URL.RawQuery = q.Encode()
+
+	return t.Underlying.RoundTrip(req)
+}
+
 // NewYouTubeDataClient creates a new YouTube data client
 func NewYouTubeDataClient(apiKey string) (*YouTubeDataClient, error) {
 	if apiKey == "" {
@@ -78,12 +102,70 @@ func NewYouTubeDataClient(apiKey string) (*YouTubeDataClient, error) {
 
 // Connect establishes a connection to the YouTube API
 func (c *YouTubeDataClient) Connect(ctx context.Context) error {
-	log.Info().Msg("Connecting to YouTube API")
+	log.Debug().Msg("Connecting to YouTube API")
 
 	//// Create a new HTTP client with default timeout
 	//httpClient := &http.Client{
 	//	Timeout: 30 * time.Second,
 	//}
+
+	// TODO: Expose options as config variables
+	// 1. Create a custom transport to fix connection churn
+	customTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			ServerName: "youtube.googleapis.com", // Forces SNI on every handshake
+		},
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+
+		// CRITICAL: Increase this from the default of 2 to handle concurrency
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 5,
+
+		// ALIGNMENT: Keep this higher than Istio's idleTimeout (e.g., Istio 80s)
+		IdleConnTimeout: 90 * time.Second,
+
+		TLSHandshakeTimeout:   20 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true, // Recommended for Google APIs
+	}
+
+	// httpClient, _, err := htransport.NewClient(ctx,
+	// 	option.WithHTTPClient(&http.Client{
+	// 		Transport: customTransport,
+	// 		Timeout:   60 * time.Second,
+	// 	}),
+	// 	option.WithAPIKey(c.apiKey),
+	// )
+
+	// // 2. Create the client using the custom transport
+	// httpClient := &http.Client{
+	// 	Transport: customTransport,
+	// 	Timeout:   60 * time.Second, // Total request timeout
+	// }
+
+	h2, err := http2.ConfigureTransports(customTransport)
+	if err == nil {
+		// This tells the Go client to check if the connection is still
+		// alive if it has been idle for this long.
+		// This prevents the "connection reset" when Istio closes at 80s.
+		h2.ReadIdleTimeout = 30 * time.Second
+		h2.PingTimeout = 5 * time.Second
+		h2.StrictMaxConcurrentStreams = false
+	}
+
+	// Wrap custom transport with the API Key logic
+	authenticatedTransport := &apiKeyTransport{
+		Underlying: customTransport,
+		APIKey:     c.apiKey,
+	}
+
+	httpClient := &http.Client{
+		Transport: authenticatedTransport,
+		Timeout:   60 * time.Second,
+	}
 
 	// Create YouTube service
 	log.Debug().Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Creating YouTube service with API key")
@@ -91,14 +173,14 @@ func (c *YouTubeDataClient) Connect(ctx context.Context) error {
 		log.Error().Msg("YouTube API key is empty! This will cause authentication errors")
 	}
 
-	service, err := ytapi.NewService(ctx, option.WithAPIKey(c.apiKey))
+	service, err := ytapi.NewService(ctx, option.WithHTTPClient(httpClient))
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to create YouTube service")
 		return fmt.Errorf("failed to create YouTube service: %w", err)
 	}
 
 	c.service = service
-	log.Info().Msg("Connected to YouTube API successfully")
+	log.Debug().Msg("Connected to YouTube API successfully")
 	return nil
 }
 
@@ -129,7 +211,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 		return cachedChannel, nil
 	}
 
-	log.Info().Str("channel_id", channelID).Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Fetching YouTube channel info")
+	log.Debug().Str("channel_id", channelID).Str("api_key_length", fmt.Sprintf("%d chars", len(c.apiKey))).Msg("Fetching YouTube channel info")
 
 	// Check if API key is present
 	if c.apiKey == "" {
@@ -153,7 +235,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 
 	response, err := call.MaxResults(1).Context(ctx).Do()
 	if err != nil {
-		log.Error().Err(err).Str("channel_id", channelID).Msg("Failed to get channel from YouTube API")
+		log.Error().Err(err).Str("channel_id", channelID).Str("log_tag", "FOCUS").Msg("Failed to get channel from YouTube API")
 		return nil, fmt.Errorf("failed to get channel from YouTube API: %w", err)
 	}
 
@@ -221,7 +303,7 @@ func (c *YouTubeDataClient) GetChannelInfo(ctx context.Context, channelID string
 	}
 	c.cacheMutex.Unlock()
 
-	log.Info().
+	log.Debug().
 		Str("channel_id", channel.ID).
 		Str("title", channel.Title).
 		Int64("subscribers", channel.SubscriberCount).
@@ -400,7 +482,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 
 		playlistResponse, err := playlistCall.Do()
 		if err != nil {
-			log.Error().Err(err).Str("playlist_id", uploadsPlaylistID).Msg("Failed to get videos from playlist")
+			log.Error().Err(err).Str("playlist_id", uploadsPlaylistID).Str("log_tag", "FOCUS").Msg("Failed to get videos from playlist")
 			return nil, fmt.Errorf("failed to get videos from playlist: %w", err)
 		}
 
@@ -535,7 +617,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 			itemsAccepted++
 		}
 
-		log.Info().
+		log.Debug().
 			Int("total_items", len(playlistResponse.Items)).
 			Int("items_accepted", itemsAccepted).
 			Int("items_skipped_before_from_time", itemsSkippedBeforeFromTime).
@@ -596,7 +678,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 
 				videosResponse, err := videosCall.Do()
 				if err != nil {
-					log.Error().Err(err).Strs("video_ids", uncachedVideoIDs).Msg("Failed to get video statistics for uncached batch")
+					log.Error().Err(err).Strs("video_ids", uncachedVideoIDs).Str("log_tag", "FOCUS").Msg("Failed to get video statistics for uncached batch")
 					// Continue with basic information only
 
 					// Even without statistics, add the videos to the results to avoid losing them
@@ -677,7 +759,7 @@ func (c *YouTubeDataClient) GetVideosFromChannel(ctx context.Context, channelID 
 						}
 					}
 
-					log.Info().
+					log.Debug().
 						Int("total_videos_processed", len(batchVideoMap)).
 						Int("stats_found", statsFound).
 						Int("stats_missing", len(batchVideoMap)-statsFound).
@@ -1765,7 +1847,6 @@ func extractChannelIDsFromText(text string) []string {
 	}
 
 	// Look for handle-based channels (@xxxx)
-	handlePattern := regexp.MustCompile(`youtube\.com/@([a-zA-Z0-9_.-]+)`)
 	handleMatches := handlePattern.FindAllStringSubmatch(text, -1)
 	for _, match := range handleMatches {
 		if len(match) > 1 {
