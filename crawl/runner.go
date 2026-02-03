@@ -338,7 +338,7 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 
 	// TODO: Replace with client level rate limiting
 	sleepMS := 1600 + rand.IntN(900)
-	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
+	log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
 	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
 	getChatHistoryStart := time.Now()
@@ -525,7 +525,7 @@ func getChannelInfoWithDeps(
 
 	// TODO: Replace with client level rate limiting
 	sleepMS := 9600 + rand.IntN(900)
-	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
+	log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
 	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
 	searchPublicChatStart := time.Now()
@@ -1166,11 +1166,6 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 			// Return empty outlinks to continue processing other messages
 		}
 	}()
-
-	// // TODO: Replace with client level rate limiting
-	// sleepMS := 600 + rand.IntN(900)
-	// log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessageLink").Msg("Telegram API Call Sleep")
-	// time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
 	// Get message link - handle this error specifically CACHED_CALL
 	var messageLink *client.MessageLink

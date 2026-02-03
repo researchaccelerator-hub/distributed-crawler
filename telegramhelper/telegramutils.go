@@ -42,7 +42,7 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 
 		// TODO: Replace with client level rate limiting
 		sleepMS := 1600 + rand.Intn(900)
-		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
+		log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
 		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
 		log.Debug().Msgf("Fetching message batch for channel %s starting from ID %d at depth: %v", page.URL, fromMessageId, page.Depth)
@@ -184,9 +184,6 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelId int64) (in
 		// For channels and supergroups
 		supergroupId := v.SupergroupId
 
-		// log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetSuperGroupFullInfo").Msg("Telegram API Call Sleep")
-		// time.Sleep(time.Duration(sleepMS) * time.Millisecond)
-
 		// Get supergroup full info CACHED_CALL
 		getSuperGroupFullInfoStart := time.Now()
 		fullInfo, err := tdlibClient.GetSupergroupFullInfo(&client.GetSupergroupFullInfoRequest{
@@ -257,11 +254,6 @@ func GetViewCount(message *client.Message, channelname string) int {
 // If the message's InteractionInfo is available, it returns the ForwardCount as the share count.
 // If InteractionInfo is nil or an error occurs, it returns 0 and an error, respectively.
 func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) (int, error) {
-
-	// TODO: Replace with client level rate limiting
-	// sleepMS := 600 + rand.Intn(900)
-	// log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessage").Msg("Telegram API Call Sleep")
-	// time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 
 	// Fetch the message details CACHED_CALL
 	log.Debug().Msgf("Getting message share count for channel %s", channelname)
@@ -891,6 +883,11 @@ func DetectCacheOrServer(start time.Time, endpoint string) bool {
 		cacheHit = false
 	}
 
-	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	if cacheHit {
+		log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	} else {
+		log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	}
+
 	return cacheHit
 }
