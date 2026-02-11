@@ -190,26 +190,6 @@ func (c *Chunker) watchFilesWithInternalBuffer(out chan<- fsnotify.Event) {
 func (c *Chunker) processEvents(internalBuffer <-chan fsnotify.Event) {
 	defer c.wg.Done()
 	defer close(c.fileChan) // signal processBatches to finish
-	// for event := range internalBuffer {
-	// 	// Only process writes/creates of jsonl files
-	// 	if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Create)) && strings.HasSuffix(event.Name, ".jsonl") {
-
-	// 		if c.isSeen(event.Name) {
-	// 			continue
-	// 		}
-	// 		c.markSeen(event.Name)
-
-	// 		info, err := os.Stat(event.Name)
-	// 		if err != nil {
-	// 			continue
-	// 		}
-
-	// 		c.fileChan <- FileEntry{
-	// 			Path: event.Name,
-	// 			Size: info.Size(),
-	// 		}
-	// 	}
-	// }
 
 	for event := range internalBuffer {
 		if (event.Has(fsnotify.Rename) || event.Has(fsnotify.Create)) && strings.HasSuffix(event.Name, ".jsonl") {

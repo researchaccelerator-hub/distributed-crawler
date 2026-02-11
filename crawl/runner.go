@@ -527,31 +527,7 @@ func getChannelInfoWithDeps(
 ) (*channelInfo, []*client.Message, error) {
 
 	// TODO: REMOVE THIS AFTER DONE TESTING SPLIT CRAWLER
-	httpClient := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	req, err := http.NewRequest("GET", "https://ifconfig.me/ip", nil)
-	if err != nil {
-		fmt.Printf("Error creating IP request: %v\n", err)
-	}
-
-	req.Header.Set("User-Agent", "curl/7.79.1")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		fmt.Printf("Error making IP request: %v\n", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading IP body: %v\n", err)
-	}
-
-	ipAddress := strings.TrimSpace(string(body))
-
-	log.Info().Str("ip_address", ipAddress).Msg("Current IP Address")
+	testIP()
 
 	// TODO: Replace with client level rate limiting
 	sleepMS := 9600 + rand.IntN(900)
@@ -1246,4 +1222,35 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 	}
 
 	return []string{}, fmt.Errorf("could not process message %d: no message link available", messageId)
+}
+
+func testIP() {
+	httpClient := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", "https://ifconfig.me/ip", nil)
+	if err != nil {
+		fmt.Printf("Error creating IP request: %v\n", err)
+		return
+	}
+
+	req.Header.Set("User-Agent", "curl/7.79.1")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("Error making IP request: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Printf("Error reading IP body: %v\n", err)
+		return
+	}
+
+	ipAddress := strings.TrimSpace(string(body))
+
+	log.Info().Str("ip_address", ipAddress).Msg("Current IP Address")
 }
