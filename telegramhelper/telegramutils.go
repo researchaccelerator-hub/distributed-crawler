@@ -883,11 +883,13 @@ func DetectCacheOrServer(start time.Time, endpoint string) bool {
 		cacheHit = false
 	}
 
-	if cacheHit {
-		log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
-	} else {
-		log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
-	}
+	// if cacheHit {
+	// 	log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	// } else {
+	// 	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	// }
+
+	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
 
 	return cacheHit
 }
