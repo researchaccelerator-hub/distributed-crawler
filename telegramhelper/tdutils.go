@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"time"
+	"strconv"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
@@ -910,20 +911,34 @@ func BuildTelegramLink(chat *client.Chat, msg *client.Message) string {
 	// Math: InternalID >> 20 (or divide by 1048576)
 	publicMsgId := msg.Id / 1048576
 
+	// In go-tdlib, the username is often tucked inside the ChatType
+    // depending on the version, or accessible via the chat object's logic.
+    // We check the specific ChatTypeSupergroup which carries the username.
+    var username string
+    if chat.Type != nil {
+        if t, ok := chat.Type.(*client.ChatTypeSupergroup); ok {
+            // Some versions use t.Username, others use an array of usernames.
+            // We'll try the most common field name for go-tdlib:
+            username = t.Username 
+        }
+    }
+
 	// Handle Public Channels (@username)
-	if chat.Username != "" {
-		link := fmt.Sprintf("https://t.me/%s/%d", chat.Username, publicMsgId)
-		if msg.MediaGroupId != 0 {
-			link += "?single"
-		}
-		return link
-	}
+	if username != "" {
+        link := fmt.Sprintf("https://t.me/%s/%d", username, publicMsgId)
+        // Note: Field is MediaAlbumId in most go-tdlib versions
+        if msg.MediaAlbumId != 0 {
+            link += "?single"
+        }
+        return link
+    }
 
 	// Handle Private Channels/Supergroups
 	// Private links use the format: t.me/c/ID_WITHOUT_PREFIX/MSG_ID
 	// TDLib IDs for supergroups start with -100. We need to strip that.
 	chatIdStr := strconv.FormatInt(chat.Id, 10)
 	strippedId := chatIdStr
+
 
 	if strings.HasPrefix(chatIdStr, "-100") {
 		strippedId = chatIdStr[4:]
@@ -935,7 +950,7 @@ func BuildTelegramLink(chat *client.Chat, msg *client.Message) string {
 	link := fmt.Sprintf("https://t.me/c/%s/%d", strippedId, publicMsgId)
 	
 	// Albums in private chats still use the ?single flag
-	if msg.MediaGroupId != 0 {
+	if msg.MediaAlbumId != 0 {
 		link += "?single"
 	}
 
