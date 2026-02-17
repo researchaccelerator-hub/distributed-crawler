@@ -1173,55 +1173,75 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 		}
 	}()
 
-	// Get message link - handle this error specifically CACHED_CALL
-	var messageLink *client.MessageLink
-	getMessageLinkStart := time.Now()
-	messageLink, err = tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
-		ChatId:    chatId,
-		MessageId: messageId,
-	})
-	cacheHit := telegramhelper.DetectCacheOrServer(getMessageLinkStart, "GetMessageLink")
+	// // Get message link - handle this error specifically CACHED_CALL
+	// var messageLink *client.MessageLink
+	// getMessageLinkStart := time.Now()
+	// messageLink, err = tdlibClient.GetMessageLink(&client.GetMessageLinkRequest{
+	// 	ChatId:    chatId,
+	// 	MessageId: messageId,
+	// })
+	// cacheHit := telegramhelper.DetectCacheOrServer(getMessageLinkStart, "GetMessageLink")
 
-	if !cacheHit {
-		sleepMS := 600 + rand.IntN(900)
-		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessageLink").Msg("Retroactive Telegram API Call Sleep")
-		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	// if !cacheHit {
+	// 	sleepMS := 600 + rand.IntN(900)
+	// 	log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessageLink").Msg("Retroactive Telegram API Call Sleep")
+	// 	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	// }
+
+	// if err != nil {
+	// 	log.Warn().Err(err).Msgf("Failed to get link for message %d", messageId)
+	// 	// Instead of continuing, return an empty slice and the error
+	// 	// This allows the caller to update the message status and continue
+	// 	return []string{}, fmt.Errorf("failed to get message link: %w", err)
+	// }
+
+	// // Parse and store the message
+	// if messageLink != nil {
+	// 	// Parse and store the message
+	// 	post, parseErr := telegramhelper.ParseMessage(
+	// 		crawlID,
+	// 		message,
+	// 		messageLink,
+	// 		info.chatDetails,
+	// 		info.supergroup,
+	// 		info.supergroupInfo,
+	// 		int(info.messageCount),
+	// 		int(info.totalViews),
+	// 		channelUsername,
+	// 		tdlibClient,
+	// 		sm,
+	// 		cfg,
+	// 	)
+
+	// 	if parseErr != nil {
+	// 		log.Error().Stack().Err(parseErr).Msgf("Failed to parse message %d", messageId)
+	// 		return []string{}, parseErr
+	// 	}
+
+	// 	return post.Outlinks, nil
+	// }
+
+	// return []string{}, fmt.Errorf("could not process message %d: no message link available", messageId)
+	post, parseErr := telegramhelper.ParseMessage(
+		crawlID,
+		message,
+		info.chatDetails,
+		info.supergroup,
+		info.supergroupInfo,
+		int(info.messageCount),
+		int(info.totalViews),
+		channelUsername,
+		tdlibClient,
+		sm,
+		cfg,
+	)
+
+	if parseErr != nil {
+		log.Error().Stack().Err(parseErr).Msgf("Failed to parse message %d", messageId)
+		return []string{}, parseErr
 	}
 
-	if err != nil {
-		log.Warn().Err(err).Msgf("Failed to get link for message %d", messageId)
-		// Instead of continuing, return an empty slice and the error
-		// This allows the caller to update the message status and continue
-		return []string{}, fmt.Errorf("failed to get message link: %w", err)
-	}
-
-	// Parse and store the message
-	if messageLink != nil {
-		// Parse and store the message
-		post, parseErr := telegramhelper.ParseMessage(
-			crawlID,
-			message,
-			messageLink,
-			info.chatDetails,
-			info.supergroup,
-			info.supergroupInfo,
-			int(info.messageCount),
-			int(info.totalViews),
-			channelUsername,
-			tdlibClient,
-			sm,
-			cfg,
-		)
-
-		if parseErr != nil {
-			log.Error().Stack().Err(parseErr).Msgf("Failed to parse message %d", messageId)
-			return []string{}, parseErr
-		}
-
-		return post.Outlinks, nil
-	}
-
-	return []string{}, fmt.Errorf("could not process message %d: no message link available", messageId)
+	return post.Outlinks, nil
 }
 
 func testIP() {

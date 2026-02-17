@@ -306,7 +306,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 var ParseMessage = func(
 	crawlid string,
 	message *client.Message,
-	mlr *client.MessageLink,
+	// mlr *client.MessageLink, // REMOVED: No longer needed
 	chat *client.Chat,
 	supergroup *client.Supergroup,
 	supergroupInfo *client.SupergroupFullInfo,
@@ -334,29 +334,21 @@ var ParseMessage = func(
 	if message == nil {
 		return model.Post{}, fmt.Errorf("message is nil")
 	}
-	if mlr == nil {
-		return model.Post{}, fmt.Errorf("message link is nil")
-	}
 	if chat == nil {
 		return model.Post{}, fmt.Errorf("chat is nil")
 	}
+
+    generatedLink := BuildTelegramLink(chat, message)
+    
+    // Calculate the public message number (used for PostUID and logic)
+    // In Telegram links, this is the ID divided by 2^20
+    publicMsgId := message.Id / 1048576
+    messageNumber := strconv.FormatInt(publicMsgId, 10)
 
 	publishedAt := time.Unix(int64(message.Date), 0)
 
 	if !cfg.MinPostDate.IsZero() && publishedAt.Before(cfg.MinPostDate) {
 		return model.Post{}, nil // Skip messages earlier than MinPostDate
-	}
-
-	var messageNumber string
-	if mlr.Link != "" {
-		linkParts := strings.Split(mlr.Link, "/")
-		if len(linkParts) > 0 {
-			messageNumber = linkParts[len(linkParts)-1]
-		}
-	}
-
-	if messageNumber == "" {
-		return model.Post{}, fmt.Errorf("could not determine message number")
 	}
 
 	// Initialize variables
@@ -392,11 +384,11 @@ var ParseMessage = func(
 				thumbnailPath, videoPath, description, _, thumbnailfileid, err = processMessageSafely(content)
 
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 				}
 
 				//if videoPath != "" {
-				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid, cfg)
+				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, generatedLink, videofileid, cfg)
 				//}
 
 				if content.Caption != nil {
@@ -416,7 +408,7 @@ var ParseMessage = func(
 					content.Photo.Sizes[0].Photo.Remote != nil {
 					thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 					}
 				}
 			}
@@ -433,7 +425,7 @@ var ParseMessage = func(
 					content.Animation.Thumbnail.File.Remote != nil {
 					thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 					}
 				}
 			}
@@ -452,7 +444,6 @@ var ParseMessage = func(
 			if content != nil && content.Prize != nil {
 				description = content.Prize.GiveawayPrizeType()
 			}
-
 		case *client.MessagePaidMedia:
 			if content != nil && content.Caption != nil {
 				description = content.Caption.Text
@@ -465,7 +456,7 @@ var ParseMessage = func(
 				content.Sticker.Sticker.Remote != nil {
 				thumbnailPath = content.Sticker.Sticker.Remote.Id
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 				}
 			}
 
@@ -483,7 +474,7 @@ var ParseMessage = func(
 						content.VideoNote.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 						}
 					}
 
@@ -507,7 +498,7 @@ var ParseMessage = func(
 						content.Document.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.Document.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 						}
 					}
 
@@ -515,7 +506,7 @@ var ParseMessage = func(
 						content.Document.Document.Remote != nil {
 						videoPath = content.Document.Document.Remote.Id
 						//if videoPath != "" {
-						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid, cfg)
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, generatedLink, videofileid, cfg)
 						//}
 					}
 				}
@@ -563,18 +554,17 @@ var ParseMessage = func(
 	}
 
 	username := GetPoster(tdlibClient, message)
-
 	// Safely get supergroup info
 	memberCount := 0
 	if supergroupInfo != nil {
 		memberCount = int(supergroupInfo.MemberCount)
 	}
-	// TODO: verify some of these are available like CrawlLabel
+
 	post = model.Post{
-		PostLink:     mlr.Link,
+		PostLink:     generatedLink,
 		ChannelID:    fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
 		PostUID:      postUid,
-		URL:          mlr.Link,
+		URL:          generatedLink,
 		PublishedAt:  publishedAt,
 		CreatedAt:    createdAt,
 		LanguageCode: "",
@@ -656,9 +646,8 @@ var ParseMessage = func(
 		Handle:      username,
 	}
 
-	result := cfg.NullValidator.ValidatePost(&post)
-	if !result.Valid {
-		log.Error().Strs("errors", result.Errors).Msg("ParseMessage: Missing critical fields in telegram post data")
+	if result := cfg.NullValidator.ValidatePost(&post); !result.Valid {
+		log.Error().Strs("errors", result.Errors).Msg("ParseMessage: Validation failed")
 	}
 
 	// Store the post but don't return an error if storage fails
