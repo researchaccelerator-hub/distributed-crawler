@@ -902,3 +902,42 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 
 	return channelNames
 }
+
+// BuildTelegramLink constructs a message link locally from TDLib objects.
+// It avoids network calls to prevent FLOOD_WAIT errors.
+func BuildTelegramLink(chat *client.Chat, msg *client.Message) string {
+	// Convert TDLib Internal ID to Public Message ID
+	// Math: InternalID >> 20 (or divide by 1048576)
+	publicMsgId := msg.Id / 1048576
+
+	// Handle Public Channels (@username)
+	if chat.Username != "" {
+		link := fmt.Sprintf("https://t.me/%s/%d", chat.Username, publicMsgId)
+		if msg.MediaGroupId != 0 {
+			link += "?single"
+		}
+		return link
+	}
+
+	// Handle Private Channels/Supergroups
+	// Private links use the format: t.me/c/ID_WITHOUT_PREFIX/MSG_ID
+	// TDLib IDs for supergroups start with -100. We need to strip that.
+	chatIdStr := strconv.FormatInt(chat.Id, 10)
+	strippedId := chatIdStr
+
+	if strings.HasPrefix(chatIdStr, "-100") {
+		strippedId = chatIdStr[4:]
+	} else if strings.HasPrefix(chatIdStr, "-") {
+		// Handle legacy groups if necessary
+		strippedId = chatIdStr[1:]
+	}
+
+	link := fmt.Sprintf("https://t.me/c/%s/%d", strippedId, publicMsgId)
+	
+	// Albums in private chats still use the ?single flag
+	if msg.MediaGroupId != 0 {
+		link += "?single"
+	}
+
+	return link
+}
