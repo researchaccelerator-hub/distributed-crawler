@@ -1241,6 +1241,13 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 		return []string{}, parseErr
 	}
 
+	if err != nil {
+		log.Warn().Err(err).Msgf("Failed to get link for message %d", messageId)
+		// Instead of continuing, return an empty slice and the error
+		// This allows the caller to update the message status and continue
+		return []string{}, fmt.Errorf("failed to get message link: %w", err)
+	}
+
 	return post.Outlinks, nil
 }
 
