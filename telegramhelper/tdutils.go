@@ -924,8 +924,8 @@ func BuildTelegramLink(tdlibClient crawler.TDLibClient, chat *client.Chat, msg *
                 SupergroupId: t.SupergroupId,
             })
 			DetectCacheOrServer(getSupergroupStart, "GetSupergroup")
-            if err == nil && sg != nil {
-                username = sg.Username
+            if err == nil && sg.Usernames != nil && len(sg.Usernames.ActiveUsernames) > 0 {
+                username = sg.Usernames.ActiveUsernames[0]
             }
         }
     }
