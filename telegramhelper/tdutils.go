@@ -340,7 +340,6 @@ var ParseMessage = func(
 	}
 
     generatedLink := BuildTelegramLink(tdlibClient, chat, message)
-    
 
 	log.Info().Str("message_link", generatedLink).Msg("Link generated")
     // Calculate the public message number (used for PostUID and logic)
@@ -542,7 +541,9 @@ var ParseMessage = func(
 		posttype = []string{message.Content.MessageContentType()}
 	}
 
-	createdAt := time.Now()
+	createdAt := time.Now().UTC().Truncate(time.Second)
+	
+	// TODO: this should be publishedAt not createdAt right?
 	if message.EditDate > 0 {
 		createdAt = time.Unix(int64(message.EditDate), 0)
 	}
