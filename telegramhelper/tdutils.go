@@ -339,7 +339,7 @@ var ParseMessage = func(
 		return model.Post{}, fmt.Errorf("chat is nil")
 	}
 
-    generatedLink := BuildTelegramLink(chat, message)
+    generatedLink := BuildTelegramLink(tdlibClient, chat, message)
     
     // Calculate the public message number (used for PostUID and logic)
     // In Telegram links, this is the ID divided by 2^20
@@ -906,7 +906,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 
 // BuildTelegramLink constructs a message link locally from TDLib objects.
 // It avoids network calls to prevent FLOOD_WAIT errors.
-func BuildTelegramLink(chat *client.Chat, msg *client.Message) string {
+func BuildTelegramLink(tdlibClient crawler.TDLibClient, chat *client.Chat, msg *client.Message) string {
 	// Convert TDLib Internal ID to Public Message ID
 	// Math: InternalID >> 20 (or divide by 1048576)
 	publicMsgId := msg.Id / 1048576
@@ -923,7 +923,7 @@ func BuildTelegramLink(chat *client.Chat, msg *client.Message) string {
             sg, err := tdlibClient.GetSupergroup(&client.GetSupergroupRequest{
                 SupergroupId: t.SupergroupId,
             })
-			telegramhelper.DetectCacheOrServer(getSupergroupStart, "GetSupergroup")
+			DetectCacheOrServer(getSupergroupStart, "GetSupergroup")
             if err == nil && sg != nil {
                 username = sg.Username
             }
