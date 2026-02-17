@@ -341,6 +341,8 @@ var ParseMessage = func(
 
     generatedLink := BuildTelegramLink(tdlibClient, chat, message)
     
+
+	log.Info().Str("message_link", generatedLink).Msg("Link generated")
     // Calculate the public message number (used for PostUID and logic)
     // In Telegram links, this is the ID divided by 2^20
     publicMsgId := message.Id / 1048576
