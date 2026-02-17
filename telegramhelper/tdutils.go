@@ -915,11 +915,18 @@ func BuildTelegramLink(chat *client.Chat, msg *client.Message) string {
     // depending on the version, or accessible via the chat object's logic.
     // We check the specific ChatTypeSupergroup which carries the username.
     var username string
-    if chat.Type != nil {
+	if chat.Type != nil {
         if t, ok := chat.Type.(*client.ChatTypeSupergroup); ok {
-            // Some versions use t.Username, others use an array of usernames.
-            // We'll try the most common field name for go-tdlib:
-            username = t.Username 
+            // In TDLib, the username belongs to the Supergroup object, not the Chat.
+            // We fetch the supergroup info using the ID found in the ChatType.
+			getSupergroupStart := time.Now()
+            sg, err := tdlibClient.GetSupergroup(&client.GetSupergroupRequest{
+                SupergroupId: t.SupergroupId,
+            })
+			telegramhelper.DetectCacheOrServer(getSupergroupStart, "GetSupergroup")
+            if err == nil && sg != nil {
+                username = sg.Username
+            }
         }
     }
 
