@@ -5,7 +5,6 @@ import (
 	"os"
 	"regexp"
 	"runtime/debug"
-	"strings"
 	"time"
 	"strconv"
 
@@ -339,14 +338,8 @@ var ParseMessage = func(
 		return model.Post{}, fmt.Errorf("chat is nil")
 	}
 
-    generatedLink := BuildTelegramLink(tdlibClient, chat, message)
-
-	log.Info().Str("message_link", generatedLink).Msg("Link generated")
-    // Calculate the public message number (used for PostUID and logic)
-    // In Telegram links, this is the ID divided by 2^20
-    publicMsgId := message.Id / 1048576
+    generatedLink, publicMsgId := BuildTelegramLinkAndMessageID(supergroup, chat, message)
     messageNumber := strconv.FormatInt(publicMsgId, 10)
-
 	publishedAt := time.Unix(int64(message.Date), 0)
 
 	if !cfg.MinPostDate.IsZero() && publishedAt.Before(cfg.MinPostDate) {
@@ -549,7 +542,6 @@ var ParseMessage = func(
 	}
 
 	vc := GetViewCount(message, channelName)
-	postUid := fmt.Sprintf("%s-%s", messageNumber, channelName)
 	var sharecount int = 0
 
 	// Safely get share count
@@ -567,7 +559,7 @@ var ParseMessage = func(
 	post = model.Post{
 		PostLink:     generatedLink,
 		ChannelID:    fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
-		PostUID:      postUid,
+		PostUID:      fmt.Sprintf("%s-%s", messageNumber, channelName),
 		URL:          generatedLink,
 		PublishedAt:  publishedAt,
 		CreatedAt:    createdAt,
@@ -909,7 +901,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 
 // BuildTelegramLink constructs a message link locally from TDLib objects.
 // It avoids network calls to prevent FLOOD_WAIT errors.
-func BuildTelegramLink(tdlibClient crawler.TDLibClient, chat *client.Chat, msg *client.Message) string {
+func BuildTelegramLinkAndMessageID(supergroup *client.Supergroup, chat *client.Chat, msg *client.Message) (string, int64) {
 	// Convert TDLib Internal ID to Public Message ID
 	// Math: InternalID >> 20 (or divide by 1048576)
 	publicMsgId := msg.Id / 1048576
@@ -918,20 +910,11 @@ func BuildTelegramLink(tdlibClient crawler.TDLibClient, chat *client.Chat, msg *
     // depending on the version, or accessible via the chat object's logic.
     // We check the specific ChatTypeSupergroup which carries the username.
     var username string
-	if chat.Type != nil {
-        if t, ok := chat.Type.(*client.ChatTypeSupergroup); ok {
-            // In TDLib, the username belongs to the Supergroup object, not the Chat.
-            // We fetch the supergroup info using the ID found in the ChatType.
-			getSupergroupStart := time.Now()
-            sg, err := tdlibClient.GetSupergroup(&client.GetSupergroupRequest{
-                SupergroupId: t.SupergroupId,
-            })
-			DetectCacheOrServer(getSupergroupStart, "GetSupergroup")
-            if err == nil && sg.Usernames != nil && len(sg.Usernames.ActiveUsernames) > 0 {
-                username = sg.Usernames.ActiveUsernames[0]
-            }
-        }
-    }
+	if supergroup != nil {
+		if supergroup.Usernames != nil && len(supergroup.Usernames.ActiveUsernames) > 0 {
+			username = supergroup.Usernames.ActiveUsernames[0]
+		}
+	}
 
 	// Handle Public Channels (@username)
 	if username != "" {
@@ -940,29 +923,8 @@ func BuildTelegramLink(tdlibClient crawler.TDLibClient, chat *client.Chat, msg *
         if msg.MediaAlbumId != 0 {
             link += "?single"
         }
-        return link
+        return link, publicMsgId
     }
 
-	// Handle Private Channels/Supergroups
-	// Private links use the format: t.me/c/ID_WITHOUT_PREFIX/MSG_ID
-	// TDLib IDs for supergroups start with -100. We need to strip that.
-	chatIdStr := strconv.FormatInt(chat.Id, 10)
-	strippedId := chatIdStr
-
-
-	if strings.HasPrefix(chatIdStr, "-100") {
-		strippedId = chatIdStr[4:]
-	} else if strings.HasPrefix(chatIdStr, "-") {
-		// Handle legacy groups if necessary
-		strippedId = chatIdStr[1:]
-	}
-
-	link := fmt.Sprintf("https://t.me/c/%s/%d", strippedId, publicMsgId)
-	
-	// Albums in private chats still use the ?single flag
-	if msg.MediaAlbumId != 0 {
-		link += "?single"
-	}
-
-	return link
+	return "", publicMsgId
 }

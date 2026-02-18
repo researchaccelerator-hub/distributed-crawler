@@ -464,7 +464,6 @@ func (c *Chunker) VerifyCleanup() {
 		"Combine": c.combineDir,
 	}
 
-	log.Info().Str("log_tag", "chunk_vc").Msg("--- Final Cleanup Verification ---")
 	for label, path := range dirs {
 		entries, err := os.ReadDir(path)
 		if err != nil {
@@ -479,13 +478,12 @@ func (c *Chunker) VerifyCleanup() {
 			for _, e := range entries {
 				fileNames = append(fileNames, e.Name())
 			}
-			log.Warn().
+			log.Error().
 				Str("log_tag", "chunk_vc").
 				Str("dir", label).
 				Int("count", len(entries)).
 				Strs("files", fileNames).
-				Msg("Verification Warning: Directory still contains files!")
+				Msg("Verification Error: Directory still contains files!")
 		}
 	}
-	log.Info().Str("log_tag", "chunk_vc").Msg("--- Cleanup Verification Complete ---")
 }

@@ -704,9 +704,6 @@ func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common
 		}
 		log.Info().Msgf("Processing layer at depth %d with %d pages", depth, len(pages))
 
-		log.Info().Msg("Sleeping for 60s to examine pages. REMOVE LATER")
-		time.Sleep(60 * time.Second)
-
 		// Create a Layer object
 		layer := &state.Layer{
 			Depth: depth,
