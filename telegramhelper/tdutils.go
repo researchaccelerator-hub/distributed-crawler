@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"runtime/debug"
 	"time"
-	"strconv"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
@@ -536,10 +535,10 @@ var ParseMessage = func(
 
 	createdAt := time.Now().UTC().Truncate(time.Second)
 	
-	// TODO: this should be publishedAt not createdAt right?
-	if message.EditDate > 0 {
-		createdAt = time.Unix(int64(message.EditDate), 0)
-	}
+	// TODO: create an edit date field in model.post
+	// if message.EditDate > 0 {
+	// 	createdAt = time.Unix(int64(message.EditDate), 0)
+	// }
 
 	vc := GetViewCount(message, channelName)
 	var sharecount int = 0
