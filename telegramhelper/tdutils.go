@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
@@ -337,8 +338,8 @@ var ParseMessage = func(
 		return model.Post{}, fmt.Errorf("chat is nil")
 	}
 
-    generatedLink, publicMsgId := BuildTelegramLinkAndMessageID(supergroup, chat, message)
-    messageNumber := strconv.FormatInt(publicMsgId, 10)
+	generatedLink, publicMsgId := BuildTelegramLinkAndMessageID(supergroup, chat, message)
+	messageNumber := strconv.FormatInt(publicMsgId, 10)
 	publishedAt := time.Unix(int64(message.Date), 0)
 
 	if !cfg.MinPostDate.IsZero() && publishedAt.Before(cfg.MinPostDate) {
@@ -534,7 +535,7 @@ var ParseMessage = func(
 	}
 
 	createdAt := time.Now().UTC().Truncate(time.Second)
-	
+
 	// TODO: create an edit date field in model.post
 	// if message.EditDate > 0 {
 	// 	createdAt = time.Unix(int64(message.EditDate), 0)
@@ -906,9 +907,9 @@ func BuildTelegramLinkAndMessageID(supergroup *client.Supergroup, chat *client.C
 	publicMsgId := msg.Id / 1048576
 
 	// In go-tdlib, the username is often tucked inside the ChatType
-    // depending on the version, or accessible via the chat object's logic.
-    // We check the specific ChatTypeSupergroup which carries the username.
-    var username string
+	// depending on the version, or accessible via the chat object's logic.
+	// We check the specific ChatTypeSupergroup which carries the username.
+	var username string
 	if supergroup != nil {
 		if supergroup.Usernames != nil && len(supergroup.Usernames.ActiveUsernames) > 0 {
 			username = supergroup.Usernames.ActiveUsernames[0]
@@ -917,13 +918,13 @@ func BuildTelegramLinkAndMessageID(supergroup *client.Supergroup, chat *client.C
 
 	// Handle Public Channels (@username)
 	if username != "" {
-        link := fmt.Sprintf("https://t.me/%s/%d", username, publicMsgId)
-        // Note: Field is MediaAlbumId in most go-tdlib versions
-        if msg.MediaAlbumId != 0 {
-            link += "?single"
-        }
-        return link, publicMsgId
-    }
+		link := fmt.Sprintf("https://t.me/%s/%d", username, publicMsgId)
+		// Note: Field is MediaAlbumId in most go-tdlib versions
+		if msg.MediaAlbumId != 0 {
+			link += "?single"
+		}
+		return link, publicMsgId
+	}
 
 	return "", publicMsgId
 }
