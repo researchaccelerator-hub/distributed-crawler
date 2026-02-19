@@ -3421,8 +3421,8 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 }
 
 func (dsm *DaprStateManager) fetchAllPages(crawlID string, pageIDs []string) ([]Page, error) {
-	
-	// TODO: figure out correct batch size
+
+	// TODO: figure out correct batch size here
 	const (
 		batchSize   = 100
 		maxFailures = 3 // Exit entirely if 3 batches fail
