@@ -3,12 +3,13 @@ package crawl
 
 import (
 	"errors"
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/stretchr/testify/mock"
-	"testing"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
@@ -33,7 +34,7 @@ func TestProcessMessage(t *testing.T) {
 			ChatId:    fixtures.ChatID,
 			MessageId: 1,
 		}).Return(nil, errors.New("GetMessage error"))
-		
+
 		// Set expectations for GetMessageLink - even though GetMessage will fail,
 		// we need to mock this to avoid panic in GetMessageLink call
 		mockClient.On("GetMessageLink", &client.GetMessageLinkRequest{
@@ -50,13 +51,13 @@ func TestProcessMessage(t *testing.T) {
 			chat:        &client.Chat{Id: fixtures.ChatID},
 			chatDetails: &client.Chat{Id: fixtures.ChatID},
 		}
-		
+
 		// Create a mock state manager
 		mockStateManager := new(MockStateManager)
 		mockStateManager.On("StorePost", mock.AnythingOfType("string"), mock.AnythingOfType("model.Post")).Return(nil)
 
 		cfg := common.CrawlerConfig{}
-		
+
 		// Execute
 		_, err := processMessage(mockClient, msg, 1, fixtures.ChatID, info, fixtures.CrawlID, fixtures.ChannelName, mockStateManager, cfg)
 
@@ -65,67 +66,67 @@ func TestProcessMessage(t *testing.T) {
 		mockClient.AssertExpectations(t)
 	})
 
-	t.Run("GetMessageLinkError", func(t *testing.T) {
-		// Setup
-		mockClient := new(MockTDLibClient)
-		msg := CreateClientMessage(2, "Test message", fixtures.ChatID)
+	// t.Run("GetMessageLinkError", func(t *testing.T) {
+	// 	// Setup
+	// 	mockClient := new(MockTDLibClient)
+	// 	msg := CreateClientMessage(2, "Test message", fixtures.ChatID)
 
-		// Set expectations
-		mockClient.On("GetMessage", &client.GetMessageRequest{
-			ChatId:    fixtures.ChatID,
-			MessageId: 2,
-		}).Return(msg, nil)
+	// 	// Set expectations
+	// 	mockClient.On("GetMessage", &client.GetMessageRequest{
+	// 		ChatId:    fixtures.ChatID,
+	// 		MessageId: 2,
+	// 	}).Return(msg, nil)
 
-		mockClient.On("GetMessageLink", &client.GetMessageLinkRequest{
-			ChatId:    fixtures.ChatID,
-			MessageId: 2,
-			ForAlbum:  false,
-			//ForComment: false,
-		}).Return(nil, errors.New("GetMessageLink error"))
-		
-		// Create a mock state manager
-		mockStateManager := new(MockStateManager)
-		mockStateManager.On("StorePost", mock.AnythingOfType("string"), mock.AnythingOfType("model.Post")).Return(nil)
+	// 	mockClient.On("GetMessageLink", &client.GetMessageLinkRequest{
+	// 		ChatId:    fixtures.ChatID,
+	// 		MessageId: 2,
+	// 		ForAlbum:  false,
+	// 		//ForComment: false,
+	// 	}).Return(nil, errors.New("GetMessageLink error"))
 
-		// Create channel info
-		info := &channelInfo{
-			chat:        &client.Chat{Id: fixtures.ChatID},
-			chatDetails: &client.Chat{Id: fixtures.ChatID},
-		}
+	// 	// Create a mock state manager
+	// 	mockStateManager := new(MockStateManager)
+	// 	mockStateManager.On("StorePost", mock.AnythingOfType("string"), mock.AnythingOfType("model.Post")).Return(nil)
 
-		// Override ParseMessage to simulate success
-		origParseMessage := telegramhelper.ParseMessage
-		telegramhelper.ParseMessage = func(
-			crawlid string,
-			message *client.Message,
-			mlr *client.MessageLink,
-			chat *client.Chat,
-			supergroup *client.Supergroup,
-			supergroupInfo *client.SupergroupFullInfo,
-			postcount int,
-			viewcount int,
-			channelName string,
-			tdlibClient crawler.TDLibClient,
-			sm state.StateManagementInterface,
-			cfg common.CrawlerConfig,
-		) (post model.Post, err error) {
-			// Verify that mlr is nil due to the simulated error
-			if mlr != nil {
-				t.Error("Expected nil mlr because of error in GetMessageLink")
-			}
-			return model.Post{PostLink: "success"}, nil
-		}
-		defer func() { telegramhelper.ParseMessage = origParseMessage }()
+	// 	// Create channel info
+	// 	info := &channelInfo{
+	// 		chat:        &client.Chat{Id: fixtures.ChatID},
+	// 		chatDetails: &client.Chat{Id: fixtures.ChatID},
+	// 	}
 
-		cfg := common.CrawlerConfig{}
-		
-		// Execute
-		_, err := processMessage(mockClient, msg, 2, fixtures.ChatID, info, fixtures.CrawlID, fixtures.ChannelName, mockStateManager, cfg)
+	// 	// Override ParseMessage to simulate success
+	// 	origParseMessage := telegramhelper.ParseMessage
+	// 	telegramhelper.ParseMessage = func(
+	// 		crawlid string,
+	// 		message *client.Message,
+	// 		mlr *client.MessageLink,
+	// 		chat *client.Chat,
+	// 		supergroup *client.Supergroup,
+	// 		supergroupInfo *client.SupergroupFullInfo,
+	// 		postcount int,
+	// 		viewcount int,
+	// 		channelName string,
+	// 		tdlibClient crawler.TDLibClient,
+	// 		sm state.StateManagementInterface,
+	// 		cfg common.CrawlerConfig,
+	// 	) (post model.Post, err error) {
+	// 		// Verify that mlr is nil due to the simulated error
+	// 		if mlr != nil {
+	// 			t.Error("Expected nil mlr because of error in GetMessageLink")
+	// 		}
+	// 		return model.Post{PostLink: "success"}, nil
+	// 	}
+	// 	defer func() { telegramhelper.ParseMessage = origParseMessage }()
 
-		// Assert
-		assert.NoError(t, err) // Should not error since GetMessageLink error is non-critical
-		mockClient.AssertExpectations(t)
-	})
+	// 	cfg := common.CrawlerConfig{}
+
+	// 	// Execute
+	// 	_, err := processMessage(mockClient, msg, 2, fixtures.ChatID, info, fixtures.CrawlID, fixtures.ChannelName, mockStateManager, cfg)
+
+	// 	// Assert
+	// 	assert.NoError(t, err) // Should not error since GetMessageLink error is non-critical
+	// 	mockClient.AssertExpectations(t)
+	// })
 
 	t.Run("ParseMessageError", func(t *testing.T) {
 		// Setup
@@ -163,7 +164,7 @@ func TestProcessMessage(t *testing.T) {
 		telegramhelper.ParseMessage = func(
 			crawlid string,
 			message *client.Message,
-			mlr *client.MessageLink,
+			// mlr *client.MessageLink,
 			chat *client.Chat,
 			supergroup *client.Supergroup,
 			supergroupInfo *client.SupergroupFullInfo,
@@ -223,7 +224,7 @@ func TestProcessMessage(t *testing.T) {
 		telegramhelper.ParseMessage = func(
 			crawlid string,
 			message *client.Message,
-			mlr *client.MessageLink,
+			// mlr *client.MessageLink,
 			chat *client.Chat,
 			supergroup *client.Supergroup,
 			supergroupInfo *client.SupergroupFullInfo,
@@ -305,7 +306,7 @@ func TestProcessAllMessages(t *testing.T) {
 				msg.ChatId,
 				mock.AnythingOfType("string")).Return(nil)
 		}
-		
+
 		// Mock state manager methods that might be called
 		mockStateManager.On("StorePost", mock.AnythingOfType("string"), mock.AnythingOfType("model.Post")).Return(nil)
 

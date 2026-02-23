@@ -2,15 +2,16 @@ package telegramhelper
 
 import (
 	"fmt"
+	"math/rand"
+	"runtime/debug"
+	"strings"
+	"time"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
-	"math/rand"
-	"runtime/debug"
-	"strings"
-	"time"
 )
 
 func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPosts int) ([]*client.Message, error) {
@@ -38,12 +39,22 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 	}
 
 	for {
+
+		// TODO: Replace with client level rate limiting
+		sleepMS := 1600 + rand.Intn(900)
+		log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+
 		log.Debug().Msgf("Fetching message batch for channel %s starting from ID %d at depth: %v", page.URL, fromMessageId, page.Depth)
+
+		getChatHistoryStart := time.Now()
 		chatHistory, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 			ChatId:        chatID,
 			FromMessageId: fromMessageId,
 			Limit:         100, // Fetch up to 100 messages at a time
 		})
+		DetectCacheOrServer(getChatHistoryStart, "GetChatHistory")
+
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to get chat history for channel: %v", page.URL)
 			return nil, err
@@ -58,7 +69,7 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 		reachedOldMessages := false
 		for _, msg := range chatHistory.Messages {
 			msgUnix := int64(msg.Date)
-			
+
 			// Compare message timestamp with minPostDate
 			if msgUnix < minPostUnix {
 				log.Debug().Msgf("Reached messages older than minimum date (message date: %v, min date: %v)",
@@ -67,7 +78,7 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 				reachedOldMessages = true
 				break
 			}
-			
+
 			// Check if message is newer than maxPostDate (if specified)
 			if !maxPostDate.IsZero() && msgUnix > maxPostUnix {
 				log.Debug().Msgf("Skipping message newer than maximum date (message date: %v, max date: %v)",
@@ -75,7 +86,7 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 					maxPostDate.Format("2006-01-02 15:04:05"))
 				continue
 			}
-			
+
 			allMessages = append(allMessages, msg)
 			if maxPosts > -1 && len(allMessages) == maxPosts {
 				reachedOldMessages = true
@@ -142,11 +153,21 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 	return allMessages, nil
 }
 
-func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelUsername string) (int, error) {
+func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelId int64) (int, error) {
 	// First, resolve the username to get the chat ID
-	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
-		Username: channelUsername,
+	// chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+	// 	Username: channelUsername,
+	// })
+
+	// chatDetails, err := tdlibClient.GetChat(&client.GetChatRequest{
+	// 	ChatId: chat.Id,
+	// })
+	getChatStart := time.Now()
+	chat, err := tdlibClient.GetChat(&client.GetChatRequest{
+		ChatId: channelId,
 	})
+	DetectCacheOrServer(getChatStart, "GetChat")
+
 	if err != nil {
 		return 0, fmt.Errorf("failed to resolve channel username: %w", err)
 	}
@@ -155,15 +176,20 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelUsername stri
 	chatType := chat.Type
 	var memberCount int
 
+	// TODO: Replace with client level rate limiting
+	sleepMS := 2500 + rand.Intn(900)
+
 	switch v := chatType.(type) {
 	case *client.ChatTypeSupergroup:
 		// For channels and supergroups
 		supergroupId := v.SupergroupId
 
-		// Get supergroup full info
+		// Get supergroup full info CACHED_CALL
+		getSuperGroupFullInfoStart := time.Now()
 		fullInfo, err := tdlibClient.GetSupergroupFullInfo(&client.GetSupergroupFullInfoRequest{
 			SupergroupId: supergroupId,
 		})
+		DetectCacheOrServer(getSuperGroupFullInfoStart, "GetSupergroupFullInfo")
 		if err != nil {
 			return 0, fmt.Errorf("failed to get supergroup info: %w", err)
 		}
@@ -173,10 +199,14 @@ func GetChannelMemberCount(tdlibClient crawler.TDLibClient, channelUsername stri
 		// For basic groups
 		basicGroupId := v.BasicGroupId
 
+		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetBasicGroupFullInfo").Msg("Telegram API Call Sleep")
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
 		// Get basic group full info
+		getBasicGroupFullInfoStart := time.Now()
 		fullInfo, err := tdlibClient.GetBasicGroupFullInfo(&client.GetBasicGroupFullInfoRequest{
 			BasicGroupId: basicGroupId,
 		})
+		DetectCacheOrServer(getBasicGroupFullInfoStart, "GetBasicGroupFullInfo")
 		if err != nil {
 			return 0, fmt.Errorf("failed to get basic group info: %w", err)
 		}
@@ -224,12 +254,22 @@ func GetViewCount(message *client.Message, channelname string) int {
 // If the message's InteractionInfo is available, it returns the ForwardCount as the share count.
 // If InteractionInfo is nil or an error occurs, it returns 0 and an error, respectively.
 func GetMessageShareCount(tdlibClient crawler.TDLibClient, chatID, messageID int64, channelname string) (int, error) {
-	// Fetch the message details
+
+	// Fetch the message details CACHED_CALL
 	log.Debug().Msgf("Getting message share count for channel %s", channelname)
+	getMessageStart := time.Now()
 	message, err := tdlibClient.GetMessage(&client.GetMessageRequest{
 		ChatId:    chatID,
 		MessageId: messageID,
 	})
+	cacheHit := DetectCacheOrServer(getMessageStart, "GetMessage")
+
+	if !cacheHit {
+		sleepMS := 600 + rand.Intn(900)
+		log.Info().Int("sleep_ms", sleepMS).Str("api_call", "GetMessage").Msg("Retroactive Telegram API Call Sleep")
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	}
+
 	if err != nil {
 		return 0, err
 	}
@@ -291,6 +331,10 @@ func GetMessageComments(tdlibClient crawler.TDLibClient, chatID, messageID int64
 			Int64("messageID", messageID).
 			Msg("TDLib client is nil")
 		return nil, fmt.Errorf("tdlibClient is nil")
+	}
+
+	if maxcomments == 0 {
+		return []model.Comment{}, nil
 	}
 
 	log.Debug().
@@ -820,4 +864,32 @@ func GetPoster(tdlibClient crawler.TDLibClient, msg *client.Message) string {
 	}
 
 	return username
+}
+
+func DetectCacheOrServer(start time.Time, endpoint string) bool {
+	duration := time.Since(start)
+
+	var source string
+	var cacheHit bool
+
+	if duration < 15*time.Millisecond {
+		source = "LOCAL_CACHE"
+		cacheHit = true
+	} else if duration < 35*time.Millisecond {
+		source = "GREY_AREA"
+		cacheHit = false
+	} else {
+		source = "TELEGRAM_SERVER"
+		cacheHit = false
+	}
+
+	// if cacheHit {
+	// 	log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	// } else {
+	// 	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	// }
+
+	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+
+	return cacheHit
 }

@@ -5,7 +5,7 @@ import (
 	"os"
 	"regexp"
 	"runtime/debug"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
@@ -15,6 +15,12 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/zelenin/go-tdlib/client"
 )
+
+// Regex to identify Telegram channel links in text
+var channelLinkRegex = regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
+
+// Regex to identify names that fit username requirements
+var usernameRegex = regexp.MustCompile(`(?:@)?([a-zA-Z0-9_]{4,32})`)
 
 //// removeMultimedia removes all files and subdirectories in the specified directory.
 //// If the directory does not exist, it does nothing.
@@ -300,7 +306,7 @@ func fetchAndUploadMedia(tdlibClient crawler.TDLibClient, sm state.StateManageme
 var ParseMessage = func(
 	crawlid string,
 	message *client.Message,
-	mlr *client.MessageLink,
+	// mlr *client.MessageLink, // REMOVED: No longer needed
 	chat *client.Chat,
 	supergroup *client.Supergroup,
 	supergroupInfo *client.SupergroupFullInfo,
@@ -328,29 +334,16 @@ var ParseMessage = func(
 	if message == nil {
 		return model.Post{}, fmt.Errorf("message is nil")
 	}
-	if mlr == nil {
-		return model.Post{}, fmt.Errorf("message link is nil")
-	}
 	if chat == nil {
 		return model.Post{}, fmt.Errorf("chat is nil")
 	}
 
+	generatedLink, publicMsgId := BuildTelegramLinkAndMessageID(supergroup, chat, message)
+	messageNumber := strconv.FormatInt(publicMsgId, 10)
 	publishedAt := time.Unix(int64(message.Date), 0)
 
 	if !cfg.MinPostDate.IsZero() && publishedAt.Before(cfg.MinPostDate) {
 		return model.Post{}, nil // Skip messages earlier than MinPostDate
-	}
-
-	var messageNumber string
-	if mlr.Link != "" {
-		linkParts := strings.Split(mlr.Link, "/")
-		if len(linkParts) > 0 {
-			messageNumber = linkParts[len(linkParts)-1]
-		}
-	}
-
-	if messageNumber == "" {
-		return model.Post{}, fmt.Errorf("could not determine message number")
 	}
 
 	// Initialize variables
@@ -386,11 +379,11 @@ var ParseMessage = func(
 				thumbnailPath, videoPath, description, _, thumbnailfileid, err = processMessageSafely(content)
 
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 				}
 
 				//if videoPath != "" {
-				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid, cfg)
+				//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, generatedLink, videofileid, cfg)
 				//}
 
 				if content.Caption != nil {
@@ -410,7 +403,7 @@ var ParseMessage = func(
 					content.Photo.Sizes[0].Photo.Remote != nil {
 					thumbnailPath = content.Photo.Sizes[0].Photo.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 					}
 				}
 			}
@@ -427,7 +420,7 @@ var ParseMessage = func(
 					content.Animation.Thumbnail.File.Remote != nil {
 					thumbnailPath = content.Animation.Thumbnail.File.Remote.Id
 					if thumbnailPath != "" {
-						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+						thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 					}
 				}
 			}
@@ -446,7 +439,6 @@ var ParseMessage = func(
 			if content != nil && content.Prize != nil {
 				description = content.Prize.GiveawayPrizeType()
 			}
-
 		case *client.MessagePaidMedia:
 			if content != nil && content.Caption != nil {
 				description = content.Caption.Text
@@ -459,7 +451,7 @@ var ParseMessage = func(
 				content.Sticker.Sticker.Remote != nil {
 				thumbnailPath = content.Sticker.Sticker.Remote.Id
 				if thumbnailPath != "" {
-					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+					thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 				}
 			}
 
@@ -477,7 +469,7 @@ var ParseMessage = func(
 						content.VideoNote.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.VideoNote.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 						}
 					}
 
@@ -501,7 +493,7 @@ var ParseMessage = func(
 						content.Document.Thumbnail.File.Remote != nil {
 						thumbnailPath = content.Document.Thumbnail.File.Remote.Id
 						if thumbnailPath != "" {
-							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, mlr.Link, thumbnailfileid, cfg)
+							thumbnailPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, thumbnailPath, generatedLink, thumbnailfileid, cfg)
 						}
 					}
 
@@ -509,7 +501,7 @@ var ParseMessage = func(
 						content.Document.Document.Remote != nil {
 						videoPath = content.Document.Document.Remote.Id
 						//if videoPath != "" {
-						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, mlr.Link, videofileid, cfg)
+						//	videoPath, _ = fetchAndUploadMedia(tdlibClient, sm, crawlid, channelName, videoPath, generatedLink, videofileid, cfg)
 						//}
 					}
 				}
@@ -542,13 +534,14 @@ var ParseMessage = func(
 		posttype = []string{message.Content.MessageContentType()}
 	}
 
-	createdAt := time.Now()
-	if message.EditDate > 0 {
-		createdAt = time.Unix(int64(message.EditDate), 0)
-	}
+	createdAt := time.Now().UTC().Truncate(time.Second)
+
+	// TODO: create an edit date field in model.post
+	// if message.EditDate > 0 {
+	// 	createdAt = time.Unix(int64(message.EditDate), 0)
+	// }
 
 	vc := GetViewCount(message, channelName)
-	postUid := fmt.Sprintf("%s-%s", messageNumber, channelName)
 	var sharecount int = 0
 
 	// Safely get share count
@@ -557,18 +550,17 @@ var ParseMessage = func(
 	}
 
 	username := GetPoster(tdlibClient, message)
-
 	// Safely get supergroup info
 	memberCount := 0
 	if supergroupInfo != nil {
 		memberCount = int(supergroupInfo.MemberCount)
 	}
-	// TODO: verify some of these are available like CrawlLabel
+
 	post = model.Post{
-		PostLink:     mlr.Link,
+		PostLink:     generatedLink,
 		ChannelID:    fmt.Sprintf("%d", message.ChatId), // Convert int64 to string
-		PostUID:      postUid,
-		URL:          mlr.Link,
+		PostUID:      fmt.Sprintf("%s-%s", messageNumber, channelName),
+		URL:          generatedLink,
 		PublishedAt:  publishedAt,
 		CreatedAt:    createdAt,
 		LanguageCode: "",
@@ -650,9 +642,8 @@ var ParseMessage = func(
 		Handle:      username,
 	}
 
-	result := cfg.NullValidator.ValidatePost(&post)
-	if !result.Valid {
-		log.Error().Strs("errors", result.Errors).Msg("ParseMessage: Missing critical fields in telegram post data")
+	if result := cfg.NullValidator.ValidatePost(&post); !result.Valid {
+		log.Error().Strs("errors", result.Errors).Msg("ParseMessage: Validation failed")
 	}
 
 	// Store the post but don't return an error if storage fails
@@ -829,12 +820,6 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 	// Hold unique channel names
 	channelNamesMap := make(map[string]bool)
 
-	// Regex to identify Telegram channel links in text
-	channelLinkRegex := regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
-
-	// Regex to identify names that fit username requirements
-	usernameRegex := regexp.MustCompile(`(?:@)?([a-zA-Z0-9_]{4,32})`)
-
 	// Check if it's a text message
 	var messageText *client.MessageText
 
@@ -856,7 +841,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
 					// Extract just the channel name (group 2 from regex)
 					channelName := matches[2]
-					log.Info().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
+					log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 					channelNamesMap[channelName] = true
 				}
 			case *client.TextEntityTypeMention:
@@ -867,11 +852,11 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 					mention := messageText.Text.Text[offset : offset+length]
 					if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
 						channelName := matches[1]
-						log.Info().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
+						log.Debug().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 						channelNamesMap[channelName] = true
 					} else {
-						log.Info().Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
-						log.Info().Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
+						log.Debug().Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
+						log.Debug().Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
 					}
 				}
 
@@ -884,7 +869,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 					if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
 						// Extract just the channel name (group 2 from regex)
 						channelName := matches[2]
-						log.Info().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
+						log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
 						channelNamesMap[channelName] = true
 					}
 				}
@@ -899,7 +884,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 			if len(match) >= 3 {
 				// Extract just the channel name (group 2 from regex)
 				channelName := match[2]
-				log.Info().Str("channel_name", channelName).Str("entity_type", "messageText.Text.Text").Msg("random-walk-links: adding")
+				log.Debug().Str("channel_name", channelName).Str("entity_type", "messageText.Text.Text").Msg("random-walk-links: adding")
 				channelNamesMap[channelName] = true
 			}
 		}
@@ -912,4 +897,34 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 	}
 
 	return channelNames
+}
+
+// BuildTelegramLink constructs a message link locally from TDLib objects.
+// It avoids network calls to prevent FLOOD_WAIT errors.
+func BuildTelegramLinkAndMessageID(supergroup *client.Supergroup, chat *client.Chat, msg *client.Message) (string, int64) {
+	// Convert TDLib Internal ID to Public Message ID
+	// Math: InternalID >> 20 (or divide by 1048576)
+	publicMsgId := msg.Id / 1048576
+
+	// In go-tdlib, the username is often tucked inside the ChatType
+	// depending on the version, or accessible via the chat object's logic.
+	// We check the specific ChatTypeSupergroup which carries the username.
+	var username string
+	if supergroup != nil {
+		if supergroup.Usernames != nil && len(supergroup.Usernames.ActiveUsernames) > 0 {
+			username = supergroup.Usernames.ActiveUsernames[0]
+		}
+	}
+
+	// Handle Public Channels (@username)
+	if username != "" {
+		link := fmt.Sprintf("https://t.me/%s/%d", username, publicMsgId)
+		// Note: Field is MediaAlbumId in most go-tdlib versions
+		if msg.MediaAlbumId != 0 {
+			link += "?single"
+		}
+		return link, publicMsgId
+	}
+
+	return "", publicMsgId
 }

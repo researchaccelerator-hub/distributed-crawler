@@ -768,7 +768,8 @@ func init() {
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
-	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWatchDir, "combine-watch-dir", "/tmp/watch-files", "Where single crawl data files are written to be combined later")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWatchDir, "combine-watch-dir", "/tmp/watch-files", "Where single crawl data files are moved after a write to TempDir to be combined later")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineTempDir, "combine-temp-dir", "/tmp/temp-files", "Where single crawl data files are temporarily written before being moved to WatchDir")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWriteDir, "combine-write-dir", "/tmp/combine-write", "Where combined files are written before upload")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineTriggerSize, "combine-trigger-size", 170, "Number of MiB to set trigger size for combining files")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.CombineHardCap, "combine-hard-cap", 200, "Number of MiB to set hard cap for combining files")
@@ -818,6 +819,7 @@ func init() {
 	viper.BindPFlag("distributed.worker_id", rootCmd.PersistentFlags().Lookup("worker-id"))
 	viper.BindPFlag("crawler.combine_files", rootCmd.PersistentFlags().Lookup("combine-files"))
 	viper.BindPFlag("crawler.combine_watch_dir", rootCmd.PersistentFlags().Lookup("combine-watch-dir"))
+	viper.BindPFlag("crawler.combine_temp_dir", rootCmd.PersistentFlags().Lookup("combine-temp-dir"))
 	viper.BindPFlag("crawler.combine_write_dir", rootCmd.PersistentFlags().Lookup("combine-write-dir"))
 	viper.BindPFlag("crawler.combine_trigger_size", rootCmd.PersistentFlags().Lookup("combine-trigger-size"))
 	viper.BindPFlag("crawler.combine_hard_cap", rootCmd.PersistentFlags().Lookup("combine-hard-cap"))

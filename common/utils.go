@@ -46,6 +46,7 @@ type CrawlerConfig struct {
 	WalkbackRate       int                    // Rate to walkback using random-walk sampling method
 	MinChannelVideos   int64                  // Minimum videos per channel for inclusion
 	CombineFiles       bool                   // Flag to turn on combining files before upload
+	CombineTempDir     string                 // Location to write temp files to before moving on completion. Reduces file events removing some pressure on the kernel buffer
 	CombineWatchDir    string                 // Location to write crawl data to and watch for combining files once they reach the trigger size
 	CombineWriteDir    string                 // Location to write combined files to before upload
 	CombineTriggerSize int64                  // Total file size hreshold for creating a new combined file

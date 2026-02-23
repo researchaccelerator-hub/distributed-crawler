@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -305,12 +306,13 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 					Msg("Successfully loaded layer map for execution ID")
 
 				// Also load the URL cache
+				log.Info().Msg("Loading URLS for crawl")
 				err = dsm.loadURLsForCrawl(dsm.config.CrawlExecutionID)
 				if err != nil {
 					log.Warn().Err(err).Str("executionID", dsm.config.CrawlExecutionID).
 						Msg("Failed to load URLs for execution ID, but continuing")
 				}
-
+				log.Info().Msg("Loading Pages into memory")
 				// Load all the pages from this layer map into memory with "unfetched" status
 				err = dsm.loadPagesIntoMemory(dsm.config.CrawlExecutionID, false)
 				if err != nil {
@@ -557,12 +559,17 @@ func (dsm *DaprStateManager) initializeURLCache() error {
 func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
 	// Load the layer map for this crawl
 	layerMapKey := fmt.Sprintf("%s/layer_map", crawlID)
+
+	log.Info().Str("layer_map_key", layerMapKey).Msg("Getting layer map REMOVE")
+
 	layerMapResponse, err := (*dsm.client).GetState(
 		context.Background(),
 		dsm.stateStoreName,
 		layerMapKey,
 		nil,
 	)
+
+	log.Info().Str("layer_map_key", layerMapKey).Msg("Layer map received REMOVE")
 
 	if err != nil || layerMapResponse.Value == nil {
 		return fmt.Errorf("failed to load layer map for crawl %s: %w", crawlID, err)
@@ -574,43 +581,28 @@ func (dsm *DaprStateManager) loadURLsForCrawl(crawlID string) error {
 		return fmt.Errorf("failed to parse layer map for crawl %s: %w", crawlID, err)
 	}
 
-	// Track how many URLs we add
-	addedCount := 0
+	log.Info().Str("layer_map_key", layerMapKey).Msg("Parsed layer map REMOVE")
 
-	// For each layer, get all page IDs
-	for _, pageIDs := range layerMap {
-		for _, pageID := range pageIDs {
-			// Fetch the page from Dapr
-			pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
-			pageResponse, err := (*dsm.client).GetState(
-				context.Background(),
-				dsm.stateStoreName,
-				pageKey,
-				nil,
-			)
-
-			if err != nil || pageResponse.Value == nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
-				continue
-			}
-
-			var page Page
-			err = json.Unmarshal(pageResponse.Value, &page)
-			if err != nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
-				continue
-			}
-
-			// Add URL to cache
-			dsm.urlCacheMutex.Lock()
-			dsm.urlCache[page.URL] = fmt.Sprintf("%s:%s", crawlID, page.ID)
-			dsm.urlCacheMutex.Unlock()
-
-			addedCount++
-		}
+	// flatten page ids into list
+	var allIDs []string
+	for _, ids := range layerMap {
+		allIDs = append(allIDs, ids...)
 	}
 
-	log.Debug().Str("crawlID", crawlID).Int("urlCount", addedCount).Msg("Loaded URLs for crawl")
+	pages, err := dsm.fetchAllPages(crawlID, allIDs)
+	if err != nil {
+		return err
+	}
+
+	// 4. Update Cache in one pass
+	dsm.urlCacheMutex.Lock()
+	for _, page := range pages {
+		dsm.urlCache[page.URL] = fmt.Sprintf("%s:%s", crawlID, page.ID)
+	}
+	dsm.urlCacheMutex.Unlock()
+
+	log.Info().Str("crawlID", crawlID).Int("urlCount", len(pages)).Msg("Loaded URLs for crawl")
+
 	return nil
 }
 
@@ -682,7 +674,7 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 	}
 
 	// to avoid overwhelming statestore for large seed counts
-	const maxConcurrentDaprCalls = 100
+	const maxConcurrentDaprCalls = 1000
 	sem := make(chan struct{}, maxConcurrentDaprCalls)
 
 	// Update in-memory structures for each page
@@ -813,52 +805,75 @@ func (dsm *DaprStateManager) UpdateCrawlMetadata(crawlID string, metadata map[st
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	// Use errgroup to perform save operations concurrently
-	var eg errgroup.Group
+	// // Use errgroup to perform save operations concurrently
+	// var eg errgroup.Group
 
-	// 1. Save with formatted key
-	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
-		if err != nil {
-			log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
-			return err
-		}
-		return nil
-	})
+	// // 1. Save with formatted key
+	// metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
 
-	// 2. Save with direct crawl ID key
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
-		}
-		// Continue even if this fails as it's redundant
-		return nil
-	})
+	// // 2. Save with direct crawl ID key
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+	// 	}
+	// 	// Continue even if this fails as it's redundant
+	// 	return nil
+	// })
 
-	// 3. Save with execution ID key
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
-		}
-		// Continue even if this fails as it's redundant
-		return nil
-	})
+	// // 3. Save with execution ID key
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
+	// 	}
+	// 	// Continue even if this fails as it's redundant
+	// 	return nil
+	// })
 
-	// Wait for all operations to complete, fail only if the primary one fails
-	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("failed to update metadata: %w", err)
+	// // Wait for all operations to complete, fail only if the primary one fails
+	// if err := eg.Wait(); err != nil {
+	// 	return fmt.Errorf("failed to update metadata: %w", err)
+	// }
+
+	keys := []struct {
+		key     string
+		keyType string
+	}{
+		{fmt.Sprintf("%s/metadata", dsm.config.CrawlID), "formatted key"},
+		{dsm.config.CrawlID, "direct key"},
+		{dsm.config.CrawlExecutionID, "execution ID"},
 	}
 
-	log.Info().
-		Str("crawlID", crawlID).
-		Str("executionID", dsm.config.CrawlExecutionID).
-		Str("status", metadataCopy.Status).
-		Msg("Crawl metadata updated in DAPR")
+	for i, k := range keys {
+		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, metadataData, nil)
+		if err == nil {
+			log.Info().
+				Str("crawlID", crawlID).
+				Str("executionID", dsm.config.CrawlExecutionID).
+				Str("status", metadataCopy.Status).
+				Str("key", k.key).
+				Str("key_type", k.keyType).
+				Msg("Crawl metadata updated in DAPR using")
+			return nil
+		}
+		if i == 0 {
+			log.Error().Err(err).Str("key", k.key).Msg("Primary key failed")
+		} else {
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Fallback key failed")
+		}
+	}
 
-	return nil
+	return fmt.Errorf("failed to save metadata with all attempted keys")
+
 }
 
 // SaveState persists the current state to Dapr
@@ -918,79 +933,156 @@ func (dsm *DaprStateManager) SaveState() error {
 		return fmt.Errorf("failed to marshal layer map: %w", err)
 	}
 
-	// Use errgroup to manage all concurrent DAPR operations
+	// // Use errgroup to manage all concurrent DAPR operations
+	// var eg errgroup.Group
+
+	// // 1. Save metadata with different key formats
+	// metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
+
+	// // Also save with direct crawl ID
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // Also save with execution ID
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // 2. Save layer map data
+	// layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, layerMapKey, layerMapData, nil)
+	// 	if err != nil {
+	// 		log.Error().Err(err).Str("key", layerMapKey).Msg("Failed to save layer map")
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
+
+	// // Save with alternate key format as well
+	// alternateLayerMapKey := fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID)
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, alternateLayerMapKey, layerMapData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", alternateLayerMapKey).Msg("Failed to save layer map with alternate key")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // 3. Save active crawl indicator
+	// activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
+	// activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
+	// 	dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
+
+	// eg.Go(func() error {
+	// 	err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
+	// 	if err != nil {
+	// 		log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator")
+	// 	}
+	// 	return nil // Non-critical, continue even if it fails
+	// })
+
+	// // Wait for all operations to complete
+	// if err := eg.Wait(); err != nil {
+	// 	return fmt.Errorf("failed to save state: %w", err)
+	// }
+
+	// Use errgroup to manage the three major grouping operations concurrently
 	var eg errgroup.Group
 
-	// 1. Save metadata with different key formats
-	metadataKey := fmt.Sprintf("%s/metadata", dsm.config.CrawlID)
+	// 1. Concurrent Block: Save Metadata with Fallback Logic
 	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, metadataKey, metadataData, nil)
-		if err != nil {
-			log.Error().Err(err).Str("key", metadataKey).Msg("Failed to save metadata with formatted key")
-			return err
+		metadataKeys := []struct {
+			key     string
+			keyType string
+		}{
+			{fmt.Sprintf("%s/metadata", dsm.config.CrawlID), "formatted key"},
+			{dsm.config.CrawlID, "direct key"},
+			{dsm.config.CrawlExecutionID, "execution ID"},
+		}
+
+		for i, k := range metadataKeys {
+			err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, metadataData, nil)
+			if err == nil {
+				return nil // Success! Exit this goroutine
+			}
+
+			// Log the failure
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed metadata save attempt")
+
+			// If this was the last attempt and it failed, return the error to the group
+			if i == len(metadataKeys)-1 {
+				return fmt.Errorf("all metadata save attempts failed: %w", err)
+			}
 		}
 		return nil
 	})
 
-	// Also save with direct crawl ID
+	// 2. Concurrent Block: Save Layer Map with Fallback Logic
 	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlID).Msg("Failed to save metadata with direct key")
+		layerKeys := []struct {
+			key     string
+			keyType string
+		}{
+			{fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID), "primary key"},
+			{fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID), "alternate key"},
 		}
-		return nil // Non-critical, continue even if it fails
-	})
 
-	// Also save with execution ID
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, dsm.config.CrawlExecutionID, metadataData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", dsm.config.CrawlExecutionID).Msg("Failed to save metadata with execution ID")
-		}
-		return nil // Non-critical, continue even if it fails
-	})
+		for i, k := range layerKeys {
+			err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, k.key, layerMapData, nil)
+			if err == nil {
+				return nil // Success!
+			}
 
-	// 2. Save layer map data
-	layerMapKey := fmt.Sprintf("%s/layer_map", dsm.config.CrawlExecutionID)
-	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, layerMapKey, layerMapData, nil)
-		if err != nil {
-			log.Error().Err(err).Str("key", layerMapKey).Msg("Failed to save layer map")
-			return err
+			log.Warn().Err(err).Str("key", k.key).Str("key_type", k.keyType).Msg("Failed layer map save attempt")
+
+			if i == len(layerKeys)-1 {
+				return fmt.Errorf("all layer map save attempts failed: %w", err)
+			}
 		}
 		return nil
 	})
 
-	// Save with alternate key format as well
-	alternateLayerMapKey := fmt.Sprintf("%s/layer_map/%s", dsm.config.CrawlID, dsm.config.CrawlExecutionID)
+	// 3. Concurrent Block: Save Active Crawl Indicator
 	eg.Go(func() error {
-		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, alternateLayerMapKey, layerMapData, nil)
-		if err != nil {
-			log.Warn().Err(err).Str("key", alternateLayerMapKey).Msg("Failed to save layer map with alternate key")
-		}
-		return nil // Non-critical, continue even if it fails
-	})
+		activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
+		activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
+			dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
 
-	// 3. Save active crawl indicator
-	activeKey := fmt.Sprintf("active_crawl/%s", dsm.config.CrawlID)
-	activeData := []byte(fmt.Sprintf(`{"crawl_id":"%s","execution_id":"%s","timestamp":"%s"}`,
-		dsm.config.CrawlID, dsm.config.CrawlExecutionID, time.Now().Format(time.RFC3339)))
-
-	eg.Go(func() error {
 		err := (*dsm.client).SaveState(ctx, dsm.stateStoreName, activeKey, activeData, nil)
 		if err != nil {
-			log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator")
+			log.Warn().Err(err).Str("key", activeKey).Msg("Failed to save active crawl indicator (non-critical)")
 		}
-		return nil // Non-critical, continue even if it fails
+		return nil
 	})
 
-	// Wait for all operations to complete
+	// Wait for all three groups to finish
 	if err := eg.Wait(); err != nil {
-		return fmt.Errorf("failed to save state: %w", err)
+		return fmt.Errorf("state persistence failed: %w", err)
 	}
 
-	log.Debug().Str("crawlID", dsm.config.CrawlID).Str("executionID", dsm.config.CrawlExecutionID).
-		Msg("Successfully saved state to DAPR")
+	log.Debug().
+		Str("crawlID", dsm.config.CrawlID).
+		Str("executionID", dsm.config.CrawlExecutionID).
+		Msg("Successfully completed all concurrent DAPR state operations")
+
 	return nil
 }
 
@@ -1014,11 +1106,17 @@ func (dsm *DaprStateManager) StorePost(channelID string, post model.Post) error 
 			return fmt.Errorf("Chunk: Unable to marshall data for writing to file: %w", err)
 		}
 
-		filename := fmt.Sprintf("%s/post_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
+		tempFilename := fmt.Sprintf("%s/temp_%s_%d.jsonl", dsm.BaseStateManager.config.CombineTempDir, post.PostUID, time.Now().UnixNano())
+		watchFilename := fmt.Sprintf("%s/post_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, post.PostUID, time.Now().UnixNano())
 
-		err = os.WriteFile(filename, jsonData, 0644)
+		err = os.WriteFile(tempFilename, jsonData, 0644)
 		if err != nil {
-			return fmt.Errorf("Chunk: Unable to write to combined filename %s: %w", filename, err)
+			return fmt.Errorf("Chunk: Unable to write to combined filename %s: %w", tempFilename, err)
+		}
+
+		err = os.Rename(tempFilename, watchFilename)
+		if err != nil {
+			return fmt.Errorf("Chunk: Unable to move %s to %s: %w", tempFilename, watchFilename, err)
 		}
 
 		return nil
@@ -2652,7 +2750,7 @@ func (dsm *DaprStateManager) loadURLsFromPreviousCrawls() (map[string]string, er
 }
 
 func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) error {
-	loadedCount := 0
+	// loadedCount := 0
 
 	// Check if we're resuming the same crawl execution
 	// We consider it the same execution if we're using the exact same executionID
@@ -2663,82 +2761,127 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) erro
 		Str("loadingCrawlID", crawlID).
 		Msg("Loading pages with execution context")
 
-	// For each layer in the layer map
-	for _, pageIDs := range dsm.layerMap {
-		// For each page ID in the layer
-		for _, pageID := range pageIDs {
-			// Check if we already have this page in memory
-			if _, exists := dsm.pageMap[pageID]; exists {
-				continue
+	var allIDs []string
+	for _, ids := range dsm.layerMap {
+		for _, id := range ids {
+			if _, exists := dsm.pageMap[id]; !exists {
+				allIDs = append(allIDs, id)
 			}
-
-			// Fetch the page from Dapr
-			pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
-			pageResponse, err := (*dsm.client).GetState(
-				context.Background(),
-				dsm.stateStoreName,
-				pageKey,
-				nil,
-			)
-
-			if err != nil || pageResponse.Value == nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
-				continue
-			}
-
-			var page Page
-			err = json.Unmarshal(pageResponse.Value, &page)
-			if err != nil {
-				log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
-				continue
-			}
-
-			// Add page to in-memory page map
-			if !cont {
-				if !isResumingSameCrawlExecution {
-					// When not resuming the same execution, mark ALL pages as unfetched
-					// to ensure they get reprocessed with the new execution ID
-					oldStatus := page.Status
-					page.Status = "unfetched"
-					log.Debug().
-						Str("pageID", pageID).
-						Str("url", page.URL).
-						Str("old_status", oldStatus).
-						Bool("resuming_same_execution", isResumingSameCrawlExecution).
-						Msg("New execution: Marking page as unfetched regardless of previous status")
-				} else {
-					// When resuming same execution, preserve fetched status when loading from DAPR
-					if page.Status != "fetched" {
-						page.Status = "unfetched"
-						log.Debug().
-							Str("pageID", pageID).
-							Str("url", page.URL).
-							Str("old_status", page.Status).
-							Bool("resuming_same_execution", isResumingSameCrawlExecution).
-							Msg("Resetting non-fetched page status to unfetched in same execution")
-					} else {
-						log.Debug().
-							Str("pageID", pageID).
-							Str("url", page.URL).
-							Bool("resuming_same_execution", isResumingSameCrawlExecution).
-							Msg("Preserving fetched status from Dapr storage in same execution")
-					}
-				}
-				page.Timestamp = time.Now()
-			}
-
-			// Clear any previous messages or processing data
-			page.Messages = []Message{}
-
-			// Update the timestamp to current time
-			dsm.pageMap[pageID] = page
-			loadedCount++
 		}
 	}
 
+	pages, err := dsm.fetchAllPages(crawlID, allIDs)
+	if err != nil {
+		return err
+	}
+
+	for _, page := range pages {
+		if !cont {
+			if !isResumingSameCrawlExecution {
+				page.Status = "unfetched"
+				// When not resuming the same execution, mark ALL pages as unfetched
+				// to ensure they get reprocessed with the new execution ID
+				oldStatus := page.Status
+				page.Status = "unfetched"
+				log.Debug().
+					Str("pageID", page.ID).
+					Str("url", page.URL).
+					Str("old_status", oldStatus).
+					Bool("resuming_same_execution", isResumingSameCrawlExecution).
+					Msg("New execution: Marking page as unfetched regardless of previous status")
+			} else if page.Status != "fetched" {
+				page.Status = "unfetched"
+				log.Debug().
+					Str("pageID", page.ID).
+					Str("url", page.URL).
+					Str("old_status", page.Status).
+					Bool("resuming_same_execution", isResumingSameCrawlExecution).
+					Msg("Resetting non-fetched page status to unfetched in same execution")
+			} else {
+				// // When resuming same execution, preserve fetched status when loading from DAPR
+			}
+			page.Timestamp = time.Now()
+		}
+		page.Messages = []Message{}
+		dsm.pageMap[page.ID] = page
+	}
+
+	// // For each layer in the layer map
+	// for _, pageIDs := range dsm.layerMap {
+	// 	// For each page ID in the layer
+	// 	for _, pageID := range pageIDs {
+	// 		// Check if we already have this page in memory
+	// 		if _, exists := dsm.pageMap[pageID]; exists {
+	// 			continue
+	// 		}
+
+	// 		// Fetch the page from Dapr
+	// 		pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
+	// 		pageResponse, err := (*dsm.client).GetState(
+	// 			context.Background(),
+	// 			dsm.stateStoreName,
+	// 			pageKey,
+	// 			nil,
+	// 		)
+
+	// 		if err != nil || pageResponse.Value == nil {
+	// 			log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
+	// 			continue
+	// 		}
+
+	// 		var page Page
+	// 		err = json.Unmarshal(pageResponse.Value, &page)
+	// 		if err != nil {
+	// 			log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
+	// 			continue
+	// 		}
+
+	// 		// Add page to in-memory page map
+	// 		if !cont {
+	// 			if !isResumingSameCrawlExecution {
+	// 				// When not resuming the same execution, mark ALL pages as unfetched
+	// 				// to ensure they get reprocessed with the new execution ID
+	// 				oldStatus := page.Status
+	// 				page.Status = "unfetched"
+	// 				log.Debug().
+	// 					Str("pageID", pageID).
+	// 					Str("url", page.URL).
+	// 					Str("old_status", oldStatus).
+	// 					Bool("resuming_same_execution", isResumingSameCrawlExecution).
+	// 					Msg("New execution: Marking page as unfetched regardless of previous status")
+	// 			} else {
+	// 				// When resuming same execution, preserve fetched status when loading from DAPR
+	// 				if page.Status != "fetched" {
+	// 					page.Status = "unfetched"
+	// 					log.Debug().
+	// 						Str("pageID", pageID).
+	// 						Str("url", page.URL).
+	// 						Str("old_status", page.Status).
+	// 						Bool("resuming_same_execution", isResumingSameCrawlExecution).
+	// 						Msg("Resetting non-fetched page status to unfetched in same execution")
+	// 				} else {
+	// 					log.Debug().
+	// 						Str("pageID", pageID).
+	// 						Str("url", page.URL).
+	// 						Bool("resuming_same_execution", isResumingSameCrawlExecution).
+	// 						Msg("Preserving fetched status from Dapr storage in same execution")
+	// 				}
+	// 			}
+	// 			page.Timestamp = time.Now()
+	// 		}
+
+	// 		// Clear any previous messages or processing data
+	// 		page.Messages = []Message{}
+
+	// 		// Update the timestamp to current time
+	// 		dsm.pageMap[pageID] = page
+	// 		loadedCount++
+	// 	}
+	// }
+
 	log.Info().
 		Str("crawlID", crawlID).
-		Int("pageCount", loadedCount).
+		Int("pageCount", len(pages)).
 		Bool("resuming_same_execution", isResumingSameCrawlExecution).
 		Msg("Loaded pages into memory from DAPR")
 	return nil
@@ -3275,4 +3418,82 @@ func (dsm *DaprStateManager) UploadCombinedFile(filename string) error {
 		return fmt.Errorf("failed to store post via Dapr: %w", err)
 	}
 	return nil
+}
+
+func (dsm *DaprStateManager) fetchAllPages(crawlID string, pageIDs []string) ([]Page, error) {
+
+	// TODO: figure out correct batch size here
+	const (
+		batchSize   = 100
+		maxFailures = 3 // Exit entirely if 3 batches fail
+	)
+
+	pages := make([]Page, 0, len(pageIDs))
+	var mu sync.Mutex
+	var failureCount int32
+
+	// errgroup.WithContext handles the "Stop everything else" logic automatically
+	g, ctx := errgroup.WithContext(context.Background())
+
+	for i := 0; i < len(pageIDs); i += batchSize {
+		i := i
+		end := i + batchSize
+		if end > len(pageIDs) {
+			end = len(pageIDs)
+		}
+
+		g.Go(func() error {
+			// 1. Check if another goroutine already triggered a shutdown
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			keys := make([]string, 0, end-i)
+			for j := i; j < end; j++ {
+				keys = append(keys, fmt.Sprintf("%s/page/%s", crawlID, pageIDs[j]))
+			}
+
+			// 2. Attempt the Dapr call
+			resp, err := (*dsm.client).GetBulkState(ctx, dsm.stateStoreName, keys, nil, 10)
+
+			if err != nil {
+				newFailures := atomic.AddInt32(&failureCount, 1)
+				log.Error().Err(err).Int32("failure_count", newFailures).Msg("Batch fetch failed")
+
+				// 3. If we hit the limit, return the error to trigger errgroup cancellation
+				if newFailures >= maxFailures {
+					return fmt.Errorf("halted: reached %d batch failures", maxFailures)
+				}
+				// Otherwise, just return nil to let other batches try to finish
+				// (or return err if you want to stop on the very first failure)
+				return nil
+			}
+
+			// 4. Process successful results
+			localPages := make([]Page, 0, len(resp))
+			for _, item := range resp {
+				if len(item.Value) == 0 {
+					continue
+				}
+				var p Page
+				if err := json.Unmarshal(item.Value, &p); err == nil {
+					localPages = append(localPages, p)
+				}
+			}
+
+			mu.Lock()
+			pages = append(pages, localPages...)
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	// Wait returns the first error returned by any goroutine
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return pages, nil
 }

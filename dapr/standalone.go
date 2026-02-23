@@ -4,6 +4,7 @@ package dapr
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -62,9 +63,9 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			return
 		}
 	}()
-
-	log.Info().Msg("Waiting 60 seconds for Dapr sidecar to initialize...")
-	time.Sleep(60 * time.Second)
+	// TODO: use DAPR api to ascertain when it's ready. maybe a read of small file from statestore
+	log.Info().Msg("Waiting 30 seconds for Dapr sidecar to initialize...")
+	time.Sleep(30 * time.Second)
 	log.Info().Msg("Dapr sidecar initialization wait complete")
 
 	// Create a file cleaner that targets the same location as where connections are unzipped
@@ -182,10 +183,17 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		return
 	}
 
+	// Create context for canceling processes like chunking after completion
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var chunker *chunk.Chunker
+
 	// Turn on chunking if necessary
 	if crawlCfg.CombineFiles {
-		chunker := chunk.NewChunker(
+		chunker = chunk.NewChunker(
+			ctx,
 			sm,
+			crawlCfg.CombineTempDir,
 			crawlCfg.CombineWatchDir,
 			crawlCfg.CombineWriteDir,
 			crawlCfg.CombineTriggerSize*1024*1024,
@@ -252,6 +260,16 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		return
 	}
 	log.Info().Msg("All items processed successfully.")
+
+	if crawlCfg.CombineFiles {
+		log.Info().Str("log_tag", "chunk_launch").Msg("Closing chunker")
+		cancel()
+		log.Info().Str("log_tag", "chunk_launch").Msg("Waiting for chunker shutdown")
+		chunker.Wait()
+		log.Info().Str("log_tag", "chunk_launch").Msg("Verifying chunker shutdown")
+		chunker.VerifyCleanup()
+	}
+
 }
 
 // processLayerInParallel processes all pages in a layer with a maximum of maxWorkers concurrent goroutines.
@@ -283,6 +301,16 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Log the original count of pages
 	originalCount := len(layer.Pages)
+
+	// create pool of youtube clients
+	var ytPool chan *ytWorker
+	if crawlCfg.Platform == "youtube" {
+		ytPool = make(chan *ytWorker, maxWorkers)
+		for i := 0; i < maxWorkers; i++ {
+			w, _ := createFreshWorker(sm, crawlCfg)
+			ytPool <- w
+		}
+	}
 
 	// Process each page in the current layer, ensuring each URL is processed only once
 	for pageIndex := 0; pageIndex < len(layer.Pages); pageIndex++ {
@@ -370,18 +398,38 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 			if crawlCfg.Platform == "youtube" {
 				// YouTube platform processing
 				log.Info().Msgf("Processing YouTube channel: %s", page.URL)
-				ytCrawler, ytClient, clientCtx, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
-				if ytInitErr != nil {
-					err = ytInitErr
-				} else {
-					discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler, crawlCfg, page, ctx)
-				}
-				// Disconnect YouTube client
-				if ytClient != nil {
-					if disconnectErr := ytClient.Disconnect(clientCtx); disconnectErr != nil {
-						log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
+				ytCrawler := <-ytPool
+				discoveredChannels, err = FetchYoutubeChannelInfoAndVideos(ytCrawler.crawler, crawlCfg, page, ctx)
+				ytCrawler.usage++
+
+				// Rotate if
+				// TODO: move pool logic to another function/package
+				if ytCrawler.usage >= ytCrawler.retireAt {
+					log.Info().Int("usage", ytCrawler.usage).Str("log_tag", "FOCUS").Int("channels_crawled", ytCrawler.usage).Msg("Youtube Crawler retirement triggered")
+
+					// Cleanup old
+					if ytCrawler.client != nil {
+						ytCrawler.client.Disconnect(ytCrawler.ctx)
+					}
+					if ytCrawler.cancel != nil {
+						ytCrawler.cancel() // Vital for OOM prevention
+					}
+
+					ytCrawler.client = nil
+					ytCrawler.crawler = nil
+					ytCrawler.ctx = nil
+
+					// Replace
+					newCrawler, err := createFreshWorker(sm, crawlCfg)
+					if err == nil {
+						ytCrawler = newCrawler
+					} else {
+						log.Error().Err(err).Str("log_tag", "FOCUS").Msg("Failed to rotate youtube crawler")
+						ytCrawler.usage = 0 // Fallback: reset counter if init fails
 					}
 				}
+
+				ytPool <- ytCrawler
 			} else {
 				// Telegram platform processing (default)
 				// Use the pooled channel processing
@@ -389,7 +437,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				discoveredChannels, err = crawl.RunForChannelWithPool(ctx, &page, crawlCfg.StorageRoot, sm, crawlCfg)
 			}
 
-			log.Info().Msgf("Page processed for %s", page.URL)
+			log.Info().Str("page_url", page.URL).Str("connection_id", page.ConnectionID).Msg("Page processed")
 
 			if err != nil {
 				log.Error().Stack().Err(err).Msgf("Error processing item %s", page.URL)
@@ -428,6 +476,15 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 
 	// Wait for all pages to be processed
 	wg.Wait()
+
+	if crawlCfg.Platform == "youtube" {
+		close(ytPool)
+		for ytCrawler := range ytPool {
+			if disconnectErr := ytCrawler.client.Disconnect(ytCrawler.ctx); disconnectErr != nil {
+				log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
+			}
+		}
+	}
 
 	// Log summary of unique pages processed
 	uniqueCount := len(uniquePages)
@@ -523,6 +580,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			SamplingMethod:  crawlCfg.SamplingMethod,
 			SeedSize:        crawlCfg.SeedSize,
 			CombineFiles:    crawlCfg.CombineFiles,
+			CombineTempDir:  crawlCfg.CombineTempDir,
 			CombineWatchDir: crawlCfg.CombineWatchDir,
 		}
 	} else {
@@ -535,6 +593,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			SamplingMethod:   crawlCfg.SamplingMethod,
 			SeedSize:         crawlCfg.SeedSize,
 			CombineFiles:     crawlCfg.CombineFiles,
+			CombineTempDir:   crawlCfg.CombineTempDir,
 			CombineWatchDir:  crawlCfg.CombineWatchDir,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
@@ -662,10 +721,11 @@ func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common
 	}
 }
 
-func InitializeYoutubeCrawlerComponents(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (crawler.Crawler, clientpkg.Client, context.Context, error) {
+func InitializeYoutubeCrawlerComponents(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (crawler.Crawler, clientpkg.Client, context.Context, context.CancelFunc, error) {
 	// Initialize YouTube components
 	var err error
-	clientCtx := context.Background()
+	// clientCtx := context.Background()
+	clientCtx, clientCtxCancel := context.WithCancel(context.Background())
 	clientFactory := clientpkg.NewDefaultClientFactory()
 
 	// Debug API key passing
@@ -684,34 +744,34 @@ func InitializeYoutubeCrawlerComponents(sm state.StateManagementInterface, crawl
 	if ytErr != nil {
 		err = fmt.Errorf("failed to create YouTube client: %w", ytErr)
 		log.Error().Err(err).Msg("YouTube client creation failed")
-		return nil, nil, clientCtx, err
+		return nil, nil, clientCtx, clientCtxCancel, err
 	}
 	// Connect to YouTube API
 	if ytErr = ytClient.Connect(clientCtx); ytErr != nil {
 		err = fmt.Errorf("failed to connect to YouTube API: %w", ytErr)
 		log.Error().Err(err).Msg("YouTube API connection failed")
-		return nil, ytClient, clientCtx, err
+		return nil, ytClient, clientCtx, clientCtxCancel, err
 	}
 	// Create crawler factory and register crawlers
 	factory := crawler.NewCrawlerFactory()
 	if ytErr = crawlercommon.RegisterAllCrawlers(factory); ytErr != nil {
 		err = fmt.Errorf("failed to register crawlers: %w", ytErr)
 		log.Error().Err(err).Msg("Failed to register YouTube crawler")
-		return nil, ytClient, clientCtx, err
+		return nil, ytClient, clientCtx, clientCtxCancel, err
 	}
 	// Create YouTube crawler
 	ytCrawler, ytErr := factory.GetCrawler(crawler.PlatformYouTube)
 	if ytErr != nil {
 		err = fmt.Errorf("failed to create YouTube crawler: %w", ytErr)
 		log.Error().Err(err).Msg("Failed to create YouTube crawler")
-		return nil, ytClient, clientCtx, err
+		return nil, ytClient, clientCtx, clientCtxCancel, err
 	}
 	// Create YouTubeClient adapter
 	ytAdapter, adapterErr := youtube.NewClientAdapter(ytClient)
 	if adapterErr != nil {
 		err = fmt.Errorf("failed to create YouTube client adapter: %w", adapterErr)
 		log.Error().Err(err).Msg("YouTube client adapter creation failed")
-		return nil, ytClient, clientCtx, err
+		return nil, ytClient, clientCtx, clientCtxCancel, err
 	}
 	// Initialize YouTube crawler with the adapter
 	crawlerConfig := map[string]interface{}{
@@ -725,9 +785,9 @@ func InitializeYoutubeCrawlerComponents(sm state.StateManagementInterface, crawl
 	if ytErr = ytCrawler.Initialize(clientCtx, crawlerConfig); ytErr != nil {
 		err = fmt.Errorf("failed to initialize YouTube crawler: %w", ytErr)
 		log.Error().Err(err).Msg("Failed to initialize YouTube crawler")
-		return ytCrawler, ytClient, clientCtx, err
+		return ytCrawler, ytClient, clientCtx, clientCtxCancel, err
 	}
-	return ytCrawler, ytClient, clientCtx, nil
+	return ytCrawler, ytClient, clientCtx, clientCtxCancel, nil
 }
 
 func CalculateDateFilters(crawlCfg common.CrawlerConfig) (time.Time, time.Time) {
@@ -802,18 +862,13 @@ func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common
 		log.Error().Err(err).Msg("Failed to fetch YouTube videos")
 		return []*state.Page{}, err
 	} else {
-		log.Info().
+		log.Debug().
 			Int("video_count", len(result.Posts)).
 			Str("channel", page.URL).
 			Msg("Successfully crawled YouTube channel")
 
 		// For now, we don't discover channels from YouTube
 		discoveredChannels = []*state.Page{}
-	}
-
-	// Cleanup YouTube crawler resources
-	if closeErr := ytCrawler.Close(); closeErr != nil {
-		log.Warn().Err(closeErr).Msg("Error closing YouTube crawler")
 	}
 	return discoveredChannels, nil
 }
@@ -837,7 +892,7 @@ func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.C
 		NullValidator:    crawlCfg.NullValidator,
 	}
 
-	ytCrawler, ytClient, clientCtx, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+	ytCrawler, ytClient, clientCtx, _, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
 	if ytInitErr != nil {
 		return
 	} else {
@@ -863,4 +918,33 @@ func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.C
 		}
 	}
 	return
+}
+
+type ytWorker struct {
+	crawler  crawler.Crawler
+	client   clientpkg.Client
+	ctx      context.Context
+	cancel   context.CancelFunc // Now we have something to call!
+	usage    int
+	retireAt int
+}
+
+func createFreshWorker(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (*ytWorker, error) {
+	c, cl, cCtx, cCtxCancel, err := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// Define a base life and add ±20% jitter
+	base := 50
+	jitter := rand.Intn(21) - 10 // range -10 to +10
+
+	return &ytWorker{
+		crawler:  c,
+		client:   cl,
+		ctx:      cCtx,
+		cancel:   cCtxCancel, // Call this if you have it!
+		usage:    0,
+		retireAt: base + jitter,
+	}, nil
 }
