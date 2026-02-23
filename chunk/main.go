@@ -265,25 +265,11 @@ func (c *Chunker) recoveryWorker() {
 			time.Sleep(5 * time.Second)
 			log.Info().Str("log_tag", "chunk_rw").Msg("Starting directory rescan for missed files...")
 
-			entries, err := os.ReadDir(c.watchDir)
+			files, err := listJSONLFiles(c.watchDir, "chunk_rw")
 			if err != nil {
 				log.Error().Err(err).Str("log_tag", "chunk_rw").Msg("Recovery rescan failed to read directory")
 				continue
 			}
-
-			// Sort entries by ModTime to ensure chronological processing
-			var files []fs.FileInfo
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
-					if info, err := entry.Info(); err == nil {
-						files = append(files, info)
-					}
-				}
-			}
-
-			slices.SortFunc(files, func(a, b fs.FileInfo) int {
-				return a.ModTime().Compare(b.ModTime())
-			})
 
 			for _, file := range files {
 				fullPath := filepath.Join(c.watchDir, file.Name())
@@ -391,15 +377,7 @@ func (c *Chunker) consumeBatches(jobs <-chan []FileEntry) {
 		log.Info().Str("combined_file", outputName).Int64("total_uploaded_size_bytes", c.totalUploadSize).Int32("total_posts_uploaded", c.postsUploaded).
 			Str("log_tag", "chunk_cb").Msg("Upload completed. Deleting source files")
 
-		for _, file := range batch {
-			if err := os.Remove(file.Path); err != nil {
-				log.Error().Err(err).Str("file_name", file.Path).Str("log_tag", "chunk_cb").Msg("Failed to remove file")
-			}
-		}
-
-		if err := os.Remove(outputName); err != nil {
-			log.Error().Err(err).Str("file_name", outputName).Str("log_tag", "chunk_cb").Msg("Failed to delete combined file")
-		}
+		cleanupAfterUpload(batch, outputName, "chunk_cb")
 	}
 	log.Info().Str("log_tag", "chunk_cb").Msg("All batches uploaded and deleted")
 }
@@ -500,6 +478,47 @@ func (c *Chunker) shouldRotate() bool {
 	return rotated == 0 || c.lastUploadTime.Load() > rotated
 }
 
+// listJSONLFiles reads dir and returns all .jsonl files sorted by modification
+// time. Stat errors for individual entries are logged and skipped.
+func listJSONLFiles(dir, logTag string) ([]fs.FileInfo, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var files []fs.FileInfo
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			log.Warn().Err(err).Str("name", entry.Name()).Str("log_tag", logTag).
+				Msg("Could not stat file, skipping")
+			continue
+		}
+		files = append(files, info)
+	}
+	slices.SortFunc(files, func(a, b fs.FileInfo) int {
+		return a.ModTime().Compare(b.ModTime())
+	})
+	return files, nil
+}
+
+// cleanupAfterUpload removes the source files in batch and the combined output
+// file after a successful upload. Errors are logged but not returned.
+func cleanupAfterUpload(batch []FileEntry, combined, logTag string) {
+	for _, f := range batch {
+		if err := os.Remove(f.Path); err != nil {
+			log.Error().Err(err).Str("file", f.Path).Str("log_tag", logTag).
+				Msg("Failed to delete source file after upload")
+		}
+	}
+	if err := os.Remove(combined); err != nil {
+		log.Error().Err(err).Str("file", combined).Str("log_tag", logTag).
+			Msg("Failed to delete combined file after upload")
+	}
+}
+
 // VerifyCleanup is called after the pipeline has fully drained (after Wait).
 // It scans all three directories and uploads any files that the pipeline did not
 // process — typically caused by the race between context cancellation and the
@@ -565,7 +584,7 @@ func (c *Chunker) recoverCombineDir() {
 // behaviour as processBatches).  On upload failure the combined file and its
 // sources are left on disk for manual recovery.
 func (c *Chunker) recoverWatchDir() {
-	entries, err := os.ReadDir(c.watchDir)
+	files, err := listJSONLFiles(c.watchDir, "chunk_vc")
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Error().Err(err).Str("dir", "Watch").Str("log_tag", "chunk_vc").
@@ -574,29 +593,10 @@ func (c *Chunker) recoverWatchDir() {
 		return
 	}
 
-	var files []fs.FileInfo
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			log.Warn().Err(err).Str("name", entry.Name()).Str("log_tag", "chunk_vc").
-				Msg("Could not stat file during watch-dir recovery, skipping")
-			continue
-		}
-		files = append(files, info)
-	}
-
 	if len(files) == 0 {
 		log.Info().Str("dir", "Watch").Str("log_tag", "chunk_vc").Msg("Directory is empty")
 		return
 	}
-
-	// Process in modification-time order — consistent with the recovery worker.
-	slices.SortFunc(files, func(a, b fs.FileInfo) int {
-		return a.ModTime().Compare(b.ModTime())
-	})
 
 	log.Warn().Int("count", len(files)).Str("log_tag", "chunk_vc").
 		Msg("Found leftover files in watch directory. Batching for upload.")
@@ -623,16 +623,7 @@ func (c *Chunker) recoverWatchDir() {
 			batchSize = 0
 			return
 		}
-		for _, f := range batch {
-			if err := os.Remove(f.Path); err != nil {
-				log.Error().Err(err).Str("file", f.Path).Str("log_tag", "chunk_vc").
-					Msg("Failed to delete source file after upload")
-			}
-		}
-		if err := os.Remove(combined); err != nil {
-			log.Error().Err(err).Str("file", combined).Str("log_tag", "chunk_vc").
-				Msg("Failed to delete combined file after upload")
-		}
+		cleanupAfterUpload(batch, combined, "chunk_vc")
 		batch = nil
 		batchSize = 0
 	}
