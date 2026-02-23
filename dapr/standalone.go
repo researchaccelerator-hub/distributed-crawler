@@ -183,15 +183,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		return
 	}
 
-	// Create context for canceling processes like chunking after completion
-	ctx, cancel := context.WithCancel(context.Background())
-
 	var chunker *chunk.Chunker
 
 	// Turn on chunking if necessary
 	if crawlCfg.CombineFiles {
 		chunker = chunk.NewChunker(
-			ctx,
+			context.Background(),
 			sm,
 			crawlCfg.CombineTempDir,
 			crawlCfg.CombineWatchDir,
@@ -262,12 +259,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	log.Info().Msg("All items processed successfully.")
 
 	if crawlCfg.CombineFiles {
-		log.Info().Str("log_tag", "chunk_launch").Msg("Closing chunker")
-		cancel()
-		log.Info().Str("log_tag", "chunk_launch").Msg("Waiting for chunker shutdown")
-		chunker.Wait()
-		log.Info().Str("log_tag", "chunk_launch").Msg("Verifying chunker shutdown")
-		chunker.VerifyCleanup()
+		chunker.Shutdown()
 	}
 
 }
