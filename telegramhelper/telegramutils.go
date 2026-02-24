@@ -872,10 +872,10 @@ func DetectCacheOrServer(start time.Time, endpoint string) bool {
 	var source string
 	var cacheHit bool
 
-	if duration < 15*time.Millisecond {
+	if duration < 5*time.Millisecond {
 		source = "LOCAL_CACHE"
 		cacheHit = true
-	} else if duration < 35*time.Millisecond {
+	} else if duration < 15*time.Millisecond {
 		source = "GREY_AREA"
 		cacheHit = false
 	} else {
