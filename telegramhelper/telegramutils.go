@@ -30,6 +30,7 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 	var allMessages []*client.Message
 	var fromMessageId int64 = 0 // Start from the latest message
 	var oldestMessageId int64 = 0
+	firstBatch := true
 
 	// Convert minPostDate to Unix timestamp for comparison
 	minPostUnix := minPostDate.Unix()
@@ -63,6 +64,15 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 		// If no messages are returned, break
 		if len(chatHistory.Messages) == 0 {
 			break
+		}
+
+		if firstBatch {
+			publicMsgId := chatHistory.Messages[0].Id / 1048576
+			log.Info().
+				Str("channel", page.URL).
+				Int64("total_posts", publicMsgId).
+				Msgf("Posts to crawl for channel", page.URL, publicMsgId)
+			firstBatch = false
 		}
 
 		// Check messages and add only those within the date range
