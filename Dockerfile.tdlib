@@ -20,6 +20,9 @@ RUN apk update &&\
     apk upgrade &&\
     apk add alpine-sdk linux-headers git zlib-dev gperf php cmake &&\
     git clone https://github.com/tdlib/td.git &&\
+    awk '/^void PollManager::on_update_poll_timeout\(PollId poll_id\) \{$/{print; print "  return;  // Disabled: prevents FLOOD_WAIT from messages.getPollResults"; next}1' \
+        td/td/telegram/PollManager.cpp > /tmp/pm_patched.cpp &&\
+    mv /tmp/pm_patched.cpp td/td/telegram/PollManager.cpp &&\
     cd td &&\
     rm -rf build &&\
     mkdir build &&\

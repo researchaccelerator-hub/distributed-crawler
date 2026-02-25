@@ -30,6 +30,7 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 	var allMessages []*client.Message
 	var fromMessageId int64 = 0 // Start from the latest message
 	var oldestMessageId int64 = 0
+	firstBatch := true
 
 	// Convert minPostDate to Unix timestamp for comparison
 	minPostUnix := minPostDate.Unix()
@@ -63,6 +64,15 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 		// If no messages are returned, break
 		if len(chatHistory.Messages) == 0 {
 			break
+		}
+
+		if firstBatch {
+			publicMsgId := chatHistory.Messages[0].Id / 1048576
+			log.Info().
+				Str("channel", page.URL).
+				Int64("total_posts", publicMsgId).
+				Msg("Estimated post count for channel")
+			firstBatch = false
 		}
 
 		// Check messages and add only those within the date range
@@ -872,10 +882,10 @@ func DetectCacheOrServer(start time.Time, endpoint string) bool {
 	var source string
 	var cacheHit bool
 
-	if duration < 15*time.Millisecond {
+	if duration < 5*time.Millisecond {
 		source = "LOCAL_CACHE"
 		cacheHit = true
-	} else if duration < 35*time.Millisecond {
+	} else if duration < 15*time.Millisecond {
 		source = "GREY_AREA"
 		cacheHit = false
 	} else {
@@ -883,13 +893,11 @@ func DetectCacheOrServer(start time.Time, endpoint string) bool {
 		cacheHit = false
 	}
 
-	// if cacheHit {
-	// 	log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
-	// } else {
-	// 	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
-	// }
-
-	log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	if cacheHit {
+		log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	} else {
+		log.Info().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
+	}
 
 	return cacheHit
 }

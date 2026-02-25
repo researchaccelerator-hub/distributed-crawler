@@ -259,11 +259,15 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	if err != nil {
 		return nil, err
 	}
+	var channelProfileImage string
+	if channelInfo.chat.Photo != nil {
+		channelProfileImage = channelInfo.chat.Photo.Extra
+	}
 	channelData := &model.ChannelData{
 		ChannelID:   strconv.FormatInt(channelInfo.chat.Id, 10),
 		ChannelName: channelInfo.chat.Title,
 		// ChannelDescription unavailable
-		ChannelProfileImage: channelInfo.chat.Photo.Extra,
+		ChannelProfileImage: channelProfileImage,
 		ChannelEngagementData: model.EngagementData{
 			FollowerCount: int(channelInfo.memberCount),
 			// FollowingCount unavailable
