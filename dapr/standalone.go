@@ -28,6 +28,41 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Hello, World!")
 }
 
+// waitForDaprReady polls the Dapr sidecar health endpoint until it responds with 204 (ready)
+// or the context is cancelled. The Dapr HTTP port is read from DAPR_HTTP_PORT (default: 3500).
+func waitForDaprReady(ctx context.Context) error {
+	daprHTTPPort := os.Getenv("DAPR_HTTP_PORT")
+	if daprHTTPPort == "" {
+		daprHTTPPort = "3500"
+	}
+
+	healthURL := fmt.Sprintf("http://localhost:%s/v1.0/healthz", daprHTTPPort)
+	log.Info().Str("url", healthURL).Msg("Waiting for Dapr sidecar to become ready...")
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for Dapr sidecar: %w", ctx.Err())
+		case <-ticker.C:
+			resp, err := client.Get(healthURL)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusNoContent {
+					log.Info().Msg("Dapr sidecar is ready")
+					return nil
+				}
+				log.Debug().Int("status", resp.StatusCode).Msg("Dapr sidecar not yet ready, retrying...")
+			} else {
+				log.Debug().Err(err).Msg("Dapr sidecar not yet reachable, retrying...")
+			}
+		}
+	}
+}
+
 // StartDaprStandaloneMode initializes and starts the crawler in standalone mode with Dapr integration.
 //
 // This function handles the end-to-end process of starting a Telegram crawling operation:
@@ -63,10 +98,12 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			return
 		}
 	}()
-	// TODO: use DAPR api to ascertain when it's ready. maybe a read of small file from statestore
-	log.Info().Msg("Waiting 30 seconds for Dapr sidecar to initialize...")
-	time.Sleep(30 * time.Second)
-	log.Info().Msg("Dapr sidecar initialization wait complete")
+
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer readyCancel()
+	if err := waitForDaprReady(readyCtx); err != nil {
+		log.Fatal().Err(err).Msg("Dapr sidecar did not become ready")
+	}
 
 	// Create a file cleaner that targets the same location as where connections are unzipped
 	// to ensure proper cleanup of temporary files
