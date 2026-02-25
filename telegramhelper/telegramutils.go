@@ -71,7 +71,7 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 			log.Info().
 				Str("channel", page.URL).
 				Int64("total_posts", publicMsgId).
-				Msgf("Posts to crawl for channel", page.URL, publicMsgId)
+				Msg("Estimated post count for channel")
 			firstBatch = false
 		}
 
