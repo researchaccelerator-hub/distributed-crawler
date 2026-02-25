@@ -19,7 +19,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=1 go build -o main .
+RUN CGO_ENABLED=1 CGO_LDFLAGS="-ltde2e" go build -o main .
 
 # # Stage 2: Minimal runtime image
 # FROM acrnetcus.azurecr.io/tdlib:latest
