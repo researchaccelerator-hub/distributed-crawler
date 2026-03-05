@@ -1259,13 +1259,13 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 			// Process search results - collect unique channel IDs
 			channelIDs := make(map[string]bool)
 			channelsAdded := 0
-			// invalidVideoIDs := make([]string, 0, 50)
 
 			for _, item := range searchResponse.Items {
 				channelID := item.Snippet.ChannelId
 				videoID := item.Id.VideoId
 				candidatePrefix := videoID[0:5]
 
+				// TODO: remove after testing
 				log.Info().Str("videoID", videoID).Str("candidatePrefix", candidatePrefix).Str("videoIdPrefix", videoIdPrefix).Str("prefix", prefix).Msg("Prefix information")
 
 				if prefixCase != "matchcase" {
