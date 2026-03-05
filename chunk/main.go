@@ -307,6 +307,7 @@ func (c *Chunker) processBatches(out chan<- []FileEntry) {
 			out <- batchToSend
 			state.Files = nil
 			state.Size = 0
+			log.Info().Int("file_count", len(state.Files)).Int64("buffer_size_bytes", state.Size).Str("log_tag", "chunk_pb").Msg("Current buffer")
 		}
 	}
 

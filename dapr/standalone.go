@@ -237,6 +237,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		if err := chunker.Start(); err != nil {
 			log.Fatal().Err(err).Msg("Failed to start file combiner")
 		}
+		defer chunker.Shutdown()
 	}
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
@@ -291,13 +292,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	err = sm.ExportPagesToBinding(cfg.CrawlID)
 	if err != nil {
+		log.Error().Err(err).Msg("Error exporting pages to binding")
 		return
 	}
 	log.Info().Msg("All items processed successfully.")
-
-	if crawlCfg.CombineFiles {
-		chunker.Shutdown()
-	}
 
 }
 
