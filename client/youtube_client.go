@@ -885,11 +885,15 @@ func min(a, b int) int {
 
 // generateRandomPrefix generates a random prefix for YouTube search queries.
 // Similar to the Python example: watch?v=<random_chars> except removes the trailing - which was effectively increasing prefix length by 1.
-// prefixCase controls the alphabet: "matchcase" uses A-Za-z0-9_-, anything else uses a-z0-9_-.
+// prefixCase controls the alphabet: "matchcase" uses A-Za-z0-9, anything else uses a-z0-9.
+// Note: '-' and '_' are intentionally excluded. YouTube search treats '-' as an exclusion
+// operator, causing hyphen-containing prefixes to succeed far more often than alphanumeric
+// ones, which biases the sample heavily toward hyphenated video IDs. This limits sampling
+// to videos whose ID starts with alphanumeric characters (~85.5% of ID space in matchcase).
 func (c *YouTubeDataClient) generateRandomPrefix(length int, prefixCase string) string {
-	charset := "abcdefghijklmnopqrstuvwxyz0123456789_-"
+	charset := "abcdefghijklmnopqrstuvwxyz0123456789"
 	if prefixCase == "matchcase" {
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	}
 	watchPrefix := "watch?v="
 
