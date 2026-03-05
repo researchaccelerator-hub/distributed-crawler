@@ -1228,9 +1228,11 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				videoIdPrefix = strings.ToLower(videoIdPrefix)
 			}
 			attempt++
-			// Search for videos with this prefix
+			// Search for videos with this prefix. Wrap in quotes to prevent
+			// YouTube from tokenizing '-' as an exclusion operator, which would
+			// bias sampling toward hyphen-containing video IDs.
 			searchCall := c.service.Search.List([]string{"id", "snippet"}).
-				Q(prefix).
+				Q(`"` + prefix + `"`).
 				MaxResults(50). // Max allowed by API
 				Context(ctxWithCancel).
 				Type("video").
