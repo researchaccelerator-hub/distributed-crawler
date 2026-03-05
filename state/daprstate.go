@@ -2887,33 +2887,58 @@ func (dsm *DaprStateManager) loadPagesIntoMemory(crawlID string, cont bool) erro
 	return nil
 }
 
+// exportChunkSizeBytes is the maximum raw JSONL size per binding call (~100 MB).
+// After base64 encoding (~33% overhead) this stays well under the 200 MB gRPC limit.
+// Declared as a var so tests can override it.
+var exportChunkSizeBytes = 100 * 1024 * 1024
+
 func (dsm *DaprStateManager) ExportPagesToBinding(crawlID string) error {
 	exportedCount := 0
+	chunkIndex := 0
 
-	// Get timestamp for filename
 	timestamp := time.Now().Format("20060102-150405")
-	filename := fmt.Sprintf("channel-pages-%s-%s.jsonl", crawlID, timestamp)
 
-	// Create storage path
-	storagePath, err := dsm.generateStoragePath(
-		"analysis", // Using "analysis" instead of channel ID
-		fmt.Sprintf("channels/%s", filename),
-	)
+	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
 	if err != nil {
-		return fmt.Errorf("failed to generate storage path: %w", err)
+		return err
 	}
 
-	// Prepare for collecting all data as JSONL
-	var allPagesData []byte
+	flushChunk := func(data []byte) error {
+		filename := fmt.Sprintf("channel-pages-%s-%s-part%d.jsonl", crawlID, timestamp, chunkIndex)
+		storagePath, err := dsm.generateStoragePath(
+			"analysis",
+			fmt.Sprintf("channels/%s", filename),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to generate storage path: %w", err)
+		}
 
-	// For each layer in the layer map
+		encodedData := base64.StdEncoding.EncodeToString(data)
+		req := daprc.InvokeBindingRequest{
+			Name:      dsm.storageBinding,
+			Operation: "create",
+			Data:      []byte(encodedData),
+			Metadata: map[string]string{
+				key:         storagePath,
+				"operation": "create",
+			},
+		}
+
+		log.Info().Str("path", storagePath).Int("raw_bytes", len(data)).Msg("Writing export chunk")
+		_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
+		if err != nil {
+			return fmt.Errorf("failed to store pages via Dapr binding: %w", err)
+		}
+		chunkIndex++
+		return nil
+	}
+
+	var buf []byte
+
 	for _, pageIDs := range dsm.layerMap {
-		// For each page ID in the layer
 		for _, pageID := range pageIDs {
-			// Fetch the page from Dapr or memory
 			var page Page
 
-			// First try from memory
 			dsm.mutex.RLock()
 			existingPage, exists := dsm.pageMap[pageID]
 			dsm.mutex.RUnlock()
@@ -2921,7 +2946,6 @@ func (dsm *DaprStateManager) ExportPagesToBinding(crawlID string) error {
 			if exists {
 				page = existingPage
 			} else {
-				// If not in memory, fetch from Dapr
 				pageKey := fmt.Sprintf("%s/page/%s", crawlID, pageID)
 				pageResponse, err := (*dsm.client).GetState(
 					context.Background(),
@@ -2929,71 +2953,45 @@ func (dsm *DaprStateManager) ExportPagesToBinding(crawlID string) error {
 					pageKey,
 					nil,
 				)
-
 				if err != nil || pageResponse.Value == nil {
 					log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to fetch page")
 					continue
 				}
-
-				err = json.Unmarshal(pageResponse.Value, &page)
-				if err != nil {
+				if err = json.Unmarshal(pageResponse.Value, &page); err != nil {
 					log.Warn().Err(err).Str("pageID", pageID).Str("crawlID", crawlID).Msg("Failed to parse page data")
 					continue
 				}
 			}
 
-			// Extract channel ID - customize this based on your page structure
-			channelID := page.URL
-			if channelID == "" {
-				channelID = "unknown" // Default for pages without channel ID
-			}
-
-			// Marshal page to JSON and append to our data buffer with newline
 			pageData, err := json.Marshal(page)
 			if err != nil {
 				log.Warn().Err(err).Str("pageID", pageID).Msg("Failed to marshal page data")
 				continue
 			}
-
-			// Append newline for JSONL format
 			pageData = append(pageData, '\n')
-			allPagesData = append(allPagesData, pageData...)
-
+			buf = append(buf, pageData...)
 			exportedCount++
+
+			if len(buf) >= exportChunkSizeBytes {
+				if err := flushChunk(buf); err != nil {
+					return err
+				}
+				buf = buf[:0]
+			}
 		}
 	}
 
-	// If we didn't export any pages, return early
 	if exportedCount == 0 {
 		return fmt.Errorf("no pages found to export for crawl ID: %s", crawlID)
 	}
 
-	// Encode data for Dapr binding
-	encodedData := base64.StdEncoding.EncodeToString(allPagesData)
-	key, err := fetchFileNamingComponent(*dsm.client, dsm.storageBinding)
-	if err != nil {
-		return err
-	}
-	// Prepare metadata for the binding
-	metadata := map[string]string{
-		key:         storagePath,
-		"operation": "create",
+	if len(buf) > 0 {
+		if err := flushChunk(buf); err != nil {
+			return err
+		}
 	}
 
-	log.Info().Msgf("Writing file to: %s", storagePath)
-	// Send to Dapr binding
-	req := daprc.InvokeBindingRequest{
-		Name:      dsm.storageBinding,
-		Operation: "create",
-		Data:      []byte(encodedData),
-		Metadata:  metadata,
-	}
-
-	_, err = (*dsm.client).InvokeBinding(context.Background(), &req)
-	if err != nil {
-		return fmt.Errorf("failed to store pages via Dapr binding: %w", err)
-	}
-
+	log.Info().Int("pages", exportedCount).Int("chunks", chunkIndex).Msg("Export to binding complete")
 	return nil
 }
 
