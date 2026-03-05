@@ -1263,6 +1263,9 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				channelID := item.Snippet.ChannelId
 				videoID := item.Id.VideoId
 				candidatePrefix := videoID[0:5]
+
+				log.Info().Str("videoID", videoID).Str("candidatePrefix", candidatePrefix).Str("videoIdPrefix", videoIdPrefix).Str("prefix", prefix).Msg("Prefix information")
+
 				if prefixCase != "matchcase" {
 					candidatePrefix = strings.ToLower(candidatePrefix)
 				}

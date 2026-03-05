@@ -368,7 +368,6 @@ func TestRandomSamplingLoop_MaxIterTerminates(t *testing.T) {
 	sampleSize := 3
 	maxIter := sampleSize*100 + 100
 
-	var iterations int
 	for iter := 0; iter < maxIter; iter++ {
 		result, err := c.FetchMessages(context.Background(), job)
 		if err != nil {
@@ -378,12 +377,11 @@ func TestRandomSamplingLoop_MaxIterTerminates(t *testing.T) {
 		if job.SamplesRemaining <= 0 {
 			break
 		}
-		iterations++
 	}
 
-	// Loop must have stopped at the bound, not run forever.
-	if iterations >= maxIter {
-		t.Errorf("loop did not terminate: ran %d iterations (bound=%d)", iterations, maxIter)
+	// The maxIter guard must have terminated the loop — exactly maxIter calls expected.
+	if client.callCount != maxIter {
+		t.Errorf("expected %d FetchMessages calls (maxIter guard), got %d", maxIter, client.callCount)
 	}
 }
 
