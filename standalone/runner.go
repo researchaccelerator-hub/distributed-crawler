@@ -457,6 +457,96 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 	}
 
+	// YouTube random sampling bypasses the page-based crawl loop: no seed URLs are
+	// needed and we must keep calling FetchMessages until SamplesRemaining is
+	// exhausted.  This mirrors the RunRandomYoutubeSample logic in dapr/standalone.go.
+	if crawlCfg.Platform == "youtube" && crawlCfg.SamplingMethod == "random" {
+		log.Info().Msg("Running YouTube random sampling")
+
+		// #2: guard against a no-op run with no target sample count
+		if crawlCfg.SampleSize <= 0 {
+			log.Error().Msg("YouTube random sampling requires --sample-size > 0; nothing to do")
+			if closeErr := sm.Close(); closeErr != nil {
+				log.Warn().Err(closeErr).Msg("Error during final state save")
+			}
+			return
+		}
+
+		// #3: align date-filter logic with dapr/standalone.go CalculateDateFilters
+		var fromTime, toTime time.Time
+		if !crawlCfg.DateBetweenMin.IsZero() && !crawlCfg.DateBetweenMax.IsZero() {
+			fromTime = crawlCfg.DateBetweenMin
+			toTime = crawlCfg.DateBetweenMax
+			log.Info().
+				Time("date_between_min", fromTime).
+				Time("date_between_max", toTime).
+				Msg("Using date-between filter for YouTube random sampling")
+		} else if !crawlCfg.PostRecency.IsZero() {
+			fromTime = crawlCfg.PostRecency
+			toTime = time.Now()
+			log.Info().Time("post_recency", fromTime).Msg("Using post-recency filter for YouTube random sampling")
+		} else {
+			fromTime = crawlCfg.MinPostDate
+			toTime = time.Now()
+		}
+
+		randomCtx := context.Background()
+		job := crawler.CrawlJob{
+			Target: crawler.CrawlTarget{
+				Type: crawler.PlatformYouTube,
+				ID:   crawlCfg.CrawlID,
+			},
+			FromTime:         fromTime,
+			ToTime:           toTime,
+			Limit:            crawlCfg.MaxPosts,
+			SampleSize:       crawlCfg.SampleSize,
+			SamplesRemaining: crawlCfg.SampleSize,
+			NullValidator:    crawlCfg.NullValidator,
+			PrefixCase:       crawlCfg.PrefixCase,
+		}
+
+		maxIter := crawlCfg.SampleSize*100 + 100
+		for iter := 0; iter < maxIter; iter++ {
+			var result crawler.CrawlResult
+			var ytErr error
+			backoff := time.Second
+			for attempt := 0; attempt < 3; attempt++ {
+				result, ytErr = ytCrawler.FetchMessages(randomCtx, job)
+				if ytErr == nil {
+					break
+				}
+				log.Warn().Err(ytErr).Int("attempt", attempt+1).Msg("FetchMessages failed, retrying")
+				select {
+				case <-randomCtx.Done():
+					return
+				case <-time.After(backoff):
+				}
+				backoff *= 2
+			}
+			if ytErr != nil {
+				log.Error().Err(ytErr).Msg("Failed to fetch messages after retries")
+				break
+			}
+			resultsCount := len(result.Posts)
+			job.SamplesRemaining -= resultsCount
+			log.Info().Int("new_videos_processed", resultsCount).Int("samples_left", job.SamplesRemaining).
+				Msg("YouTube random sampling progress")
+			if job.SamplesRemaining <= 0 {
+				log.Info().Msg("Finished fetching random samples")
+				break
+			}
+			if iter == maxIter-1 {
+				log.Warn().Int("max_iterations", maxIter).Msg("Hit max iterations without reaching sample target")
+			}
+		}
+
+		log.Info().Msg("YouTube random sampling completed")
+		if closeErr := sm.Close(); closeErr != nil {
+			log.Warn().Err(closeErr).Msg("Error during final state save")
+		}
+		return
+	}
+
 	// Process layers sequentially starting from depth 0
 	// and continuing until max depth is reached or no more layers exist
 	currentDepth := 0
