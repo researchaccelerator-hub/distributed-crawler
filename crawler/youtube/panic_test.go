@@ -34,7 +34,7 @@ func (m *MockPanicClient) GetVideosFromChannel(ctx context.Context, channelID st
 	panic("test panic in GetVideosFromChannel")
 }
 
-func (m *MockPanicClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+func (m *MockPanicClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int, prefixCase string) ([]*youtubemodel.YouTubeVideo, error) {
 	panic("test panic in GetRandomVideos")
 }
 

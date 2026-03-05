@@ -883,10 +883,14 @@ func min(a, b int) int {
 	return b
 }
 
-// generateRandomPrefix generates a random prefix for YouTube search queries
-// Similar to the Python example: watch?v=<random_chars> except removes the trailing - which was effectively increasing prefix length by 1
-func (c *YouTubeDataClient) generateRandomPrefix(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789_-"
+// generateRandomPrefix generates a random prefix for YouTube search queries.
+// Similar to the Python example: watch?v=<random_chars> except removes the trailing - which was effectively increasing prefix length by 1.
+// prefixCase controls the alphabet: "matchcase" uses A-Za-z0-9_-, anything else uses a-z0-9_-.
+func (c *YouTubeDataClient) generateRandomPrefix(length int, prefixCase string) string {
+	charset := "abcdefghijklmnopqrstuvwxyz0123456789_-"
+	if prefixCase == "matchcase" {
+		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+	}
 	watchPrefix := "watch?v="
 
 	c.rngMu.Lock()
@@ -1096,9 +1100,10 @@ func (c *YouTubeDataClient) ProcessRandomBatch(ctxWithCancel context.Context, vi
 		Msg("Sent random videos to result collector")
 }
 
-// GetRandomVideos retrieves videos using random sampling with the prefix generator
-// Uses parallel processing to handle multiple channels concurrently
-func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
+// GetRandomVideos retrieves videos using random sampling with the prefix generator.
+// Uses parallel processing to handle multiple channels concurrently.
+// prefixCase controls the character set: "lower" (a-z0-9_-) or "matchcase" (A-Za-z0-9_-).
+func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int, prefixCase string) ([]*youtubemodel.YouTubeVideo, error) {
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
 	}
@@ -1202,7 +1207,7 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				return
 			}
 			// Get unique prefixes using mutex-protected rng
-			prefix := c.generateRandomPrefix(5)
+			prefix := c.generateRandomPrefix(5, prefixCase)
 			// TODO: get crawl level map for this. only works for same sample run
 			if _, exists := prefixMap[prefix]; exists {
 				log.Error().Str("duplicated_prefix", prefix).Msg("Duplicate prefix found. Skipping")
@@ -1216,8 +1221,12 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				ResultCount:      0,
 				TotalResultCount: 0,
 			}
-			// watch?v=id7nj ->id7nj
-			videoIdPrefix := strings.ToLower(prefix[8:])
+			// Extract video ID prefix for match filtering.
+			// In "matchcase" mode the comparison is exact; otherwise normalise to lower.
+			videoIdPrefix := prefix[8:]
+			if prefixCase != "matchcase" {
+				videoIdPrefix = strings.ToLower(videoIdPrefix)
+			}
 			attempt++
 			// Search for videos with this prefix
 			searchCall := c.service.Search.List([]string{"id", "snippet"}).
@@ -1253,7 +1262,11 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 			for _, item := range searchResponse.Items {
 				channelID := item.Snippet.ChannelId
 				videoID := item.Id.VideoId
-				if strings.ToLower(videoID[0:5]) != videoIdPrefix {
+				candidatePrefix := videoID[0:5]
+				if prefixCase != "matchcase" {
+					candidatePrefix = strings.ToLower(candidatePrefix)
+				}
+				if candidatePrefix != videoIdPrefix {
 					prefixMismatchCount++
 					prefixData.InvalidVideoIDs = append(prefixData.InvalidVideoIDs, videoID)
 					continue
@@ -1897,8 +1910,8 @@ func (a *YouTubeClientAdapter) GetChannelType() string {
 }
 
 // GetRandomVideos retrieves videos using random sampling - delegates to the wrapped YouTubeDataClient
-func (a *YouTubeClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
-	return a.client.GetRandomVideos(ctx, fromTime, toTime, limit)
+func (a *YouTubeClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int, prefixCase string) ([]*youtubemodel.YouTubeVideo, error) {
+	return a.client.GetRandomVideos(ctx, fromTime, toTime, limit, prefixCase)
 }
 
 // GetVideosByIDs retrieves videos by videoIDs - delegates to the wrapped YouTubeDataClient

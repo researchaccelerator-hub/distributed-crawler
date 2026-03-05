@@ -43,6 +43,7 @@ type CrawlJob struct {
 	SampleSize       int // Number of posts to randomly sample (0 means no sampling)
 	SamplesRemaining int // Number of samples left
 	NullValidator    null_handler.Validator
+	PrefixCase       string // Character case for YouTube random prefix: "lower" (default) or "matchcase"
 }
 
 // Crawler defines the interface that all crawler implementations must satisfy
