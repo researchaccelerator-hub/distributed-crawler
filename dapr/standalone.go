@@ -901,6 +901,12 @@ func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common
 }
 
 func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+	// #2: guard against a no-op run with no target sample count
+	if crawlCfg.SampleSize <= 0 {
+		log.Error().Msg("YouTube random sampling requires SampleSize > 0; nothing to do")
+		return
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -931,7 +937,8 @@ func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.C
 			}
 			resultsCount := len(result.Posts)
 			job.SamplesRemaining = job.SamplesRemaining - resultsCount
-			log.Info().Int("new_videos_processed", resultsCount).Int("samples_left", job.SamplesRemaining)
+			log.Info().Int("new_videos_processed", resultsCount).Int("samples_left", job.SamplesRemaining).
+				Msg("YouTube random sampling progress")
 			if job.SamplesRemaining <= 0 {
 				log.Info().Int("samples_left", job.SamplesRemaining).Msg("Finished fetching random samples")
 				break
