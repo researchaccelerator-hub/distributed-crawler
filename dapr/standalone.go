@@ -919,7 +919,6 @@ func RunRandomYoutubeSample(ctx context.Context, sm state.StateManagementInterfa
 		SampleSize:       crawlCfg.SampleSize,
 		SamplesRemaining: crawlCfg.SampleSize,
 		NullValidator:    crawlCfg.NullValidator,
-		PrefixCase:       crawlCfg.PrefixCase,
 	}
 
 	ytCrawler, ytClient, clientCtx, clientCtxCancel, ytInitErr := InitializeYoutubeCrawlerComponents(ctx, sm, crawlCfg)

@@ -36,7 +36,7 @@ func (m *MockYouTubeClient) GetVideosFromChannel(ctx context.Context, channelID 
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 
-func (m *MockYouTubeClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int, prefixCase string) ([]*youtubemodel.YouTubeVideo, error) {
+func (m *MockYouTubeClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	return []*youtubemodel.YouTubeVideo{}, nil
 }
 

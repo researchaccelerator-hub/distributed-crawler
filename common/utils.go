@@ -53,7 +53,6 @@ type CrawlerConfig struct {
 	CombineHardCap     int64                  // File size cap that can not be exceeded in creation of combined file
 	NullConfig         string                 // JSON string for user defined changes to handling of null crawl data
 	NullValidator      null_handler.Validator // Null Validator object
-	PrefixCase         string                 // Prefix character case for YouTube random sampling: "lower" (a-z0-9_-) or "matchcase" (A-Za-z0-9_-)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

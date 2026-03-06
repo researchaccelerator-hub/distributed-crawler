@@ -301,7 +301,7 @@ func (c *YouTubeCrawler) FetchMessages(ctx context.Context, job crawler.CrawlJob
 	case SamplingMethodRandom:
 		// Random sampling using prefix generator with parallel processing
 		sampleTargetSize := min(50, job.SamplesRemaining) //rough limit so all video id prefix matches are processed
-		videos, err = c.client.GetRandomVideos(ctxWithTimeout, job.FromTime, job.ToTime, sampleTargetSize, job.PrefixCase)
+		videos, err = c.client.GetRandomVideos(ctxWithTimeout, job.FromTime, job.ToTime, sampleTargetSize)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to get videos using random sampling")
 			return crawler.CrawlResult{}, err

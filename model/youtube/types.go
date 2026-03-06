@@ -56,8 +56,8 @@ type YouTubeClient interface {
 	GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*YouTubeVideo, error)
 
 	// GetRandomVideos retrieves videos using random sampling with the prefix generator.
-	// prefixCase controls the character set: "lower" (a-z0-9_-) or "matchcase" (A-Za-z0-9_-).
-	GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int, prefixCase string) ([]*YouTubeVideo, error)
+	// Implements McGrady et al. (2023) "Dialing for Videos" methodology.
+	GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)
 
 	// GetSnowballVideos retrieves videos using snowball sampling from channels with > 10 videos
 	GetSnowballVideos(ctx context.Context, seedChannelIDs []string, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)

@@ -124,11 +124,11 @@ func (a *ClientAdapter) GetVideosByIDs(ctx context.Context, videoIDs []string) (
 }
 
 // GetRandomVideos retrieves videos using random sampling
-func (a *ClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int, prefixCase string) ([]*youtubemodel.YouTubeVideo, error) {
+func (a *ClientAdapter) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	// Check if the underlying client is a YouTubeClientAdapter that wraps a YouTubeDataClient
 	if ytClientAdapter, ok := a.client.(*clientpkg.YouTubeClientAdapter); ok {
 		// Access the wrapped YouTubeDataClient which has the actual random sampling implementation
-		return ytClientAdapter.GetRandomVideos(ctx, fromTime, toTime, limit, prefixCase)
+		return ytClientAdapter.GetRandomVideos(ctx, fromTime, toTime, limit)
 	}
 
 	// Fallback for clients that don't support random sampling

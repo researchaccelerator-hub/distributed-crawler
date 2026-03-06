@@ -502,7 +502,6 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			SampleSize:       crawlCfg.SampleSize,
 			SamplesRemaining: crawlCfg.SampleSize,
 			NullValidator:    crawlCfg.NullValidator,
-			PrefixCase:       crawlCfg.PrefixCase,
 		}
 
 		maxIter := crawlCfg.SampleSize*100 + 100

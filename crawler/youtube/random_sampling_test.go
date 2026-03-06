@@ -14,11 +14,10 @@ import (
 // MockConfigurableClient is a YouTube client whose GetRandomVideos can be scripted
 // call-by-call via the responses/errors slices. All other methods are no-ops.
 type MockConfigurableClient struct {
-	responses      [][]*youtubemodel.YouTubeVideo
-	errors         []error
-	limitsSeen     []int
-	prefixCasesSeen []string
-	callCount      int
+	responses  [][]*youtubemodel.YouTubeVideo
+	errors     []error
+	limitsSeen []int
+	callCount  int
 }
 
 func (m *MockConfigurableClient) Connect(_ context.Context) error { return nil }
@@ -39,9 +38,8 @@ func (m *MockConfigurableClient) GetVideosByIDs(_ context.Context, _ []string) (
 	return nil, nil
 }
 
-func (m *MockConfigurableClient) GetRandomVideos(_ context.Context, _, _ time.Time, limit int, prefixCase string) ([]*youtubemodel.YouTubeVideo, error) {
+func (m *MockConfigurableClient) GetRandomVideos(_ context.Context, _, _ time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	m.limitsSeen = append(m.limitsSeen, limit)
-	m.prefixCasesSeen = append(m.prefixCasesSeen, prefixCase)
 	i := m.callCount
 	m.callCount++
 	if i < len(m.errors) && m.errors[i] != nil {
@@ -317,42 +315,6 @@ func TestRandomSamplingLoop_BreaksOnError(t *testing.T) {
 	}
 	if client.callCount != 2 {
 		t.Errorf("expected 2 calls (1 success + 1 error), got %d", client.callCount)
-	}
-}
-
-// TestFetchMessagesRandom_PrefixCaseLower verifies that PrefixCase "lower" is forwarded
-// to GetRandomVideos unchanged.
-func TestFetchMessagesRandom_PrefixCaseLower(t *testing.T) {
-	client := &MockConfigurableClient{}
-	c := newRandomCrawler(client)
-	job := newRandomJob(10)
-	job.PrefixCase = "lower"
-
-	c.FetchMessages(context.Background(), job) //nolint:errcheck
-
-	if len(client.prefixCasesSeen) == 0 {
-		t.Fatal("expected GetRandomVideos to be called")
-	}
-	if client.prefixCasesSeen[0] != "lower" {
-		t.Errorf("expected prefixCase=%q, got %q", "lower", client.prefixCasesSeen[0])
-	}
-}
-
-// TestFetchMessagesRandom_PrefixCaseMatchcase verifies that PrefixCase "matchcase" is
-// forwarded to GetRandomVideos unchanged, enabling case-sensitive prefix matching.
-func TestFetchMessagesRandom_PrefixCaseMatchcase(t *testing.T) {
-	client := &MockConfigurableClient{}
-	c := newRandomCrawler(client)
-	job := newRandomJob(10)
-	job.PrefixCase = "matchcase"
-
-	c.FetchMessages(context.Background(), job) //nolint:errcheck
-
-	if len(client.prefixCasesSeen) == 0 {
-		t.Fatal("expected GetRandomVideos to be called")
-	}
-	if client.prefixCasesSeen[0] != "matchcase" {
-		t.Errorf("expected prefixCase=%q, got %q", "matchcase", client.prefixCasesSeen[0])
 	}
 }
 
