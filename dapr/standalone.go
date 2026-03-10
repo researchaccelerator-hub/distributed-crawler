@@ -188,6 +188,10 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
+	if crawlerCfg.ExitOnComplete {
+		log.Info().Msg("Crawl complete, exiting with code 0 (--exit-on-complete)")
+		os.Exit(0)
+	}
 	select {}
 }
 
