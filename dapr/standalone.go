@@ -63,6 +63,24 @@ func waitForDaprReady(ctx context.Context) error {
 	}
 }
 
+// shutdownDaprSidecar sends a POST to the Dapr sidecar shutdown endpoint so the sidecar
+// (and therefore the Kubernetes pod) terminates cleanly alongside the app container.
+func shutdownDaprSidecar() {
+	daprHTTPPort := os.Getenv("DAPR_HTTP_PORT")
+	if daprHTTPPort == "" {
+		daprHTTPPort = "3500"
+	}
+	shutdownURL := fmt.Sprintf("http://localhost:%s/v1.0/shutdown", daprHTTPPort)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(shutdownURL, "application/json", nil)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to send shutdown to Dapr sidecar")
+		return
+	}
+	resp.Body.Close()
+	log.Info().Int("status", resp.StatusCode).Msg("Dapr sidecar shutdown requested")
+}
+
 // StartDaprStandaloneMode initializes and starts the crawler in standalone mode with Dapr integration.
 //
 // This function handles the end-to-end process of starting a Telegram crawling operation:
@@ -190,6 +208,7 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	log.Info().Msg("Crawling completed")
 	if crawlerCfg.ExitOnComplete {
 		log.Info().Msg("Crawl complete, exiting with code 0 (--exit-on-complete)")
+		shutdownDaprSidecar()
 		os.Exit(0)
 	}
 	select {}
