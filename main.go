@@ -45,6 +45,7 @@ var (
 	logLevel          string   // Logging level
 	tdlibVerbosity    int      // TDLib verbosity level
 	skipMediaDownload bool     // Flag to skip media downloads
+	exitOnComplete    bool     // Exit with code 0 after successful crawl
 )
 
 func main() {
@@ -326,6 +327,13 @@ Examples:
 			crawlerCfg.SkipMediaDownload = viper.GetBool("crawler.skipmedia")
 		}
 
+		// Set exit-on-complete flag
+		if cmd.Flags().Changed("exit-on-complete") {
+			crawlerCfg.ExitOnComplete = exitOnComplete
+		} else {
+			crawlerCfg.ExitOnComplete = viper.GetBool("crawler.exit_on_complete")
+		}
+
 		// Load sampling method configuration
 		crawlerCfg.SamplingMethod = viper.GetString("crawler.sampling")
 		if crawlerCfg.SamplingMethod == "" {
@@ -587,6 +595,11 @@ Examples:
 				log.Warn().Err(err).Str("file", downloadedFile).Msg("Failed to clean up downloaded URL file")
 			}
 		}
+
+		if crawlerCfg.ExitOnComplete {
+			log.Info().Msg("Crawl complete, exiting with code 0 (--exit-on-complete)")
+			os.Exit(0)
+		}
 	},
 }
 
@@ -765,6 +778,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.WalkbackRate, "walkback-rate", 15, "The rate at which to perform walkbacks when using random-walk sampling")
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.NullConfig, "null-config", "{}", "Config for handling of null values in post and channel data. See README for more information")
+	rootCmd.PersistentFlags().BoolVar(&exitOnComplete, "exit-on-complete", false, "Exit with code 0 after a successful crawl (useful for Kubernetes cron jobs)")
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
@@ -824,6 +838,7 @@ func init() {
 	viper.BindPFlag("crawler.combine_trigger_size", rootCmd.PersistentFlags().Lookup("combine-trigger-size"))
 	viper.BindPFlag("crawler.combine_hard_cap", rootCmd.PersistentFlags().Lookup("combine-hard-cap"))
 	viper.BindPFlag("crawler.null_config", rootCmd.PersistentFlags().Lookup("null-config"))
+	viper.BindPFlag("crawler.exit_on_complete", rootCmd.PersistentFlags().Lookup("exit-on-complete"))
 
 	// Add subcommands
 	rootCmd.AddCommand(versionCmd)

@@ -53,6 +53,7 @@ type CrawlerConfig struct {
 	CombineHardCap     int64                  // File size cap that can not be exceeded in creation of combined file
 	NullConfig         string                 // JSON string for user defined changes to handling of null crawl data
 	NullValidator      null_handler.Validator // Null Validator object
+	ExitOnComplete     bool                   // Exit with code 0 after a successful crawl (useful for Kubernetes cron jobs)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

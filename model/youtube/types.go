@@ -55,7 +55,8 @@ type YouTubeClient interface {
 	// GetVideosByIDs retrieves videos from a list of video ids
 	GetVideosByIDs(ctx context.Context, videoIDs []string) ([]*YouTubeVideo, error)
 
-	// GetRandomVideos retrieves videos using random sampling with the prefix generator
+	// GetRandomVideos retrieves videos using random sampling with the prefix generator.
+	// Implements McGrady et al. (2023) "Dialing for Videos" methodology.
 	GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*YouTubeVideo, error)
 
 	// GetSnowballVideos retrieves videos using snowball sampling from channels with > 10 videos

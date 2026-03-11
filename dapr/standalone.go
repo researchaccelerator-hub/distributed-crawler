@@ -63,6 +63,24 @@ func waitForDaprReady(ctx context.Context) error {
 	}
 }
 
+// shutdownDaprSidecar sends a POST to the Dapr sidecar shutdown endpoint so the sidecar
+// (and therefore the Kubernetes pod) terminates cleanly alongside the app container.
+func shutdownDaprSidecar() {
+	daprHTTPPort := os.Getenv("DAPR_HTTP_PORT")
+	if daprHTTPPort == "" {
+		daprHTTPPort = "3500"
+	}
+	shutdownURL := fmt.Sprintf("http://localhost:%s/v1.0/shutdown", daprHTTPPort)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(shutdownURL, "application/json", nil)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to send shutdown to Dapr sidecar")
+		return
+	}
+	resp.Body.Close()
+	log.Info().Int("status", resp.StatusCode).Msg("Dapr sidecar shutdown requested")
+}
+
 // StartDaprStandaloneMode initializes and starts the crawler in standalone mode with Dapr integration.
 //
 // This function handles the end-to-end process of starting a Telegram crawling operation:
@@ -188,6 +206,11 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
+	if crawlerCfg.ExitOnComplete {
+		log.Info().Msg("Crawl complete, exiting with code 0 (--exit-on-complete)")
+		shutdownDaprSidecar()
+		os.Exit(0)
+	}
 	select {}
 }
 
@@ -243,7 +266,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
 	if crawlCfg.SamplingMethod == "random" && crawlCfg.Platform == "youtube" {
-		RunRandomYoutubeSample(sm, crawlCfg)
+		RunRandomYoutubeSample(context.Background(), sm, crawlCfg)
 	} else {
 		// Create a global map to track all URLs we've seen across all layers
 		seenURLs := make(map[string]bool)
@@ -748,11 +771,10 @@ func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common
 	}
 }
 
-func InitializeYoutubeCrawlerComponents(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (crawler.Crawler, clientpkg.Client, context.Context, context.CancelFunc, error) {
+func InitializeYoutubeCrawlerComponents(ctx context.Context, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (crawler.Crawler, clientpkg.Client, context.Context, context.CancelFunc, error) {
 	// Initialize YouTube components
 	var err error
-	// clientCtx := context.Background()
-	clientCtx, clientCtxCancel := context.WithCancel(context.Background())
+	clientCtx, clientCtxCancel := context.WithCancel(ctx)
 	clientFactory := clientpkg.NewDefaultClientFactory()
 
 	// Debug API key passing
@@ -900,9 +922,12 @@ func FetchYoutubeChannelInfoAndVideos(ytCrawler crawler.Crawler, crawlCfg common
 	return discoveredChannels, nil
 }
 
-func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func RunRandomYoutubeSample(ctx context.Context, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+	// Guard against a no-op run with no target sample count
+	if crawlCfg.SampleSize <= 0 {
+		log.Warn().Msg("YouTube random sampling requires SampleSize > 0; nothing to do")
+		return
+	}
 
 	fromTime, toTime := CalculateDateFilters(crawlCfg)
 	target := crawler.CrawlTarget{
@@ -919,23 +944,44 @@ func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.C
 		NullValidator:    crawlCfg.NullValidator,
 	}
 
-	ytCrawler, ytClient, clientCtx, _, ytInitErr := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+	ytCrawler, ytClient, clientCtx, clientCtxCancel, ytInitErr := InitializeYoutubeCrawlerComponents(ctx, sm, crawlCfg)
 	if ytInitErr != nil {
 		return
-	} else {
-		for {
-			result, ytErr := ytCrawler.FetchMessages(ctx, job)
-			if ytErr != nil {
-				log.Error().Err(ytErr).Msg("Failed to fetch messages for random sample")
+	}
+	defer clientCtxCancel()
+
+	maxIter := crawlCfg.SampleSize*100 + 100
+	for iter := 0; iter < maxIter; iter++ {
+		var result crawler.CrawlResult
+		var ytErr error
+		backoff := time.Second
+		for attempt := 0; attempt < 3; attempt++ {
+			result, ytErr = ytCrawler.FetchMessages(ctx, job)
+			if ytErr == nil {
 				break
 			}
-			resultsCount := len(result.Posts)
-			job.SamplesRemaining = job.SamplesRemaining - resultsCount
-			log.Info().Int("new_videos_processed", resultsCount).Int("samples_left", job.SamplesRemaining)
-			if job.SamplesRemaining <= 0 {
-				log.Info().Int("samples_left", job.SamplesRemaining).Msg("Finished fetching random samples")
-				break
+			log.Warn().Err(ytErr).Int("attempt", attempt+1).Msg("FetchMessages failed, retrying")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
 			}
+			backoff *= 2
+		}
+		if ytErr != nil {
+			log.Error().Err(ytErr).Msg("Failed to fetch messages after retries")
+			break
+		}
+		resultsCount := len(result.Posts)
+		job.SamplesRemaining = job.SamplesRemaining - resultsCount
+		log.Info().Int("new_videos_processed", resultsCount).Int("samples_left", job.SamplesRemaining).
+			Msg("YouTube random sampling progress")
+		if job.SamplesRemaining <= 0 {
+			log.Info().Int("samples_left", job.SamplesRemaining).Msg("Finished fetching random samples")
+			break
+		}
+		if iter == maxIter-1 {
+			log.Warn().Int("max_iterations", maxIter).Msg("Hit max iterations without reaching sample target")
 		}
 	}
 	// Disconnect YouTube client
@@ -944,7 +990,6 @@ func RunRandomYoutubeSample(sm state.StateManagementInterface, crawlCfg common.C
 			log.Warn().Err(disconnectErr).Msg("Error disconnecting YouTube client")
 		}
 	}
-	return
 }
 
 type ytWorker struct {
@@ -957,7 +1002,7 @@ type ytWorker struct {
 }
 
 func createFreshWorker(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) (*ytWorker, error) {
-	c, cl, cCtx, cCtxCancel, err := InitializeYoutubeCrawlerComponents(sm, crawlCfg)
+	c, cl, cCtx, cCtxCancel, err := InitializeYoutubeCrawlerComponents(context.Background(), sm, crawlCfg)
 	if err != nil {
 		return nil, err
 	}

@@ -883,10 +883,20 @@ func min(a, b int) int {
 	return b
 }
 
-// generateRandomPrefix generates a random prefix for YouTube search queries
-// Similar to the Python example: watch?v=<random_chars> except removes the trailing - which was effectively increasing prefix length by 1
+// generateRandomPrefix generates a 5-character lowercase alphabetic prefix for YouTube
+// search queries, following the methodology of McGrady et al. (2023) "Dialing for Videos".
+//
+// Only a-z is used (no digits, no special chars) because YouTube search is case-insensitive
+// for letters: a query for "watch?v=abcde" implicitly covers all 2^5=32 case permutations
+// (ABCDE, Abcde, ...) simultaneously. Digits have no case variant so including them would
+// reduce coverage per query and corrupt the size estimator's 2^prefix_length term.
+//
+// The mechanism: YouTube's search indexer treats '-' as a token separator, so a video URL
+// watch?v=ABCDE-xxxxx is indexed under the token "watch?v=ABCDE". Searching for
+// "watch?v=abcde" therefore returns all videos whose ID has the prefix before the first
+// hyphen matching abcde (case-insensitively). Valid results always have '-' at position 6.
 func (c *YouTubeDataClient) generateRandomPrefix(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789_-"
+	const charset = "abcdefghijklmnopqrstuvwxyz"
 	watchPrefix := "watch?v="
 
 	c.rngMu.Lock()
@@ -1096,8 +1106,9 @@ func (c *YouTubeDataClient) ProcessRandomBatch(ctxWithCancel context.Context, vi
 		Msg("Sent random videos to result collector")
 }
 
-// GetRandomVideos retrieves videos using random sampling with the prefix generator
-// Uses parallel processing to handle multiple channels concurrently
+// GetRandomVideos retrieves videos using random sampling with the prefix generator.
+// Uses parallel processing to handle multiple channels concurrently.
+// Implements the McGrady et al. (2023) "Dialing for Videos" prefix sampling methodology.
 func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTime time.Time, limit int) ([]*youtubemodel.YouTubeVideo, error) {
 	if c.service == nil {
 		return nil, fmt.Errorf("YouTube client not connected")
@@ -1216,17 +1227,20 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 				ResultCount:      0,
 				TotalResultCount: 0,
 			}
-			// watch?v=id7nj ->id7nj
+			// Extract the 5-char video ID prefix from "watch?v=XXXXX".
+			// Always lowercase — the prefix is generated lowercase and YouTube's
+			// case-insensitive search covers all case permutations automatically.
 			videoIdPrefix := strings.ToLower(prefix[8:])
 			attempt++
-			// Search for videos with this prefix
+			// Search for videos with this prefix. Wrap in quotes to prevent
+			// YouTube from tokenizing '-' as an exclusion operator, which would
+			// bias sampling toward hyphen-containing video IDs.
 			searchCall := c.service.Search.List([]string{"id", "snippet"}).
-				Q(prefix).
+				Q(`"` + prefix + `"`).
 				MaxResults(50). // Max allowed by API
 				Context(ctxWithCancel).
 				Type("video").
-				Order("relevance")
-				// Order("date") // Sort by date
+				Order("relevance") // relevance required — date ordering returns no results for watch?v= prefix queries
 
 			// Add time restrictions if provided
 			if !fromTime.IsZero() {
@@ -1248,12 +1262,17 @@ func (c *YouTubeDataClient) GetRandomVideos(ctx context.Context, fromTime, toTim
 			// Process search results - collect unique channel IDs
 			channelIDs := make(map[string]bool)
 			channelsAdded := 0
-			// invalidVideoIDs := make([]string, 0, 50)
 
 			for _, item := range searchResponse.Items {
 				channelID := item.Snippet.ChannelId
 				videoID := item.Id.VideoId
-				if strings.ToLower(videoID[0:5]) != videoIdPrefix {
+
+				// Validate per McGrady et al. (2023): the first 5 chars of the video ID
+				// must match the prefix (case-insensitively) and position 6 must be '-'.
+				// The hyphen at position 6 is not a bias — it is the mechanism: YouTube's
+				// indexer tokenises on '-', so the search only returns IDs of the form
+				// PREFIX-SUFFIX. Results without '-' at position 6 are relevance noise.
+				if len(videoID) != 11 || strings.ToLower(videoID[:5]) != videoIdPrefix || videoID[5] != '-' {
 					prefixMismatchCount++
 					prefixData.InvalidVideoIDs = append(prefixData.InvalidVideoIDs, videoID)
 					continue
