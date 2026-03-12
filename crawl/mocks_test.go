@@ -370,6 +370,11 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 	return args.Error(0)
 }
 
+// seed channels
+func (m *MockStateManager) LoadSeedChannels() error                                { return nil }
+func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error       { return nil }
+func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)                { return 0, false }
+
 // random-walk database functions
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
 	args := m.Called(edges)

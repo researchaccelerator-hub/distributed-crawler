@@ -856,6 +856,12 @@ func processAllMessagesWithProcessor(
 							// determine if a previously discovered channel and act accordingly
 							if sm.IsDiscoveredChannel(o) {
 								oldChannels[o] = true
+							} else if _, ok := sm.GetCachedChatID(o); ok {
+								// Chat ID already cached (from seed_channels) — known valid
+								// supergroup, skip the expensive SearchPublicChat RPC.
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Using cached chat ID, skipping SearchPublicChat")
+								sm.AddDiscoveredChannel(o)
+								newChannels[o] = true
 							} else {
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Sleeping for 2 seconds then checking if valid public channel.")
 								time.Sleep(2000 * time.Millisecond)
@@ -877,6 +883,10 @@ func processAllMessagesWithProcessor(
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Adding channel to discovered channels")
 								sm.AddDiscoveredChannel(o)
 								newChannels[o] = true
+								// Cache the chat ID so future runs can skip SearchPublicChat for this channel
+								if upsertErr := sm.UpsertSeedChannelChatID(o, chat.Id); upsertErr != nil {
+									log.Warn().Err(upsertErr).Str("channel", o).Msg("random-walk-channel: Failed to cache chat ID")
+								}
 							}
 						}
 					}

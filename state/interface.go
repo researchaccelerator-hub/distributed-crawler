@@ -75,6 +75,15 @@ type StateManagementInterface interface {
 
 	// Used for random-walk sampling
 
+	// LoadSeedChannels loads seed_channels table rows into the in-memory
+	// DiscoveredChannels set and chat ID cache.  Only implemented for DAPR.
+	LoadSeedChannels() error
+	// UpsertSeedChannelChatID caches the TDLib chat ID for a username in both
+	// memory and the seed_channels DB table.
+	UpsertSeedChannelChatID(username string, chatID int64) error
+	// GetCachedChatID returns the cached TDLib chat ID for username, if known.
+	GetCachedChatID(username string) (int64, bool)
+
 	// Initializes discovered channels from database
 	// Only implemented for dapr currently
 	InitializeDiscoveredChannels() error

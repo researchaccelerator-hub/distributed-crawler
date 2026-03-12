@@ -82,6 +82,9 @@ func (m *MockStateManager) Close() error                                   { ret
 
 // Used for random-walk sampling
 
+func (m *MockStateManager) LoadSeedChannels() error                          { return nil }
+func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error { return nil }
+func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)          { return 0, false }
 func (m *MockStateManager) InitializeDiscoveredChannels() error             { return nil }
 func (m *MockStateManager) InitializeRandomWalkLayer() error                { return nil }
 func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }

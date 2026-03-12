@@ -57,6 +57,10 @@ type DaprStateManager struct {
 	urlCache      map[string]string // Maps URL -> "crawlID:pageID" for all known URLs
 	urlCacheMutex sync.RWMutex      // Separate mutex for URL cache to reduce contention
 
+	// Seed channel chat ID cache: username -> TDLib chat ID
+	chatIDCache   map[string]int64
+	chatIDCacheMu sync.RWMutex
+
 	// Cache configuration
 	maxCacheItemsPerShard int // Maximum number of items per shard
 	cacheExpirationDays   int // Number of days after which cache entries are considered stale
@@ -182,6 +186,8 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 		// Default configuration
 		maxCacheItemsPerShard: maxCacheItemsPerShard,
 		cacheExpirationDays:   cacheExpirationDays,
+
+		chatIDCache: make(map[string]int64),
 	}
 
 	// Load the media cache index as part of initialization
@@ -3208,6 +3214,85 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	}
 
 	return nil
+}
+
+// LoadSeedChannels queries the seed_channels table, adds all usernames to the
+// in-memory DiscoveredChannels set, and populates the chatID cache for any rows
+// that have a resolved chat_id.  Call this during initialization before
+// InitializeDiscoveredChannels so seed channels are immediately treated as known.
+func (dsm *DaprStateManager) LoadSeedChannels() error {
+	log.Info().Msg("random-walk-seed: loading seed channels")
+	dsm.databaseBinding = databaseStorageBinding
+
+	query := "SELECT channel_username, chat_id FROM seed_channels;"
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql": query,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("random-walk-seed: failed to query seed_channels: %w", err)
+	}
+
+	var rows [][]interface{}
+	if err := json.Unmarshal(res.Data, &rows); err != nil {
+		log.Error().Str("result_data", string(res.Data)).Msg("random-walk-seed: result data")
+		return fmt.Errorf("random-walk-seed: failed to unmarshal seed_channels response: %w", err)
+	}
+
+	dsm.chatIDCacheMu.Lock()
+	defer dsm.chatIDCacheMu.Unlock()
+
+	loaded := 0
+	for _, row := range rows {
+		if len(row) < 2 {
+			continue
+		}
+		username, ok := row[0].(string)
+		if !ok || username == "" {
+			continue
+		}
+		if addErr := dsm.BaseStateManager.AddDiscoveredChannel(username); addErr != nil {
+			// Already in the set — not an error worth logging at warn level
+			log.Debug().Str("channel", username).Msg("random-walk-seed: channel already in discovered set")
+		}
+		if row[1] != nil {
+			if chatIDFloat, ok := row[1].(float64); ok {
+				dsm.chatIDCache[username] = int64(chatIDFloat)
+			}
+		}
+		loaded++
+	}
+
+	log.Info().Int("loaded", loaded).Msg("random-walk-seed: finished loading seed channels")
+	return nil
+}
+
+// UpsertSeedChannelChatID stores (or updates) the TDLib chat ID for a channel
+// username in both the in-memory cache and the seed_channels table.  Call this
+// after a successful SearchPublicChat so future crawl runs can skip the RPC.
+func (dsm *DaprStateManager) UpsertSeedChannelChatID(username string, chatID int64) error {
+	dsm.chatIDCacheMu.Lock()
+	dsm.chatIDCache[username] = chatID
+	dsm.chatIDCacheMu.Unlock()
+
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id)
+VALUES ($1, $2)
+ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id;`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+}
+
+// GetCachedChatID returns the TDLib chat ID for username if it is present in
+// the in-memory cache, along with a boolean indicating whether a value was found.
+func (dsm *DaprStateManager) GetCachedChatID(username string) (int64, bool) {
+	dsm.chatIDCacheMu.RLock()
+	defer dsm.chatIDCacheMu.RUnlock()
+	id, ok := dsm.chatIDCache[username]
+	return id, ok
 }
 
 func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {

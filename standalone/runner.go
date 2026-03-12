@@ -328,6 +328,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		return
 	}
 
+	if crawlCfg.SamplingMethod == "random-walk" {
+		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
+			log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
+		}
+	}
+
 	// Initialize connection pool with an appropriate size
 	poolSize := crawlCfg.Concurrency
 	if poolSize < 1 {

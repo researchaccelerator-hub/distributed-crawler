@@ -283,7 +283,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			return
 		}
 		if crawlCfg.SamplingMethod == "random-walk" {
-			// pull discovered channels from database
+			// load seed channels (populates DiscoveredChannels + chatID cache)
+			if seedErr := sm.LoadSeedChannels(); seedErr != nil {
+				log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
+			}
+			// pull discovered channels from edge_records
 			err := sm.InitializeDiscoveredChannels()
 			if err != nil {
 				log.Fatal().Err(err).Msg("random-walk-init: failed to pull discovered channels")

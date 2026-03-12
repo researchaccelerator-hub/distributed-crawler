@@ -88,6 +88,10 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 	return nil
 }
 
+func (bsm *BaseStateManager) LoadSeedChannels() error                                { return nil }
+func (bsm *BaseStateManager) UpsertSeedChannelChatID(_ string, _ int64) error       { return nil }
+func (bsm *BaseStateManager) GetCachedChatID(_ string) (int64, bool)                { return 0, false }
+
 func (bsm *BaseStateManager) InitializeDiscoveredChannels() error {
 	return nil
 }
