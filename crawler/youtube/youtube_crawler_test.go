@@ -100,7 +100,7 @@ func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) err
 func (m *MockYouTubeStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
 	return []state.Page{}, nil
 }
-func (m *MockYouTubeStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
+func (m *MockYouTubeStateManager) WipeLayerBuffer() error                          { return nil }
 func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil
 }

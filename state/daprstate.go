@@ -277,11 +277,6 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 
 	if dsm.config.SamplingMethod == "random-walk" {
 		dsm.databaseBinding = databaseStorageBinding
-		err := dsm.WipeLayerBuffer(false)
-		if err != nil {
-			log.Error().Err(err).Msg("random-walk-layer: failed to wipe layer buffer")
-		}
-
 	}
 
 	// First, check if we're resuming a specific execution ID
@@ -3458,17 +3453,12 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 
 }
 
-func (dsm *DaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
-	log.Info().Bool("wipe_current_crawl", includeCurrentCrawl).Msg("random-walk-layer: Wiping layer buffer")
+func (dsm *DaprStateManager) WipeLayerBuffer() error {
+	log.Info().Str("crawl_id", dsm.config.CrawlID).Msg("random-walk-layer: Wiping layer buffer")
 	values := []any{
 		dsm.config.CrawlID,
 	}
-	sqlQuery := `DELETE FROM layer_buffer WHERE crawl_id <> $1;`
-
-	if includeCurrentCrawl {
-		sqlQuery = `DELETE FROM layer_buffer;`
-		values = []any{}
-	}
+	sqlQuery := `DELETE FROM layer_buffer WHERE crawl_id = $1;`
 
 	err := dsm.ExecuteDatabaseOperation(sqlQuery, values)
 
@@ -3484,7 +3474,7 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 	log.Info().Msg("random-walk-layer: getting pages from layer buffer")
 	pages := make([]Page, 0)
 
-	query := "SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM layer_buffer;"
+	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM layer_buffer WHERE crawl_id = '%s';", dsm.config.CrawlID)
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",

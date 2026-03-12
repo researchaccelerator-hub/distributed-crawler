@@ -58,7 +58,7 @@ func (m *mockStateManager) AddDiscoveredChannel(_ string) error                 
 func (m *mockStateManager) StoreChannelData(_ string, _ *model.ChannelData) error             { return nil }
 func (m *mockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error                        { return nil }
 func (m *mockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error)                    { return nil, nil }
-func (m *mockStateManager) WipeLayerBuffer(_ bool) error                                       { return nil }
+func (m *mockStateManager) WipeLayerBuffer() error                                             { return nil }
 func (m *mockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error                   { return nil }
 func (m *mockStateManager) AddPageToLayerBuffer(_ *state.Page) error                           { return nil }
 func (m *mockStateManager) Close() error                                                        { return nil }

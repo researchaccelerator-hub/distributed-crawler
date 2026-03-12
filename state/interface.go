@@ -98,7 +98,7 @@ type StateManagementInterface interface {
 	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
 	GetPagesFromLayerBuffer() ([]Page, error)
-	WipeLayerBuffer(includeCurrentCrawl bool) error
+	WipeLayerBuffer() error
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
 	AddPageToLayerBuffer(page *Page) error
 

@@ -215,7 +215,7 @@ func (m *MockDaprStateManager) StoreChannelData(channelID string, channelData *m
 	return nil
 }
 
-func (m *MockDaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
+func (m *MockDaprStateManager) WipeLayerBuffer() error { return nil }
 func (m *MockDaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil
 }

@@ -390,8 +390,8 @@ func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
 	return args.Get(0).([]state.Page), args.Error(1)
 }
 
-func (m *MockStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
-	args := m.Called(includeCurrentCrawl)
+func (m *MockStateManager) WipeLayerBuffer() error {
+	args := m.Called()
 	return args.Error(0)
 }
 

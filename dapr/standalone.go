@@ -614,7 +614,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				log.Error().Err(err).Msg("Failed to save state after adding new layer")
 			}
 			if crawlCfg.SamplingMethod == "random-walk" {
-				if err := sm.WipeLayerBuffer(true); err != nil {
+				if err := sm.WipeLayerBuffer(); err != nil {
 					log.Error().Err(err).Msg("random-walk-layer: Failed to wipe layer buffer after adding new layer")
 				}
 			}
