@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
@@ -18,6 +19,39 @@ import (
 
 // Regex to identify Telegram channel links in text
 var channelLinkRegex = regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
+
+// utf16OffsetToBytes converts TDLib UTF-16 code unit offset and length into
+// byte start/end indices for a Go string. TDLib entity offsets are always
+// UTF-16 code unit counts, not byte offsets, so direct slicing is wrong for
+// any non-ASCII text (Cyrillic, Arabic, emoji, etc.).
+//
+// TDLib entity offsets are UTF-16 code unit counts per the textEntity TL type:
+// https://core.telegram.org/tdlib/docs/classtd_1_1td__api_1_1text_entity.html
+// go-tdlib encodes this in the Offset/Length field comments in client/type.go:3600.
+func utf16OffsetToBytes(s string, utf16Offset, utf16Length int32) (start, end int) {
+	i := 0
+	u16pos := int32(0)
+	runeStart := -1
+	for i < len(s) {
+		if u16pos == utf16Offset {
+			runeStart = i
+		}
+		if u16pos == utf16Offset+utf16Length {
+			return runeStart, i
+		}
+		r, size := utf8.DecodeRuneInString(s[i:])
+		u16units := int32(1)
+		if r >= 0x10000 {
+			u16units = 2
+		}
+		u16pos += u16units
+		i += size
+	}
+	if runeStart == -1 {
+		return 0, 0
+	}
+	return runeStart, len(s)
+}
 
 // Regex to identify names that fit username requirements
 var usernameRegex = regexp.MustCompile(`(?:@)?([a-zA-Z0-9_]{4,32})`)
@@ -845,11 +879,10 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 					channelNamesMap[channelName] = true
 				}
 			case *client.TextEntityTypeMention:
-				// Extract mention
-				offset := entity.Offset
-				length := entity.Length
-				if int(offset+length) <= len(messageText.Text.Text) {
-					mention := messageText.Text.Text[offset : offset+length]
+				// Extract mention using UTF-16 offsets (TDLib counts UTF-16 code units)
+				start, end := utf16OffsetToBytes(messageText.Text.Text, entity.Offset, entity.Length)
+				if start < end && end <= len(messageText.Text.Text) {
+					mention := messageText.Text.Text[start:end]
 					if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
 						channelName := matches[1]
 						log.Debug().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
@@ -861,11 +894,10 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 				}
 
 			case *client.TextEntityTypeUrl:
-				// Extract URL directly from text
-				offset := entity.Offset
-				length := entity.Length
-				if int(offset+length) <= len(messageText.Text.Text) {
-					url := messageText.Text.Text[offset : offset+length]
+				// Extract URL directly from text using UTF-16 offsets (TDLib counts UTF-16 code units)
+				start, end := utf16OffsetToBytes(messageText.Text.Text, entity.Offset, entity.Length)
+				if start < end && end <= len(messageText.Text.Text) {
+					url := messageText.Text.Text[start:end]
 					if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
 						// Extract just the channel name (group 2 from regex)
 						channelName := matches[2]
