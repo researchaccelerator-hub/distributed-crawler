@@ -335,6 +335,12 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
 			log.Warn().Err(invalidErr).Msg("random-walk-init: failed to load invalid channels (continuing)")
 		}
+		if discErr := sm.InitializeDiscoveredChannels(); discErr != nil {
+			log.Fatal().Err(discErr).Msg("random-walk-init: failed to pull discovered channels")
+		}
+		if len(stringList) == 0 {
+			sm.InitializeRandomWalkLayer()
+		}
 	}
 
 	// Initialize connection pool with an appropriate size
