@@ -254,8 +254,26 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 // and member count to determine whether the channel should be fully processed.
 func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
 
+	// In random-walk mode, use the cached chat ID (from seed_channels) to skip
+	// the expensive SearchPublicChat RPC when we already know the ID.
+	var cachedChatID int64
+	if cfg.SamplingMethod == "random-walk" {
+		if id, ok := sm.GetCachedChatID(p.URL); ok {
+			cachedChatID = id
+		}
+
+		// If this channel was crawled before, only fetch messages newer than the
+		// last crawl time to avoid re-processing already-seen content.
+		if lastCrawled, err := sm.GetChannelLastCrawled(p.URL); err != nil {
+			log.Warn().Err(err).Str("channel", p.URL).Msg("random-walk: failed to get last crawled time, fetching full history")
+		} else if !lastCrawled.IsZero() && lastCrawled.After(cfg.MinPostDate) {
+			log.Info().Str("channel", p.URL).Time("since", lastCrawled).Msg("random-walk: channel previously crawled, fetching only new messages")
+			cfg.MinPostDate = lastCrawled
+		}
+	}
+
 	// Get channel information
-	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cfg)
+	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cachedChatID, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +335,14 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	discoveredChannels, err := processAllMessages(tdlibClient, channelInfo, messages, cfg.CrawlID, p.URL, sm, p, cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	// In random-walk mode, record that this channel has been crawled so future
+	// runs can skip already-seen messages and avoid SearchPublicChat.
+	if cfg.SamplingMethod == "random-walk" {
+		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id); markErr != nil {
+			log.Warn().Err(markErr).Str("channel", p.URL).Msg("random-walk: failed to mark channel as crawled")
+		}
 	}
 
 	return discoveredChannels, nil
@@ -486,13 +512,14 @@ type MemberCountGetter func(client crawler.TDLibClient, channelId int64) (int, e
 // This function uses the standard implementations for retrieving views, message count,
 // and member count from the telegramhelper package. For testing or custom implementations,
 // use getChannelInfoWithDeps directly.
-func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cfg common.CrawlerConfig) (*channelInfo, []*client.Message, error) {
+func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cachedChatID int64, cfg common.CrawlerConfig) (*channelInfo, []*client.Message, error) {
 	return getChannelInfoWithDeps(
 		tdlibClient,
 		page,
 		telegramhelper.GetTotalChannelViews,
 		telegramhelper.GetMessageCount,
 		telegramhelper.GetChannelMemberCount,
+		cachedChatID,
 		cfg,
 	)
 }
@@ -527,27 +554,43 @@ func getChannelInfoWithDeps(
 	getTotalViewsFn TotalViewsGetter,
 	getMessageCountFn MessageCountGetter,
 	getMemberCountFn MemberCountGetter,
+	cachedChatID int64,
 	cfg common.CrawlerConfig,
 ) (*channelInfo, []*client.Message, error) {
 
 	// TODO: REMOVE THIS AFTER DONE TESTING SPLIT CRAWLER
 	testIP()
 
-	// TODO: Replace with client level rate limiting
-	sleepMS := 9600 + rand.IntN(900)
-	log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
-	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	var chat *client.Chat
+	var err error
 
-	searchPublicChatStart := time.Now()
-	// Search for the channel
-	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
-		Username: page.URL,
-	})
-	telegramhelper.DetectCacheOrServer(searchPublicChatStart, "SearchPublicChat")
-	if err != nil {
-		log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
-		return nil, nil, err
+	if cachedChatID != 0 {
+		// Skip SearchPublicChat — use the cached chat ID directly.
+		log.Debug().Str("channel", page.URL).Int64("chat_id", cachedChatID).Msg("Using cached chat ID, skipping SearchPublicChat")
+		getChatStart := time.Now()
+		chat, err = tdlibClient.GetChat(&client.GetChatRequest{ChatId: cachedChatID})
+		telegramhelper.DetectCacheOrServer(getChatStart, "GetChat")
+		if err != nil {
+			log.Error().Err(err).Stack().Msgf("Failed to get chat by cached ID for: %v", page.URL)
+			return nil, nil, err
+		}
+	} else {
+		// TODO: Replace with client level rate limiting
+		sleepMS := 9600 + rand.IntN(900)
+		log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+
+		searchPublicChatStart := time.Now()
+		chat, err = tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+			Username: page.URL,
+		})
+		telegramhelper.DetectCacheOrServer(searchPublicChatStart, "SearchPublicChat")
+		if err != nil {
+			log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
+			return nil, nil, err
+		}
 	}
+
 	// should be cached. not sleeping
 	getChatStart := time.Now()
 	chatDetails, err := tdlibClient.GetChat(&client.GetChatRequest{

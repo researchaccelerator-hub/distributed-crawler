@@ -197,9 +197,11 @@ func (m *MockDaprStateManager) UpdateMessage(pageID string, chatID int64, messag
 }
 
 // For random-walk sample
-func (m *MockDaprStateManager) LoadSeedChannels() error                          { return nil }
-func (m *MockDaprStateManager) UpsertSeedChannelChatID(_ string, _ int64) error { return nil }
-func (m *MockDaprStateManager) GetCachedChatID(_ string) (int64, bool)          { return 0, false }
+func (m *MockDaprStateManager) LoadSeedChannels() error                               { return nil }
+func (m *MockDaprStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
+func (m *MockDaprStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
+func (m *MockDaprStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
+func (m *MockDaprStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
 func (m *MockDaprStateManager) InitializeDiscoveredChannels() error             { return nil }
 func (m *MockDaprStateManager) InitializeRandomWalkLayer() error                { return nil }
 func (m *MockDaprStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }

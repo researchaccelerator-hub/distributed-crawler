@@ -2,6 +2,8 @@
 package crawl
 
 import (
+	"time"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
@@ -371,9 +373,11 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 }
 
 // seed channels
-func (m *MockStateManager) LoadSeedChannels() error                                { return nil }
-func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error       { return nil }
-func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)                { return 0, false }
+func (m *MockStateManager) LoadSeedChannels() error                                    { return nil }
+func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error           { return nil }
+func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)                    { return 0, false }
+func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)         { return time.Time{}, nil }
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error                { return nil }
 
 // random-walk database functions
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {

@@ -45,9 +45,11 @@ func (m *mockStateManager) UpdateCrawlMetadata(_ string, _ map[string]interface{
 func (m *mockStateManager) FindIncompleteCrawl(_ string) (string, bool, error)                 { return "", false, nil }
 func (m *mockStateManager) HasProcessedMedia(_ string) (bool, error)                           { return false, nil }
 func (m *mockStateManager) MarkMediaAsProcessed(_ string) error                                { return nil }
-func (m *mockStateManager) LoadSeedChannels() error                                            { return nil }
-func (m *mockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error                    { return nil }
-func (m *mockStateManager) GetCachedChatID(_ string) (int64, bool)                             { return 0, false }
+func (m *mockStateManager) LoadSeedChannels() error                                                { return nil }
+func (m *mockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error                        { return nil }
+func (m *mockStateManager) GetCachedChatID(_ string) (int64, bool)                                 { return 0, false }
+func (m *mockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)                      { return time.Time{}, nil }
+func (m *mockStateManager) MarkChannelCrawled(_ string, _ int64) error                             { return nil }
 func (m *mockStateManager) InitializeDiscoveredChannels() error                                { return nil }
 func (m *mockStateManager) InitializeRandomWalkLayer() error                                   { return nil }
 func (m *mockStateManager) GetRandomDiscoveredChannel() (string, error)                        { return "", nil }

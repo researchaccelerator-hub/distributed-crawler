@@ -3295,6 +3295,65 @@ func (dsm *DaprStateManager) GetCachedChatID(username string) (int64, bool) {
 	return id, ok
 }
 
+// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
+// for the given username. Returns zero time if the channel has no recorded crawl.
+func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, error) {
+	dsm.databaseBinding = databaseStorageBinding
+
+	query := fmt.Sprintf("SELECT last_crawled_at FROM seed_channels WHERE channel_username = '%s';", username)
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql": query,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("random-walk-seed: failed to query last_crawled_at for %s: %w", username, err)
+	}
+
+	var rows [][]interface{}
+	if err := json.Unmarshal(res.Data, &rows); err != nil {
+		return time.Time{}, fmt.Errorf("random-walk-seed: failed to unmarshal last_crawled_at response: %w", err)
+	}
+
+	if len(rows) == 0 || len(rows[0]) == 0 || rows[0][0] == nil {
+		return time.Time{}, nil
+	}
+
+	switch v := rows[0][0].(type) {
+	case string:
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			// Try common Postgres format
+			t, err = time.Parse("2006-01-02T15:04:05Z", v)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("random-walk-seed: failed to parse last_crawled_at %q: %w", v, err)
+			}
+		}
+		return t, nil
+	case float64:
+		return time.Unix(int64(v), 0), nil
+	default:
+		return time.Time{}, fmt.Errorf("random-walk-seed: unexpected type %T for last_crawled_at", v)
+	}
+}
+
+// MarkChannelCrawled upserts the channel into seed_channels, setting last_crawled_at
+// to NOW() and caching the resolved chatID for future SearchPublicChat avoidance.
+func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64) error {
+	dsm.chatIDCacheMu.Lock()
+	dsm.chatIDCache[username] = chatID
+	dsm.chatIDCacheMu.Unlock()
+
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at)
+VALUES ($1, $2, NOW())
+ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+}
+
 func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 	if dsm.BaseStateManager.config.SeedSize <= 0 {
 		return fmt.Errorf("random-walk-init: must use a seed-size of 1 or larger")

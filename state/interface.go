@@ -6,6 +6,8 @@
 package state
 
 import (
+	"time"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 )
 
@@ -99,6 +101,13 @@ type StateManagementInterface interface {
 	WipeLayerBuffer(includeCurrentCrawl bool) error
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
 	AddPageToLayerBuffer(page *Page) error
+
+	// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
+	// for the given username. Returns zero time if the channel has never been crawled.
+	GetChannelLastCrawled(username string) (time.Time, error)
+	// MarkChannelCrawled upserts the channel into seed_channels, recording the
+	// current time as last_crawled_at and caching the resolved chatID.
+	MarkChannelCrawled(username string, chatID int64) error
 
 	// Combined files
 	UploadCombinedFile(filename string) error
