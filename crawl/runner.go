@@ -975,8 +975,9 @@ func processAllMessagesWithProcessor(
 		if walkback || cfg.WalkbackRate >= rndNum {
 			linkToFollow.Walkback = true
 			// get walkback channel, skipping new channels discovered on this page
+			const maxWalkbackAttempts = 10
 			var walkbackURL string
-			for {
+			for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
 				var randomErr error
 				walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
 				log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk-walkback: Random Walkback channel")
@@ -989,6 +990,9 @@ func processAllMessagesWithProcessor(
 					log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Same as source channel. Pulling another channel")
 				} else {
 					break
+				}
+				if attempt == maxWalkbackAttempts-1 {
+					log.Warn().Str("channel", walkbackURL).Msg("random-walk-walkback: Exhausted walkback attempts, using last candidate as fallback")
 				}
 			}
 			page.URL = walkbackURL
@@ -1028,6 +1032,7 @@ func processAllMessagesWithProcessor(
 					Skipped:            true,
 					SourceChannel:      owner.URL,
 					Walkback:           false,
+					SequenceID:         owner.SequenceID,
 				}
 				log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
 					Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).
