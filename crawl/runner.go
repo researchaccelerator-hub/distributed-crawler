@@ -735,7 +735,6 @@ func processAllMessagesWithProcessor(
 	// random-walk structs
 	discoveredEdges := make([]*state.EdgeRecord, 0)
 	newChannels := make(map[string]bool, 0)
-	oldChannels := make(map[string]bool, 0)
 	invalidChannels := make(map[string]bool, 0)
 
 	// Process messages
@@ -842,26 +841,22 @@ func processAllMessagesWithProcessor(
 							}
 							discoveredChannels = append(discoveredChannels, page)
 						} else {
-							// check if channel already found as new, old, or invalid and skip
+							// check if channel already found as invalid and skip
 							if _, ok := invalidChannels[o]; ok {
 								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already identified as invalid. Skipping")
 								continue
-							} else if _, ok := newChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already found as part of new channels. Skipping")
-								continue
-							} else if _, ok := oldChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already found as part of old channels. Skipping")
-								continue
 							}
-							// determine if a previously discovered channel and act accordingly
+							// determine if a previously discovered channel and act accordingly.
+							// For random-walk: skip the per-batch dedup guards so the same channel
+							// can produce edge records from multiple sources in the same layer.
+							// The IsDiscoveredChannel check still prevents redundant SearchPublicChat calls.
 							if sm.IsDiscoveredChannel(o) {
-								oldChannels[o] = true
+								continue
 							} else if _, ok := sm.GetCachedChatID(o); ok {
-								// Chat ID already cached (from seed_channels) — known valid
-								// supergroup, skip the expensive SearchPublicChat RPC.
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Using cached chat ID, skipping SearchPublicChat")
+								// Channel is a seed channel — not a newly discovered channel.
+								// Mark as discovered to avoid future SearchPublicChat calls, but skip edge creation.
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
 								sm.AddDiscoveredChannel(o)
-								newChannels[o] = true
 							} else {
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Sleeping for 2 seconds then checking if valid public channel.")
 								time.Sleep(2000 * time.Millisecond)
