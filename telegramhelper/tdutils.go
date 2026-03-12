@@ -40,7 +40,7 @@ func channelNameFromMatch(match []string) (string, bool) {
 	if telegramReservedPaths[strings.ToLower(name)] {
 		return "", false
 	}
-	return name, true
+	return strings.ToLower(name), true
 }
 
 // utf16OffsetToBytes converts TDLib UTF-16 code unit offset and length into
@@ -894,7 +894,7 @@ func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map
 			if start < end && end <= len(ft.Text) {
 				mention := ft.Text[start:end]
 				if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
-					channelName := matches[1]
+					channelName := strings.ToLower(matches[1])
 					log.Debug().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
 					channelNamesMap[channelName] = true
 				} else {
