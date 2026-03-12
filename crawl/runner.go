@@ -989,6 +989,8 @@ func processAllMessagesWithProcessor(
 				}
 			}
 			page.URL = walkbackURL
+			// Walkback starts a new chain
+			page.SequenceID = uuid.New().String()
 		} else {
 			linkToFollow.Walkback = false
 
@@ -998,7 +1000,10 @@ func processAllMessagesWithProcessor(
 			}
 			page.URL = newChannelSlice[rand.IntN(len(newChannelSlice))]
 			delete(newChannels, page.URL) // remaining items in map will be used to create skipped edges
+			// Forward edge: propagate the current chain's sequence ID
+			page.SequenceID = owner.SequenceID
 		}
+		linkToFollow.SequenceID = page.SequenceID
 		linkToFollow.DestinationChannel = page.URL
 		log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
 			Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).

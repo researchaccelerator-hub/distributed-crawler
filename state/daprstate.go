@@ -507,13 +507,18 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	// Create pages from the unique seed URLs
 	pages := make([]Page, 0, len(uniqueSeedURLs))
 	for _, url := range uniqueSeedURLs {
-		pages = append(pages, Page{
+		page := Page{
 			ID:        uuid.New().String(),
 			URL:       url,
 			Depth:     0,
 			Status:    "unfetched",
 			Timestamp: time.Now(),
-		})
+		}
+		// In random-walk mode each seed channel starts its own chain
+		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+			page.SequenceID = uuid.New().String()
+		}
+		pages = append(pages, page)
 	}
 
 	// In case it's a random-walk without seed urls
@@ -3138,7 +3143,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Str("source_channel", edges[0].SourceChannel).
 		Msg("random-walk-edge: Adding new edges")
 
-	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) VALUES ($1, $2, $3, $4, $5, $6);`
+	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
 	for i, record := range edgesCopy {
 
@@ -3157,6 +3162,7 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			record.Skipped,
 			record.DiscoveryTime,
 			dsm.config.CrawlID,
+			record.SequenceID,
 		}
 
 		log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).Msg("random-walk-edge: adding edge record")
@@ -3375,11 +3381,12 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 		}
 		seedChannels[url] = true
 		pages = append(pages, Page{
-			ID:        uuid.New().String(),
-			URL:       url,
-			Depth:     0,
-			Status:    "unfetched",
-			Timestamp: time.Now(),
+			ID:         uuid.New().String(),
+			URL:        url,
+			Depth:      0,
+			Status:     "unfetched",
+			Timestamp:  time.Now(),
+			SequenceID: uuid.New().String(),
 		})
 		if len(seedChannels) >= dsm.BaseStateManager.config.SeedSize {
 			log.Info().Int("seed_size", dsm.BaseStateManager.config.SeedSize).Int("seed_channel_size", len(seedChannels)).Msg("random-walk-init: finished selecting seed channels")
@@ -3397,7 +3404,7 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 // TODO: generalize the process of inserting records to function that takes in query and params
 func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
 	log.Info().Str("url", page.URL).Msg("random-walk-layer: Adding page to layer buffer")
-	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id) VALUES ($1, $2, $3, $4, $5);`
+	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6);`
 
 	values := []any{
 		page.ID,
@@ -3405,6 +3412,7 @@ func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
 		page.Depth,
 		page.URL,
 		dsm.config.CrawlID,
+		page.SequenceID,
 	}
 
 	dsm.ExecuteDatabaseOperation(sqlQuery, values)
@@ -3476,7 +3484,7 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 	log.Info().Msg("random-walk-layer: getting pages from layer buffer")
 	pages := make([]Page, 0)
 
-	query := "SELECT page_id, parent_id, depth, url, crawl_id FROM layer_buffer;"
+	query := "SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM layer_buffer;"
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
@@ -3500,13 +3508,18 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 	if len(pageResults) > 0 {
 		log.Printf("random-walk-layer: Found %d pages in layer buffer:\n", len(pageResults))
 		for _, page := range pageResults {
+			seqID := ""
+			if len(page) > 5 && page[5] != nil {
+				seqID, _ = page[5].(string)
+			}
 			pages = append(pages, Page{
-				ID:        string(page[0].(string)),
-				ParentID:  string(page[1].(string)),
-				Depth:     int(page[2].(float64)),
-				URL:       string(page[3].(string)),
-				Status:    "unfetched",
-				Timestamp: time.Now(),
+				ID:         string(page[0].(string)),
+				ParentID:   string(page[1].(string)),
+				Depth:      int(page[2].(float64)),
+				URL:        string(page[3].(string)),
+				Status:     "unfetched",
+				Timestamp:  time.Now(),
+				SequenceID: seqID,
 			})
 		}
 		return pages, nil

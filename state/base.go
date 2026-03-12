@@ -67,6 +67,10 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 			Status:    "unfetched",
 			Timestamp: time.Now(),
 		}
+		// In random-walk mode each seed channel starts its own chain
+		if bsm.config.SamplingMethod == "random-walk" {
+			page.SequenceID = uuid.New().String()
+		}
 
 		// Store page in page map
 		bsm.pageMap[page.ID] = page

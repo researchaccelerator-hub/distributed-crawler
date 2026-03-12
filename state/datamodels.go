@@ -52,6 +52,9 @@ type Page struct {
 	ParentID     string    `json:"parentId,omitempty"`
 	Messages     []Message `json:"messages,omitempty"`
 	ConnectionID string    `json:"LastConnectionID,omitempty"` // Connection ID of last Telegram çonnection to crawl page
+
+	// Random-walk chain tracking
+	SequenceID string `json:"sequenceId,omitempty"` // UUID propagated through a forward chain; new UUID on walkback
 }
 
 // Message represents a message associated with a page
@@ -69,6 +72,7 @@ type EdgeRecord struct {
 	SourceChannel      string    `json:"sourceChannel"`
 	Walkback           bool      `json:"walkback"`
 	Skipped            bool      `json:"skipped"`
+	SequenceID         string    `json:"sequenceId"` // UUID shared across all edges in one forward chain
 }
 
 type DiscoveredChannels struct {
