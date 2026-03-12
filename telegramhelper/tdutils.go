@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -19,6 +20,28 @@ import (
 
 // Regex to identify Telegram channel links in text
 var channelLinkRegex = regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
+
+// telegramReservedPaths are t.me path segments that are not channel usernames.
+// The regex captures these as if they were usernames, so we filter them out.
+var telegramReservedPaths = map[string]bool{
+	"joinchat": true, "addstickers": true, "addtheme": true,
+	"setlanguage": true, "share": true, "c": true, "s": true,
+	"iv": true, "proxy": true, "socks": true, "login": true,
+	"confirm": true, "bg": true,
+}
+
+// channelNameFromMatch extracts a channel username from a channelLinkRegex match slice.
+// Returns ("", false) if the match is too short or the name is a reserved Telegram path.
+func channelNameFromMatch(match []string) (string, bool) {
+	if len(match) < 3 {
+		return "", false
+	}
+	name := match[2]
+	if telegramReservedPaths[strings.ToLower(name)] {
+		return "", false
+	}
+	return name, true
+}
 
 // utf16OffsetToBytes converts TDLib UTF-16 code unit offset and length into
 // byte start/end indices for a Go string. TDLib entity offsets are always
@@ -862,10 +885,9 @@ func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map
 		switch entityType := entity.Type.(type) {
 		case *client.TextEntityTypeTextUrl:
 			url := entityType.Url
-			if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
-				channelName := matches[2]
-				log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeTextUrl").Msg("random-walk-links: adding")
-				channelNamesMap[channelName] = true
+			if name, ok := channelNameFromMatch(channelLinkRegex.FindStringSubmatch(url)); ok {
+				log.Debug().Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeTextUrl").Msg("random-walk-links: adding")
+				channelNamesMap[name] = true
 			}
 		case *client.TextEntityTypeMention:
 			start, end := utf16OffsetToBytes(ft.Text, entity.Offset, entity.Length)
@@ -884,22 +906,19 @@ func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map
 			start, end := utf16OffsetToBytes(ft.Text, entity.Offset, entity.Length)
 			if start < end && end <= len(ft.Text) {
 				url := ft.Text[start:end]
-				if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
-					channelName := matches[2]
-					log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
-					channelNamesMap[channelName] = true
+				if name, ok := channelNameFromMatch(channelLinkRegex.FindStringSubmatch(url)); ok {
+					log.Debug().Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
+					channelNamesMap[name] = true
 				}
 			}
 		}
 	}
 
 	// Also scan plain text for t.me links not captured as entities
-	matches := channelLinkRegex.FindAllStringSubmatch(ft.Text, -1)
-	for _, match := range matches {
-		if len(match) >= 3 {
-			channelName := match[2]
-			log.Debug().Str("channel_name", channelName).Str("entity_type", "plaintext").Msg("random-walk-links: adding")
-			channelNamesMap[channelName] = true
+	for _, match := range channelLinkRegex.FindAllStringSubmatch(ft.Text, -1) {
+		if name, ok := channelNameFromMatch(match); ok {
+			log.Debug().Str("channel_name", name).Str("entity_type", "plaintext").Msg("random-walk-links: adding")
+			channelNamesMap[name] = true
 		}
 	}
 }
