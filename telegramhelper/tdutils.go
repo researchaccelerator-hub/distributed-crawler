@@ -948,7 +948,7 @@ func extractChannelLinksFromMessage(message *client.Message) []string {
 
 	extractLinksFromFormattedText(ft, channelNamesMap)
 
-	var channelNames []string
+	channelNames := make([]string, 0, len(channelNamesMap))
 	for name := range channelNamesMap {
 		channelNames = append(channelNames, name)
 	}
