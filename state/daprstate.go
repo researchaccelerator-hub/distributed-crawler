@@ -61,6 +61,10 @@ type DaprStateManager struct {
 	chatIDCache   map[string]int64
 	chatIDCacheMu sync.RWMutex
 
+	// Invalid channel cache: username -> time it was marked invalid (TTL = 30 days)
+	invalidChannelCache   map[string]time.Time
+	invalidChannelCacheMu sync.RWMutex
+
 	// Cache configuration
 	maxCacheItemsPerShard int // Maximum number of items per shard
 	cacheExpirationDays   int // Number of days after which cache entries are considered stale
@@ -187,7 +191,8 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 		maxCacheItemsPerShard: maxCacheItemsPerShard,
 		cacheExpirationDays:   cacheExpirationDays,
 
-		chatIDCache: make(map[string]int64),
+		chatIDCache:         make(map[string]int64),
+		invalidChannelCache: make(map[string]time.Time),
 	}
 
 	// Load the media cache index as part of initialization
@@ -3353,6 +3358,99 @@ func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64) e
 VALUES ($1, $2, NOW())
 ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
 	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+}
+
+const invalidChannelTTL = 30 * 24 * time.Hour
+
+// LoadInvalidChannels queries the invalid_channels table for rows within the
+// 30-day TTL window and populates the in-memory cache.  Call this during
+// initialization so all pods share the same set of known-invalid channels.
+func (dsm *DaprStateManager) LoadInvalidChannels() error {
+	log.Info().Msg("random-walk-invalid: loading invalid channels")
+	dsm.databaseBinding = databaseStorageBinding
+
+	query := "SELECT channel_username, invalidated_at FROM invalid_channels WHERE invalidated_at > NOW() - INTERVAL '30 days';"
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql": query,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("random-walk-invalid: failed to query invalid_channels: %w", err)
+	}
+
+	var rows [][]interface{}
+	if err := json.Unmarshal(res.Data, &rows); err != nil {
+		return fmt.Errorf("random-walk-invalid: failed to unmarshal invalid_channels response: %w", err)
+	}
+
+	dsm.invalidChannelCacheMu.Lock()
+	defer dsm.invalidChannelCacheMu.Unlock()
+
+	loaded := 0
+	for _, row := range rows {
+		if len(row) < 2 {
+			continue
+		}
+		username, ok := row[0].(string)
+		if !ok || username == "" {
+			continue
+		}
+		var invalidatedAt time.Time
+		switch v := row[1].(type) {
+		case string:
+			t, parseErr := time.Parse(time.RFC3339, v)
+			if parseErr != nil {
+				t, parseErr = time.Parse("2006-01-02T15:04:05Z", v)
+				if parseErr != nil {
+					log.Warn().Str("channel", username).Str("value", v).Msg("random-walk-invalid: failed to parse invalidated_at, skipping")
+					continue
+				}
+			}
+			invalidatedAt = t
+		case float64:
+			invalidatedAt = time.Unix(int64(v), 0)
+		default:
+			continue
+		}
+		dsm.invalidChannelCache[username] = invalidatedAt
+		loaded++
+	}
+
+	log.Info().Int("loaded", loaded).Msg("random-walk-invalid: finished loading invalid channels")
+	return nil
+}
+
+// IsInvalidChannel returns true if the channel is present in the in-memory
+// invalid cache and its 30-day TTL has not expired.
+func (dsm *DaprStateManager) IsInvalidChannel(username string) bool {
+	dsm.invalidChannelCacheMu.RLock()
+	t, ok := dsm.invalidChannelCache[username]
+	dsm.invalidChannelCacheMu.RUnlock()
+	if !ok {
+		return false
+	}
+	return time.Since(t) < invalidChannelTTL
+}
+
+// MarkChannelInvalid persists the channel to the invalid_channels table and
+// adds it to the in-memory cache so subsequent calls to IsInvalidChannel return
+// true without a DB round-trip.
+func (dsm *DaprStateManager) MarkChannelInvalid(username string, reason string) error {
+	now := time.Now()
+
+	dsm.invalidChannelCacheMu.Lock()
+	dsm.invalidChannelCache[username] = now
+	dsm.invalidChannelCacheMu.Unlock()
+
+	sqlQuery := `INSERT INTO invalid_channels (channel_username, reason, invalidated_at)
+VALUES ($1, $2, NOW())
+ON CONFLICT (channel_username) DO UPDATE SET reason = EXCLUDED.reason, invalidated_at = NOW();`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, reason})
 }
 
 func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {

@@ -109,6 +109,16 @@ type StateManagementInterface interface {
 	// current time as last_crawled_at and caching the resolved chatID.
 	MarkChannelCrawled(username string, chatID int64) error
 
+	// LoadInvalidChannels populates the in-memory invalid channel cache from the
+	// invalid_channels table (rows within the 30-day TTL window only).
+	LoadInvalidChannels() error
+	// IsInvalidChannel returns true if the channel is cached as invalid and the
+	// 30-day TTL has not yet expired.
+	IsInvalidChannel(username string) bool
+	// MarkChannelInvalid persists the channel to the invalid_channels table and
+	// adds it to the in-memory cache.  reason should be "not_found" or "not_supergroup".
+	MarkChannelInvalid(username string, reason string) error
+
 	// Combined files
 	UploadCombinedFile(filename string) error
 

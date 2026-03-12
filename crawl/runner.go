@@ -778,7 +778,6 @@ func processAllMessagesWithProcessor(
 	// random-walk structs
 	discoveredEdges := make([]*state.EdgeRecord, 0)
 	newChannels := make(map[string]bool, 0)
-	invalidChannels := make(map[string]bool, 0)
 
 	// Process messages
 	for _, message := range messages {
@@ -885,7 +884,7 @@ func processAllMessagesWithProcessor(
 							discoveredChannels = append(discoveredChannels, page)
 						} else {
 							// check if channel already found as invalid and skip
-							if _, ok := invalidChannels[o]; ok {
+							if sm.IsInvalidChannel(o) {
 								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already identified as invalid. Skipping")
 								continue
 							}
@@ -908,14 +907,18 @@ func processAllMessagesWithProcessor(
 								})
 								if err != nil {
 									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
-									invalidChannels[o] = true
+									if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
+										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+									}
 									continue
 								}
 								chatType := string(chat.Type.ChatTypeType())
 
 								if chatType != "chatTypeSupergroup" {
 									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk-channel: Not a valid chat type. Skipping")
-									invalidChannels[o] = true
+									if invalidErr := sm.MarkChannelInvalid(o, "not_supergroup"); invalidErr != nil {
+										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+									}
 									continue
 								}
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Adding channel to discovered channels")

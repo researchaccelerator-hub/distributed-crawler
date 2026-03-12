@@ -288,6 +288,10 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			if seedErr := sm.LoadSeedChannels(); seedErr != nil {
 				log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
 			}
+			// load shared invalid channel cache (shared across all pods)
+			if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
+				log.Warn().Err(invalidErr).Msg("random-walk-init: failed to load invalid channels (continuing)")
+			}
 			// pull discovered channels from edge_records
 			err := sm.InitializeDiscoveredChannels()
 			if err != nil {

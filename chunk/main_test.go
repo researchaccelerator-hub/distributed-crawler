@@ -50,6 +50,9 @@ func (m *mockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error     
 func (m *mockStateManager) GetCachedChatID(_ string) (int64, bool)                                 { return 0, false }
 func (m *mockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)                      { return time.Time{}, nil }
 func (m *mockStateManager) MarkChannelCrawled(_ string, _ int64) error                             { return nil }
+func (m *mockStateManager) LoadInvalidChannels() error                                             { return nil }
+func (m *mockStateManager) IsInvalidChannel(_ string) bool                                         { return false }
+func (m *mockStateManager) MarkChannelInvalid(_ string, _ string) error                            { return nil }
 func (m *mockStateManager) InitializeDiscoveredChannels() error                                { return nil }
 func (m *mockStateManager) InitializeRandomWalkLayer() error                                   { return nil }
 func (m *mockStateManager) GetRandomDiscoveredChannel() (string, error)                        { return "", nil }
