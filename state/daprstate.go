@@ -3306,13 +3306,18 @@ func (dsm *DaprStateManager) GetCachedChatID(username string) (int64, bool) {
 func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, error) {
 	dsm.databaseBinding = databaseStorageBinding
 
-	query := fmt.Sprintf("SELECT last_crawled_at FROM seed_channels WHERE channel_username = '%s';", username)
+	query := "SELECT last_crawled_at FROM seed_channels WHERE channel_username = $1;"
+	paramsJSON, err := json.Marshal([]any{username})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("random-walk-seed: failed to marshal params: %w", err)
+	}
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
 		Data:      nil,
 		Metadata: map[string]string{
-			"sql": query,
+			"sql":    query,
+			"params": string(paramsJSON),
 		},
 	}
 	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
@@ -3508,7 +3513,9 @@ func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
 		page.SequenceID,
 	}
 
-	dsm.ExecuteDatabaseOperation(sqlQuery, values)
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, values); err != nil {
+		return fmt.Errorf("random-walk-layer: failed to add page to layer buffer: %w", err)
+	}
 
 	return nil
 }
@@ -3601,10 +3608,10 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 				seqID, _ = page[5].(string)
 			}
 			pages = append(pages, Page{
-				ID:         string(page[0].(string)),
-				ParentID:   string(page[1].(string)),
+				ID:         page[0].(string),
+				ParentID:   page[1].(string),
 				Depth:      int(page[2].(float64)),
-				URL:        string(page[3].(string)),
+				URL:        page[3].(string),
 				Status:     "unfetched",
 				Timestamp:  time.Now(),
 				SequenceID: seqID,
