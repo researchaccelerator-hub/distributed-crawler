@@ -850,84 +850,89 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 // Each channel name is deduplicated using a map before being returned,
 // ensuring that the same channel isn't added multiple times even if referenced
 // multiple ways in the same message.
-func extractChannelLinksFromMessage(message *client.Message) []string {
-	// Hold unique channel names
-	channelNamesMap := make(map[string]bool)
-
-	// Check if it's a text message
-	var messageText *client.MessageText
-
-	// Type assertion with proper type checking
-	switch content := message.Content.(type) {
-	case *client.MessageText:
-		messageText = content
-	default:
-		return []string{} // Not a text message
+// extractLinksFromFormattedText processes a FormattedText (message body or media caption)
+// and adds any discovered channel names to channelNamesMap.
+func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map[string]bool) {
+	if ft == nil {
+		return
 	}
 
-	// Process text entities if available
-	if messageText != nil && messageText.Text != nil && messageText.Text.Entities != nil {
-		for _, entity := range messageText.Text.Entities {
-			switch entityType := entity.Type.(type) {
-			case *client.TextEntityTypeTextUrl:
-				// Extract URL from text link
-				url := entityType.Url
-				if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
-					// Extract just the channel name (group 2 from regex)
-					channelName := matches[2]
-					log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
-					channelNamesMap[channelName] = true
-				}
-			case *client.TextEntityTypeMention:
-				// Extract mention using UTF-16 offsets (TDLib counts UTF-16 code units)
-				start, end := utf16OffsetToBytes(messageText.Text.Text, entity.Offset, entity.Length)
-				if start < end && end <= len(messageText.Text.Text) {
-					mention := messageText.Text.Text[start:end]
-					if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
-						channelName := matches[1]
-						log.Debug().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
-						channelNamesMap[channelName] = true
-					} else {
-						log.Debug().Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
-						log.Debug().Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
-					}
-				}
-
-			case *client.TextEntityTypeUrl:
-				// Extract URL directly from text using UTF-16 offsets (TDLib counts UTF-16 code units)
-				start, end := utf16OffsetToBytes(messageText.Text.Text, entity.Offset, entity.Length)
-				if start < end && end <= len(messageText.Text.Text) {
-					url := messageText.Text.Text[start:end]
-					if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
-						// Extract just the channel name (group 2 from regex)
-						channelName := matches[2]
-						log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
-						channelNamesMap[channelName] = true
-					}
-				}
-			}
-		}
-	}
-
-	// Also check the plain text for channel links using regex
-	if messageText != nil && messageText.Text != nil {
-		matches := channelLinkRegex.FindAllStringSubmatch(messageText.Text.Text, -1)
-		for _, match := range matches {
-			if len(match) >= 3 {
-				// Extract just the channel name (group 2 from regex)
-				channelName := match[2]
-				log.Debug().Str("channel_name", channelName).Str("entity_type", "messageText.Text.Text").Msg("random-walk-links: adding")
+	// Process structured entities
+	for _, entity := range ft.Entities {
+		switch entityType := entity.Type.(type) {
+		case *client.TextEntityTypeTextUrl:
+			url := entityType.Url
+			if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
+				channelName := matches[2]
+				log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeTextUrl").Msg("random-walk-links: adding")
 				channelNamesMap[channelName] = true
 			}
+		case *client.TextEntityTypeMention:
+			start, end := utf16OffsetToBytes(ft.Text, entity.Offset, entity.Length)
+			if start < end && end <= len(ft.Text) {
+				mention := ft.Text[start:end]
+				if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
+					channelName := matches[1]
+					log.Debug().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
+					channelNamesMap[channelName] = true
+				} else {
+					log.Debug().Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
+					log.Debug().Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
+				}
+			}
+		case *client.TextEntityTypeUrl:
+			start, end := utf16OffsetToBytes(ft.Text, entity.Offset, entity.Length)
+			if start < end && end <= len(ft.Text) {
+				url := ft.Text[start:end]
+				if matches := channelLinkRegex.FindStringSubmatch(url); len(matches) > 0 {
+					channelName := matches[2]
+					log.Debug().Str("url", url).Str("channel_name", channelName).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
+					channelNamesMap[channelName] = true
+				}
+			}
 		}
 	}
 
-	// Convert map to slice
+	// Also scan plain text for t.me links not captured as entities
+	matches := channelLinkRegex.FindAllStringSubmatch(ft.Text, -1)
+	for _, match := range matches {
+		if len(match) >= 3 {
+			channelName := match[2]
+			log.Debug().Str("channel_name", channelName).Str("entity_type", "plaintext").Msg("random-walk-links: adding")
+			channelNamesMap[channelName] = true
+		}
+	}
+}
+
+func extractChannelLinksFromMessage(message *client.Message) []string {
+	channelNamesMap := make(map[string]bool)
+
+	var ft *client.FormattedText
+	switch content := message.Content.(type) {
+	case *client.MessageText:
+		ft = content.Text
+	case *client.MessagePhoto:
+		ft = content.Caption
+	case *client.MessageVideo:
+		ft = content.Caption
+	case *client.MessageDocument:
+		ft = content.Caption
+	case *client.MessageAnimation:
+		ft = content.Caption
+	case *client.MessageAudio:
+		ft = content.Caption
+	case *client.MessageVoiceNote:
+		ft = content.Caption
+	default:
+		return []string{}
+	}
+
+	extractLinksFromFormattedText(ft, channelNamesMap)
+
 	var channelNames []string
 	for name := range channelNamesMap {
 		channelNames = append(channelNames, name)
 	}
-
 	return channelNames
 }
 
