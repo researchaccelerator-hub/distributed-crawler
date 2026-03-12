@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/chunk"
@@ -329,7 +330,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 // processLayerInParallel processes all pages in a layer with a maximum of maxWorkers concurrent goroutines.
 // It uses a semaphore pattern to limit concurrency and ensures all pages are processed before returning.
 // This version uses the connection pool for efficient client management.
-func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, shouldStop *atomic.Bool, crawlStart time.Time) {
 	// In dapr mode it's harder to accurately detect this, so we'll simplify the approach
 	// to prevent reprocessing of fetched pages, always skip them
 	isResumingSameCrawlExecution := true
@@ -410,6 +411,12 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				}
 				// Continue processing this page
 			}
+		}
+
+		// Stop dispatching new channels if the crawl duration has been exceeded
+		if shouldStop != nil && shouldStop.Load() {
+			log.Info().Str("url", pageToProcess.URL).Msg("Max crawl duration reached, skipping remaining channels in layer")
+			break
 		}
 
 		// Acquire semaphore slot (block if we're at max workers)
@@ -525,7 +532,15 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 					mu.Unlock()
 				}
 			}
-		}(pageToProcess)
+
+		// After each channel completes, check if the crawl duration has been exceeded
+		if shouldStop != nil && crawlCfg.SamplingMethod == "random-walk" && crawlCfg.MaxCrawlDuration > 0 {
+			if time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
+				log.Info().Str("url", page.URL).Dur("max_crawl_duration", crawlCfg.MaxCrawlDuration).Msg("Max crawl duration exceeded after channel completed, signalling stop")
+				shouldStop.Store(true)
+			}
+		}
+	}(pageToProcess)
 	}
 
 	// Wait for all pages to be processed
@@ -703,6 +718,8 @@ func DetermineCrawlID(tempSM state.StateManagementInterface, crawlCfg common.Cra
 
 func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, isResumingSameCrawlExecution bool) {
 	depth := 0
+	crawlStart := time.Now()
+	var shouldStop atomic.Bool
 	for {
 		log.Info().Msgf("Starting loop for depth: %v", depth)
 		// Check current maximum depth at the beginning of each iteration
@@ -765,10 +782,19 @@ func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common
 		}
 
 		// Process pages in current layer in parallel
-		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg)
+		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg, &shouldStop, crawlStart)
 
 		// Log progress after completing a layer
 		log.Info().Msgf("Completed layer at depth %d", depth)
+
+		// For random-walk, stop if any channel completion triggered the duration limit
+		if crawlCfg.SamplingMethod == "random-walk" && shouldStop.Load() {
+			log.Info().
+				Dur("elapsed", time.Since(crawlStart)).
+				Dur("max_crawl_duration", crawlCfg.MaxCrawlDuration).
+				Msg("Max crawl duration reached, stopping random walk")
+			break
+		}
 
 		// Move to the next depth
 		depth++

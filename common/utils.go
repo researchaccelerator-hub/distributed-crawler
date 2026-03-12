@@ -54,6 +54,7 @@ type CrawlerConfig struct {
 	NullConfig         string                 // JSON string for user defined changes to handling of null crawl data
 	NullValidator      null_handler.Validator // Null Validator object
 	ExitOnComplete     bool                   // Exit with code 0 after a successful crawl (useful for Kubernetes cron jobs)
+	MaxCrawlDuration   time.Duration          // Maximum wall-clock duration for a random-walk crawl (0 = unlimited)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

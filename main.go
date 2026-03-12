@@ -39,6 +39,7 @@ var (
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
+	maxCrawlDuration  string   // Max wall-clock duration for random-walk crawl (e.g., "48h")
 	dateBetween       string   // Date range in format "YYYY-MM-DD,YYYY-MM-DD"
 	sampleSize        int      // Number of posts to randomly sample when using date-between
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
@@ -442,6 +443,18 @@ Examples:
 				Msg("Date range configured for date-between filtering")
 		}
 
+		// Parse max-crawl-duration if provided
+		maxCrawlDurationStr := viper.GetString("crawler.maxcrawlduration")
+		if maxCrawlDurationStr != "" {
+			d, err := time.ParseDuration(maxCrawlDurationStr)
+			if err != nil {
+				log.Error().Err(err).Str("max_crawl_duration", maxCrawlDurationStr).Msg("Failed to parse max-crawl-duration")
+				return fmt.Errorf("invalid max-crawl-duration format, must be a Go duration string (e.g., '48h', '24h30m'): %v", err)
+			}
+			crawlerCfg.MaxCrawlDuration = d
+			log.Info().Dur("max_crawl_duration", d).Msg("Max crawl duration configured")
+		}
+
 		// Parse sample-size parameter if provided
 		sampleSizeValue := viper.GetInt("crawler.samplesize")
 		if sampleSizeValue > 0 {
@@ -758,6 +771,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.StorageRoot, "storage-root", "/tmp/crawl", "Storage root directory")
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
+	rootCmd.PersistentFlags().StringVar(&maxCrawlDuration, "max-crawl-duration", "", "Maximum wall-clock duration for a random-walk crawl before graceful shutdown (e.g., '48h', '24h30m')")
 	rootCmd.PersistentFlags().StringVar(&dateBetween, "date-between", "", "Date range to crawl posts between (format: YYYY-MM-DD,YYYY-MM-DD)")
 	rootCmd.PersistentFlags().IntVar(&sampleSize, "sample-size", 0, "Number of posts to randomly sample when using date-between (0 means no sampling)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive (deprecated, use --tdlib-database-urls)")
@@ -810,6 +824,7 @@ func init() {
 	viper.BindPFlag("storage.root", rootCmd.PersistentFlags().Lookup("storage-root"))
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("crawler.timeago", rootCmd.PersistentFlags().Lookup("time-ago"))
+	viper.BindPFlag("crawler.maxcrawlduration", rootCmd.PersistentFlags().Lookup("max-crawl-duration"))
 	viper.BindPFlag("crawler.datebetween", rootCmd.PersistentFlags().Lookup("date-between"))
 	viper.BindPFlag("crawler.samplesize", rootCmd.PersistentFlags().Lookup("sample-size"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))

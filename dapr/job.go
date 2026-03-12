@@ -828,7 +828,7 @@ func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
 		}
 
 		// Process pages in current layer in parallel
-		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg)
+		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg, nil, time.Time{})
 
 		// Log progress after completing a layer
 		log.Info().Msgf("Completed layer at depth %d", depth)
