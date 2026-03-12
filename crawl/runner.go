@@ -303,7 +303,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	if err != nil {
 		return nil, err
 	}
-	if !active || channelInfo.messageCount == 0 || (cfg.MinUsers > 0 && channelInfo.memberCount < int32(cfg.MinUsers)) {
+	if !active || channelInfo.messageCount == 0 || (cfg.SamplingMethod != "random-walk" && cfg.MinUsers > 0 && channelInfo.memberCount < int32(cfg.MinUsers)) {
 		log.Info().Msg("Not enough members in the channel, considering it private and skipping.")
 		p.Status = "deadend"
 		err := sm.SaveState()
