@@ -2,7 +2,12 @@
 
 FROM acrnetcus.azurecr.io/tdlib:latest AS builder
 
-RUN apk add --no-cache g++ make cmake git linux-headers binutils go graphviz valgrind curl
+RUN apk add --no-cache g++ make cmake git linux-headers binutils graphviz valgrind curl
+
+# Install Go 1.25 explicitly to match go.mod requirement
+RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && \
+    curl -fsSL https://go.dev/dl/go1.25.0.linux-${ARCH}.tar.gz | tar -C /usr/local -xz
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 RUN ln -s /usr/include/asm-generic /usr/include/asm
 

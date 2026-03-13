@@ -153,7 +153,7 @@ func (lsm *LocalStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 	return []Page{}, fmt.Errorf("GetPagesFromLayerBuffer not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
+func (lsm *LocalStateManager) WipeLayerBuffer() error {
 	return fmt.Errorf("WipeLayerBuffer not implemented for local state manager")
 }
 

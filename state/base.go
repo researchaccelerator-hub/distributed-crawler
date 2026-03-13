@@ -67,6 +67,10 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 			Status:    "unfetched",
 			Timestamp: time.Now(),
 		}
+		// In random-walk mode each seed channel starts its own chain
+		if bsm.config.SamplingMethod == "random-walk" {
+			page.SequenceID = uuid.New().String()
+		}
 
 		// Store page in page map
 		bsm.pageMap[page.ID] = page
@@ -87,6 +91,15 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 	log.Info().Msgf("Initialized state with %d seed URLs", len(seedURLs))
 	return nil
 }
+
+func (bsm *BaseStateManager) LoadSeedChannels() error                                { return nil }
+func (bsm *BaseStateManager) UpsertSeedChannelChatID(_ string, _ int64) error       { return nil }
+func (bsm *BaseStateManager) GetCachedChatID(_ string) (int64, bool)                { return 0, false }
+func (bsm *BaseStateManager) GetChannelLastCrawled(_ string) (time.Time, error)     { return time.Time{}, nil }
+func (bsm *BaseStateManager) MarkChannelCrawled(_ string, _ int64) error            { return nil }
+func (bsm *BaseStateManager) LoadInvalidChannels() error                            { return nil }
+func (bsm *BaseStateManager) IsInvalidChannel(_ string) bool                        { return false }
+func (bsm *BaseStateManager) MarkChannelInvalid(_ string, _ string) error           { return nil }
 
 func (bsm *BaseStateManager) InitializeDiscoveredChannels() error {
 	return nil

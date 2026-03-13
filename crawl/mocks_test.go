@@ -2,6 +2,8 @@
 package crawl
 
 import (
+	"time"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
@@ -370,6 +372,16 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 	return args.Error(0)
 }
 
+// seed channels
+func (m *MockStateManager) LoadSeedChannels() error                                    { return nil }
+func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error           { return nil }
+func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)                    { return 0, false }
+func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)         { return time.Time{}, nil }
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error                { return nil }
+func (m *MockStateManager) LoadInvalidChannels() error                                { return nil }
+func (m *MockStateManager) IsInvalidChannel(_ string) bool                            { return false }
+func (m *MockStateManager) MarkChannelInvalid(_ string, _ string) error               { return nil }
+
 // random-walk database functions
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
 	args := m.Called(edges)
@@ -381,8 +393,8 @@ func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
 	return args.Get(0).([]state.Page), args.Error(1)
 }
 
-func (m *MockStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
-	args := m.Called(includeCurrentCrawl)
+func (m *MockStateManager) WipeLayerBuffer() error {
+	args := m.Called()
 	return args.Error(0)
 }
 

@@ -39,6 +39,7 @@ var (
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
+	maxCrawlDuration  string   // Max wall-clock duration for random-walk crawl (e.g., "48h")
 	dateBetween       string   // Date range in format "YYYY-MM-DD,YYYY-MM-DD"
 	sampleSize        int      // Number of posts to randomly sample when using date-between
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
@@ -211,21 +212,19 @@ Examples:
 			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
 		}
 
-		// TODO: update to just pass the whole crawl config to validate sampling method
 		// Validate sampling method combinations (skip URL validation for dapr-job mode)
-		if crawlerCfg.SamplingMethod == "random-walk" {
-			// xor operation to confirm only one of the two options is provided
-			if (len(urlList) > 0 || urlFileURL != "") != (crawlerCfg.SeedSize > 0) {
-			} else if ((len(urlList) > 0 || urlFileURL != "") && (crawlerCfg.SeedSize > 0)) || ((len(urlList) == 0 && urlFileURL == "") && (crawlerCfg.SeedSize == 0)) {
-				return fmt.Errorf("Must provide either seed urls or seed size in random-walk crawl")
-			} else if len(crawlerCfg.CrawlID) > 32 {
-				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
-			}
+		if err := validateSamplingMethod(common.SamplingValidationInput{
+			Platform:       crawlerCfg.Platform,
+			SamplingMethod: crawlerCfg.SamplingMethod,
+			URLList:        urlList,
+			URLFile:        urlFile,
+			URLFileURL:     urlFileURL,
+			Mode:           mode,
+			SeedSize:       crawlerCfg.SeedSize,
+			CrawlID:        crawlerCfg.CrawlID,
+		}); err != nil {
+			return err
 		}
-		// TODO: validate sampling method doesn't work with urlFileUrl. Need to redo validateSamplingMethod to accept Crawl config
-		// else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
-		// 	return err
-		// }
 
 		// Load configuration file if specified
 		if cfgFile != "" {
@@ -346,6 +345,33 @@ Examples:
 			crawlerCfg.MinChannelVideos = 10 // Default value
 		}
 
+		// Load Telegram rate limit configuration (defaults applied if not set)
+		crawlerCfg.RateLimitConfig = common.DefaultTelegramRateLimitConfig()
+		if v := viper.GetFloat64("telegram.ratelimit.get_chat_history_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetChatHistoryRate = v
+		}
+		if v := viper.GetFloat64("telegram.ratelimit.search_public_chat_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.SearchPublicChatRate = v
+		}
+		if v := viper.GetFloat64("telegram.ratelimit.get_supergroup_info_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetSupergroupInfoRate = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.get_chat_history_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetChatHistoryJitterMs = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.search_public_chat_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.SearchPublicChatJitterMs = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.get_supergroup_info_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetSupergroupInfoJitterMs = v
+		}
+		if v := viper.GetFloat64("telegram.ratelimit.get_message_server_hit_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetMessageServerHitRate = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.get_message_server_hit_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetMessageServerHitJitterMs = v
+		}
+
 		log.Debug().
 			Int("min_users", crawlerCfg.MinUsers).
 			Str("crawl_id", crawlerCfg.CrawlID).
@@ -440,6 +466,18 @@ Examples:
 				Time("min_date", minDate).
 				Time("max_date", maxDate).
 				Msg("Date range configured for date-between filtering")
+		}
+
+		// Parse max-crawl-duration if provided
+		maxCrawlDurationStr := viper.GetString("crawler.maxcrawlduration")
+		if maxCrawlDurationStr != "" {
+			d, err := time.ParseDuration(maxCrawlDurationStr)
+			if err != nil {
+				log.Error().Err(err).Str("max_crawl_duration", maxCrawlDurationStr).Msg("Failed to parse max-crawl-duration")
+				return fmt.Errorf("invalid max-crawl-duration format, must be a Go duration string (e.g., '48h', '24h30m'): %v", err)
+			}
+			crawlerCfg.MaxCrawlDuration = d
+			log.Info().Dur("max_crawl_duration", d).Msg("Max crawl duration configured")
 		}
 
 		// Parse sample-size parameter if provided
@@ -701,46 +739,10 @@ func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
 	}
 }
 
-// validateSamplingMethod validates that the platform supports the specified sampling method
-func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string, mode string) error {
-	// Valid sampling methods per platform
-	validMethods := map[string][]string{
-		"telegram": {"channel", "snowball", "random-walk"},
-		"youtube":  {"channel", "random", "snowball"},
-	}
-
-	// Check if platform is supported
-	supportedMethods, exists := validMethods[platform]
-	if !exists {
-		return fmt.Errorf("unsupported platform: %s", platform)
-	}
-
-	// Check if sampling method is valid for this platform
-	isSupported := false
-	for _, method := range supportedMethods {
-		if method == samplingMethod {
-			isSupported = true
-			break
-		}
-	}
-
-	if !isSupported {
-		return fmt.Errorf("sampling method '%s' is not supported for platform '%s'. Supported methods: %v",
-			samplingMethod, platform, supportedMethods)
-	}
-
-	// For random sampling, no URLs/channels are required
-	if samplingMethod == "random" || samplingMethod == "random-walk" {
-		return nil
-	}
-
-	// For channel and snowball sampling, validate that URLs are provided
-	// Skip URL validation for dapr-job mode since jobs provide URLs through job data
-	if (samplingMethod == "channel" || samplingMethod == "snowball" || samplingMethod == "random-walk") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
-		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
-	}
-
-	return nil
+// validateSamplingMethod is a thin wrapper around common.ValidateSamplingMethod,
+// bridging the CLI-local variables into the shared validation struct.
+func validateSamplingMethod(in common.SamplingValidationInput) error {
+	return common.ValidateSamplingMethod(in)
 }
 
 // Initialize cobra command
@@ -758,6 +760,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.StorageRoot, "storage-root", "/tmp/crawl", "Storage root directory")
 	rootCmd.PersistentFlags().StringVar(&minPostDate, "min-post-date", "", "Minimum post date to crawl (format: YYYY-MM-DD)")
 	rootCmd.PersistentFlags().StringVar(&timeAgo, "time-ago", "", "Only consider posts newer than this time ago (e.g., '30d' for 30 days, '6h' for 6 hours, '2w' for 2 weeks, '1m' for 1 month, '1y' for 1 year)")
+	rootCmd.PersistentFlags().StringVar(&maxCrawlDuration, "max-crawl-duration", "", "Maximum wall-clock duration for a random-walk crawl before graceful shutdown (e.g., '48h', '24h30m')")
 	rootCmd.PersistentFlags().StringVar(&dateBetween, "date-between", "", "Date range to crawl posts between (format: YYYY-MM-DD,YYYY-MM-DD)")
 	rootCmd.PersistentFlags().IntVar(&sampleSize, "sample-size", 0, "Number of posts to randomly sample when using date-between (0 means no sampling)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.TDLibDatabaseURL, "tdlib-database-url", "", "URL to a pre-seeded TDLib database archive (deprecated, use --tdlib-database-urls)")
@@ -810,6 +813,7 @@ func init() {
 	viper.BindPFlag("storage.root", rootCmd.PersistentFlags().Lookup("storage-root"))
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("crawler.timeago", rootCmd.PersistentFlags().Lookup("time-ago"))
+	viper.BindPFlag("crawler.maxcrawlduration", rootCmd.PersistentFlags().Lookup("max-crawl-duration"))
 	viper.BindPFlag("crawler.datebetween", rootCmd.PersistentFlags().Lookup("date-between"))
 	viper.BindPFlag("crawler.samplesize", rootCmd.PersistentFlags().Lookup("sample-size"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
