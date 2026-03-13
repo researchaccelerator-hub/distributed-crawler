@@ -53,7 +53,9 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 	}
 
 	// For random sampling, URLs are not required since we discover content randomly
-	if !generateCode && len(urls) == 0 && !(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") {
+	noURLsRequired := (crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") ||
+		crawlerCfg.SamplingMethod == "random-walk"
+	if !generateCode && len(urls) == 0 && !noURLsRequired {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
 	}
 
