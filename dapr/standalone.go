@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -269,6 +270,18 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if crawlCfg.SamplingMethod == "random" && crawlCfg.Platform == "youtube" {
 		RunRandomYoutubeSample(context.Background(), sm, crawlCfg)
 	} else {
+		// Normalize seed URLs for Telegram random-walk: strip any t.me prefix and
+		// lowercase so they match the seed_channels table (VARCHAR PK is case-sensitive).
+		if crawlCfg.SamplingMethod == "random-walk" && crawlCfg.Platform == "telegram" {
+			for i, u := range stringList {
+				u = strings.TrimPrefix(u, "https://t.me/")
+				u = strings.TrimPrefix(u, "http://t.me/")
+				u = strings.TrimPrefix(u, "t.me/")
+				u = strings.TrimPrefix(u, "@")
+				stringList[i] = strings.ToLower(u)
+			}
+		}
+
 		// Create a global map to track all URLs we've seen across all layers
 		seenURLs := make(map[string]bool)
 

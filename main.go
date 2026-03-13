@@ -212,21 +212,19 @@ Examples:
 			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
 		}
 
-		// TODO: update to just pass the whole crawl config to validate sampling method
 		// Validate sampling method combinations (skip URL validation for dapr-job mode)
-		if crawlerCfg.SamplingMethod == "random-walk" {
-			// xor operation to confirm only one of the two options is provided
-			if (len(urlList) > 0 || urlFileURL != "") != (crawlerCfg.SeedSize > 0) {
-			} else if ((len(urlList) > 0 || urlFileURL != "") && (crawlerCfg.SeedSize > 0)) || ((len(urlList) == 0 && urlFileURL == "") && (crawlerCfg.SeedSize == 0)) {
-				return fmt.Errorf("Must provide either seed urls or seed size in random-walk crawl")
-			} else if len(crawlerCfg.CrawlID) > 32 {
-				return fmt.Errorf("Crawl IDs cannot exceed 32 characters")
-			}
+		if err := validateSamplingMethod(common.SamplingValidationInput{
+			Platform:       crawlerCfg.Platform,
+			SamplingMethod: crawlerCfg.SamplingMethod,
+			URLList:        urlList,
+			URLFile:        urlFile,
+			URLFileURL:     urlFileURL,
+			Mode:           mode,
+			SeedSize:       crawlerCfg.SeedSize,
+			CrawlID:        crawlerCfg.CrawlID,
+		}); err != nil {
+			return err
 		}
-		// TODO: validate sampling method doesn't work with urlFileUrl. Need to redo validateSamplingMethod to accept Crawl config
-		// else if err := validateSamplingMethod(crawlerCfg.Platform, crawlerCfg.SamplingMethod, urlList, urlFile, mode); err != nil {
-		// 	return err
-		// }
 
 		// Load configuration file if specified
 		if cfgFile != "" {
@@ -714,46 +712,10 @@ func startWorkerMode(workerID string, crawlerCfg common.CrawlerConfig) {
 	}
 }
 
-// validateSamplingMethod validates that the platform supports the specified sampling method
-func validateSamplingMethod(platform, samplingMethod string, urlList []string, urlFile string, mode string) error {
-	// Valid sampling methods per platform
-	validMethods := map[string][]string{
-		"telegram": {"channel", "snowball", "random-walk"},
-		"youtube":  {"channel", "random", "snowball"},
-	}
-
-	// Check if platform is supported
-	supportedMethods, exists := validMethods[platform]
-	if !exists {
-		return fmt.Errorf("unsupported platform: %s", platform)
-	}
-
-	// Check if sampling method is valid for this platform
-	isSupported := false
-	for _, method := range supportedMethods {
-		if method == samplingMethod {
-			isSupported = true
-			break
-		}
-	}
-
-	if !isSupported {
-		return fmt.Errorf("sampling method '%s' is not supported for platform '%s'. Supported methods: %v",
-			samplingMethod, platform, supportedMethods)
-	}
-
-	// For random sampling, no URLs/channels are required
-	if samplingMethod == "random" || samplingMethod == "random-walk" {
-		return nil
-	}
-
-	// For channel and snowball sampling, validate that URLs are provided
-	// Skip URL validation for dapr-job mode since jobs provide URLs through job data
-	if (samplingMethod == "channel" || samplingMethod == "snowball" || samplingMethod == "random-walk") && len(urlList) == 0 && urlFile == "" && mode != "dapr-job" {
-		return fmt.Errorf("%s sampling requires URLs to be provided. Use --urls or --url-file to specify them", samplingMethod)
-	}
-
-	return nil
+// validateSamplingMethod is a thin wrapper around common.ValidateSamplingMethod,
+// bridging the CLI-local variables into the shared validation struct.
+func validateSamplingMethod(in common.SamplingValidationInput) error {
+	return common.ValidateSamplingMethod(in)
 }
 
 // Initialize cobra command

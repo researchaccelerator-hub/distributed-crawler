@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -318,6 +319,18 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Store reference to state manager for signal handler
 	shutdownSM = sm
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+
+	// Normalize seed URLs for Telegram random-walk: strip any t.me prefix and
+	// lowercase so they match the seed_channels table (VARCHAR PK is case-sensitive).
+	if crawlCfg.SamplingMethod == "random-walk" && crawlCfg.Platform == "telegram" {
+		for i, u := range stringList {
+			u = strings.TrimPrefix(u, "https://t.me/")
+			u = strings.TrimPrefix(u, "http://t.me/")
+			u = strings.TrimPrefix(u, "t.me/")
+			u = strings.TrimPrefix(u, "@")
+			stringList[i] = strings.ToLower(u)
+		}
+	}
 
 	// Initialize with seed URLs if this is a new crawl
 	// If resuming an existing crawl, this is a no-op
