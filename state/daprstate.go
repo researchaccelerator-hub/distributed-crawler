@@ -3286,9 +3286,7 @@ func (dsm *DaprStateManager) UpsertSeedChannelChatID(username string, chatID int
 	dsm.chatIDCache[username] = chatID
 	dsm.chatIDCacheMu.Unlock()
 
-	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id)
-VALUES ($1, $2)
-ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id;`
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id) VALUES ($1, $2) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id;`
 	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
 }
 
@@ -3359,9 +3357,7 @@ func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64) e
 	dsm.chatIDCache[username] = chatID
 	dsm.chatIDCacheMu.Unlock()
 
-	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at)
-VALUES ($1, $2, NOW())
-ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at) VALUES ($1, $2, NOW()) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
 	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
 }
 
@@ -3452,9 +3448,7 @@ func (dsm *DaprStateManager) MarkChannelInvalid(username string, reason string) 
 	dsm.invalidChannelCache[username] = now
 	dsm.invalidChannelCacheMu.Unlock()
 
-	sqlQuery := `INSERT INTO invalid_channels (channel_username, reason, invalidated_at)
-VALUES ($1, $2, NOW())
-ON CONFLICT (channel_username) DO UPDATE SET reason = EXCLUDED.reason, invalidated_at = NOW();`
+	sqlQuery := `INSERT INTO invalid_channels (channel_username, reason, invalidated_at) VALUES ($1, $2, NOW()) ON CONFLICT (channel_username) DO UPDATE SET reason = EXCLUDED.reason, invalidated_at = NOW();`
 	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, reason})
 }
 
