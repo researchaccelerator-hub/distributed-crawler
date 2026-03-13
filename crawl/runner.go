@@ -218,7 +218,7 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 	// Get a client from the connection pool
 	tdlibClient, connID, err := GetConnectionFromPool(ctx)
 	if err != nil {
-		log.Error().Err(err).Msgf("Failed to get client from pool for channel %s", p.URL)
+		log.Error().Err(err).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Failed to get client from pool")
 		// Fall back to creating a new connection if pool is exhausted or not initialized
 		tdlibClient, err = Connect(storagePrefix, cfg)
 		if err != nil {
@@ -231,7 +231,7 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 		defer ReleaseConnectionToPool(connID)
 	}
 	p.ConnectionID = connID
-	log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Msg("random-walk-connection-pool: Started connection")
+	log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Started connection")
 	// Continue with the regular channel processing
 	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }
@@ -266,9 +266,9 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 		// If this channel was crawled before, only fetch messages newer than the
 		// last crawl time to avoid re-processing already-seen content.
 		if lastCrawled, err := sm.GetChannelLastCrawled(p.URL); err != nil {
-			log.Warn().Err(err).Str("channel", p.URL).Msg("random-walk: failed to get last crawled time, fetching full history")
+			log.Warn().Err(err).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to get last crawled time, fetching full history")
 		} else if !lastCrawled.IsZero() && lastCrawled.After(cfg.MinPostDate) {
-			log.Info().Str("channel", p.URL).Time("since", lastCrawled).Msg("random-walk: channel previously crawled, fetching only new messages")
+			log.Info().Str("channel", p.URL).Time("since", lastCrawled).Str("log_tag", "rw_channel").Msg("Channel previously crawled, fetching only new messages")
 			cfg.MinPostDate = lastCrawled
 		}
 	}
@@ -314,7 +314,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	if cfg.SamplingMethod == "random-walk" {
 		err := sm.StoreChannelData(p.URL, channelData)
 		if err != nil {
-			log.Error().Err(err).Msg("random-walk-channel-info: failed to store channel data")
+			log.Error().Err(err).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to store channel data")
 		}
 	}
 
@@ -342,7 +342,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	// runs can skip already-seen messages and avoid SearchPublicChat.
 	if cfg.SamplingMethod == "random-walk" {
 		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id); markErr != nil {
-			log.Warn().Err(markErr).Str("channel", p.URL).Msg("random-walk: failed to mark channel as crawled")
+			log.Warn().Err(markErr).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to mark channel as crawled")
 		}
 	}
 
