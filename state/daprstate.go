@@ -3088,6 +3088,23 @@ func (dsm *DaprStateManager) StoreChannelData(channelID string, channelData *mod
 
 	channelJSON = append(channelJSON, '\n')
 
+	if dsm.BaseStateManager.config.CombineFiles {
+		tempFilename := fmt.Sprintf("%s/temp_channel_%s_%d.jsonl", dsm.BaseStateManager.config.CombineTempDir, channelID, time.Now().UnixNano())
+		watchFilename := fmt.Sprintf("%s/channel_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, channelID, time.Now().UnixNano())
+
+		err = os.WriteFile(tempFilename, channelJSON, 0644)
+		if err != nil {
+			return fmt.Errorf("random-walk-channel-info: unable to write to temp file %s: %w", tempFilename, err)
+		}
+
+		err = os.Rename(tempFilename, watchFilename)
+		if err != nil {
+			return fmt.Errorf("random-walk-channel-info: unable to move %s to %s: %w", tempFilename, watchFilename, err)
+		}
+
+		return nil
+	}
+
 	storagePath, err := dsm.generateCrawlExecutableStoragePath(
 		channelID,
 		"channel_data.jsonl",
