@@ -788,7 +788,7 @@ func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common
 			continue
 		}
 
-		if depth > crawlCfg.MaxDepth {
+		if crawlCfg.MaxDepth >= 0 && depth > crawlCfg.MaxDepth {
 			log.Info().Msgf("Processed all layers up to max depth %d", maxDepth)
 			break
 		}

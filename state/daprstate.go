@@ -635,7 +635,7 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 	duplicateCount := 0
 
 	if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-		log.Info().Msgf("random-walk-layer: Sampling Method %s allows for duplicate visits to a URL. SKipping de-duplication process", dsm.BaseStateManager.config.SamplingMethod)
+		log.Info().Msgf("random-walk-layer: Sampling Method %s allows for duplicate visits to a URL. Skipping de-duplication process", dsm.BaseStateManager.config.SamplingMethod)
 	}
 
 	for i := range pages {
