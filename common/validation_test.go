@@ -35,6 +35,7 @@ func TestValidateSamplingMethodComprehensive(t *testing.T) {
 		samplingMethod string
 		urlList        []string
 		urlFile        string
+		seedSize       int
 		expectError    bool
 		errorContains  string
 	}{
@@ -113,6 +114,7 @@ func TestValidateSamplingMethodComprehensive(t *testing.T) {
 			platform:       "telegram",
 			samplingMethod: "random-walk",
 			urlList:        []string{"https://t.me/seed1"},
+			seedSize:       100,
 			expectError:    true,
 			errorContains:  "not both or neither",
 		},
@@ -222,9 +224,11 @@ func TestValidateSamplingMethodComprehensive(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// random-walk with seed size > 0 needs SeedSize set
-			seedSize := 0
-			if tt.samplingMethod == "random-walk" && len(tt.urlList) == 0 && tt.urlFile == "" && !tt.expectError {
+			// random-walk with seed size > 0 needs SeedSize set.
+			// Use the explicit value from the test case; fall back to 100 for
+			// success cases that don't specify URLs (avoiding a "neither" error).
+			seedSize := tt.seedSize
+			if seedSize == 0 && tt.samplingMethod == "random-walk" && len(tt.urlList) == 0 && tt.urlFile == "" && !tt.expectError {
 				seedSize = 100
 			}
 			err := ValidateSamplingMethod(SamplingValidationInput{
