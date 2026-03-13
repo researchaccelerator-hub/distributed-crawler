@@ -18,8 +18,9 @@ import (
 	"github.com/zelenin/go-tdlib/client"
 )
 
-// Regex to identify Telegram channel links in text
-var channelLinkRegex = regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z0-9_]{4,32})`)
+// Regex to identify Telegram channel links in text.
+// Telegram usernames must start with a letter and be 5–32 chars total.
+var channelLinkRegex = regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z][a-zA-Z0-9_]{4,31})`)
 
 // telegramReservedPaths are t.me path segments that are not channel usernames.
 // The regex captures these as if they were usernames, so we filter them out.
@@ -76,8 +77,24 @@ func utf16OffsetToBytes(s string, utf16Offset, utf16Length int32) (start, end in
 	return runeStart, len(s)
 }
 
-// Regex to identify names that fit username requirements
-var usernameRegex = regexp.MustCompile(`(?:@)?([a-zA-Z0-9_]{4,32})`)
+// Regex to identify names that fit username requirements.
+// Telegram usernames must start with a letter and be 5–32 chars total.
+var usernameRegex = regexp.MustCompile(`(?:@)?([a-zA-Z][a-zA-Z0-9_]{4,31})`)
+
+// DiscoveredLink is a Telegram channel username extracted from a message, paired with
+// the entity type that produced it. SourceType indicates how reliable the extraction is.
+type DiscoveredLink struct {
+	Name       string
+	SourceType string
+}
+
+// Source type constants for DiscoveredLink.
+const (
+	SourceTypeMention  = "mention"   // TextEntityTypeMention — @username structured entity
+	SourceTypeTextURL  = "text_url"  // TextEntityTypeTextUrl — formatted hyperlink
+	SourceTypeURL      = "url"       // TextEntityTypeUrl — bare URL entity
+	SourceTypePlainText = "plaintext" // plain-text regex scan (least reliable)
+)
 
 //// removeMultimedia removes all files and subdirectories in the specified directory.
 //// If the directory does not exist, it does nothing.
@@ -874,10 +891,18 @@ func fetchfilefromtelegram(tdlibClient crawler.TDLibClient, sm state.StateManage
 // ensuring that the same channel isn't added multiple times even if referenced
 // multiple ways in the same message.
 // extractLinksFromFormattedText processes a FormattedText (message body or media caption)
-// and adds any discovered channel names to channelNamesMap.
-func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map[string]bool) {
+// and adds any discovered channel names to sourceMap (name → SourceType constant).
+// If a name is already present, the existing source type is preserved (first/most-structured wins,
+// since structured entities are processed before the plaintext scan).
+func extractLinksFromFormattedText(ft *client.FormattedText, sourceMap map[string]string) {
 	if ft == nil {
 		return
+	}
+
+	addIfNew := func(name, srcType string) {
+		if _, exists := sourceMap[name]; !exists {
+			sourceMap[name] = srcType
+		}
 	}
 
 	// Process structured entities
@@ -887,7 +912,7 @@ func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map
 			url := entityType.Url
 			if name, ok := channelNameFromMatch(channelLinkRegex.FindStringSubmatch(url)); ok {
 				log.Debug().Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeTextUrl").Msg("random-walk-links: adding")
-				channelNamesMap[name] = true
+				addIfNew(name, SourceTypeTextURL)
 			}
 		case *client.TextEntityTypeMention:
 			start, end := utf16OffsetToBytes(ft.Text, entity.Offset, entity.Length)
@@ -896,7 +921,7 @@ func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map
 				if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
 					channelName := strings.ToLower(matches[1])
 					log.Debug().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
-					channelNamesMap[channelName] = true
+					addIfNew(channelName, SourceTypeMention)
 				} else {
 					log.Debug().Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
 					log.Debug().Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
@@ -908,7 +933,7 @@ func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map
 				url := ft.Text[start:end]
 				if name, ok := channelNameFromMatch(channelLinkRegex.FindStringSubmatch(url)); ok {
 					log.Debug().Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
-					channelNamesMap[name] = true
+					addIfNew(name, SourceTypeURL)
 				}
 			}
 		}
@@ -918,38 +943,58 @@ func extractLinksFromFormattedText(ft *client.FormattedText, channelNamesMap map
 	for _, match := range channelLinkRegex.FindAllStringSubmatch(ft.Text, -1) {
 		if name, ok := channelNameFromMatch(match); ok {
 			log.Debug().Str("channel_name", name).Str("entity_type", "plaintext").Msg("random-walk-links: adding")
-			channelNamesMap[name] = true
+			addIfNew(name, SourceTypePlainText)
 		}
 	}
 }
 
-func extractChannelLinksFromMessage(message *client.Message) []string {
-	channelNamesMap := make(map[string]bool)
-
-	var ft *client.FormattedText
+// extractFormattedTextFromMessage returns the FormattedText body from a message's content,
+// or nil for unsupported content types.
+func extractFormattedTextFromMessage(message *client.Message) *client.FormattedText {
 	switch content := message.Content.(type) {
 	case *client.MessageText:
-		ft = content.Text
+		return content.Text
 	case *client.MessagePhoto:
-		ft = content.Caption
+		return content.Caption
 	case *client.MessageVideo:
-		ft = content.Caption
+		return content.Caption
 	case *client.MessageDocument:
-		ft = content.Caption
+		return content.Caption
 	case *client.MessageAnimation:
-		ft = content.Caption
+		return content.Caption
 	case *client.MessageAudio:
-		ft = content.Caption
+		return content.Caption
 	case *client.MessageVoiceNote:
-		ft = content.Caption
+		return content.Caption
 	default:
+		return nil
+	}
+}
+
+// ExtractChannelLinksWithSource returns all channel usernames found in the message
+// together with the entity type (SourceType*) that produced each one.
+// If the same name appears via multiple entity types, the most-structured source wins
+// (mention > text_url > url > plaintext), because structured entities are processed first.
+func ExtractChannelLinksWithSource(message *client.Message) []DiscoveredLink {
+	sourceMap := make(map[string]string)
+	ft := extractFormattedTextFromMessage(message)
+	extractLinksFromFormattedText(ft, sourceMap)
+	links := make([]DiscoveredLink, 0, len(sourceMap))
+	for name, src := range sourceMap {
+		links = append(links, DiscoveredLink{Name: name, SourceType: src})
+	}
+	return links
+}
+
+func extractChannelLinksFromMessage(message *client.Message) []string {
+	sourceMap := make(map[string]string)
+	ft := extractFormattedTextFromMessage(message)
+	if ft == nil {
 		return []string{}
 	}
-
-	extractLinksFromFormattedText(ft, channelNamesMap)
-
-	channelNames := make([]string, 0, len(channelNamesMap))
-	for name := range channelNamesMap {
+	extractLinksFromFormattedText(ft, sourceMap)
+	channelNames := make([]string, 0, len(sourceMap))
+	for name := range sourceMap {
 		channelNames = append(channelNames, name)
 	}
 	return channelNames

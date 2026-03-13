@@ -721,6 +721,47 @@ func (p *DefaultMessageProcessor) ProcessMessage(tdlibClient crawler.TDLibClient
 	return processMessage(tdlibClient, message, messageId, chatId, info, crawlID, channelUsername, *sm, cfg)
 }
 
+// searchLookupStats tracks SearchPublicChat hit/miss counts broken down by the
+// SourceType of the mention that produced the username (mention, text_url, url, plaintext).
+type searchLookupStats struct {
+	bySource map[string][2]int // [0]=hits, [1]=misses
+	total    int
+}
+
+func newSearchLookupStats() *searchLookupStats {
+	return &searchLookupStats{bySource: make(map[string][2]int)}
+}
+
+func (s *searchLookupStats) record(sourceType string, hit bool) {
+	counts := s.bySource[sourceType]
+	if hit {
+		counts[0]++
+	} else {
+		counts[1]++
+	}
+	s.bySource[sourceType] = counts
+	s.total++
+}
+
+func (s *searchLookupStats) log(channel string, tag string) {
+	e := log.Info().
+		Str("channel", channel).
+		Str("log_tag", "rw_lookup_stats").
+		Str("event", tag).
+		Int("total_lookups", s.total)
+	for src, counts := range s.bySource {
+		hitRate := 0.0
+		if counts[0]+counts[1] > 0 {
+			hitRate = float64(counts[0]) / float64(counts[0]+counts[1])
+		}
+		e = e.
+			Int(src+"_hits", counts[0]).
+			Int(src+"_misses", counts[1]).
+			Float64(src+"_hit_rate", hitRate)
+	}
+	e.Msg("SearchPublicChat lookup stats")
+}
+
 // processAllMessages retrieves and processes all messages from a channel
 func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, messages []*client.Message, crawlID, channelUsername string, sm state.StateManagementInterface, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, error) {
 	processor := &DefaultMessageProcessor{}
@@ -765,6 +806,7 @@ func processAllMessagesWithProcessor(
 	// random-walk structs
 	discoveredEdges := make([]*state.EdgeRecord, 0)
 	newChannels := make(map[string]bool, 0)
+	lookupStats := newSearchLookupStats()
 
 	// Process messages
 	for _, message := range messages {
@@ -853,6 +895,17 @@ func processAllMessagesWithProcessor(
 					// Get the current channel URL from the owner's URL
 					currentChannelURL := owner.URL
 
+					// For random-walk: build a name→sourceType map for this message so
+					// SearchPublicChat hits/misses can be broken down by mention type.
+					var msgSourceMap map[string]string
+					if cfg.SamplingMethod == "random-walk" {
+						links := telegramhelper.ExtractChannelLinksWithSource(discMessage)
+						msgSourceMap = make(map[string]string, len(links))
+						for _, l := range links {
+							msgSourceMap[l.Name] = l.SourceType
+						}
+					}
+
 					for _, o := range outlinks {
 						// Skip if the outlink is the same as the current channel
 						if o == currentChannelURL {
@@ -887,12 +940,21 @@ func processAllMessagesWithProcessor(
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
 								sm.AddDiscoveredChannel(o)
 							} else {
+								srcType, ok := msgSourceMap[o]
+								if !ok {
+									srcType = "unknown"
+								}
+
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
 
 								if err != nil {
-									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
+									log.Info().Err(err).Str("channel", o).Str("source_type", srcType).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
+									lookupStats.record(srcType, false)
+									if lookupStats.total%100 == 0 {
+										lookupStats.log(owner.URL, "periodic")
+									}
 									if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
 										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
 									}
@@ -901,13 +963,21 @@ func processAllMessagesWithProcessor(
 								chatType := string(chat.Type.ChatTypeType())
 
 								if chatType != "chatTypeSupergroup" {
-									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk-channel: Not a valid chat type. Skipping")
+									log.Info().Str("chat_type", chatType).Str("chat", o).Str("source_type", srcType).Msg("random-walk-channel: Not a valid chat type. Skipping")
+									lookupStats.record(srcType, false)
+									if lookupStats.total%100 == 0 {
+										lookupStats.log(owner.URL, "periodic")
+									}
 									if invalidErr := sm.MarkChannelInvalid(o, "not_supergroup"); invalidErr != nil {
 										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
 									}
 									continue
 								}
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Adding channel to discovered channels")
+								lookupStats.record(srcType, true)
+								if lookupStats.total%100 == 0 {
+									lookupStats.log(owner.URL, "periodic")
+								}
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Str("source_type", srcType).Msg("random-walk-channel: Adding channel to discovered channels")
 								sm.AddDiscoveredChannel(o)
 								newChannels[o] = true
 								// Cache the chat ID so future runs can skip SearchPublicChat for this channel
@@ -920,6 +990,11 @@ func processAllMessagesWithProcessor(
 				}
 			}
 		}
+	}
+
+	// Log final SearchPublicChat lookup stats for this channel (random-walk only)
+	if cfg.SamplingMethod == "random-walk" && lookupStats.total > 0 {
+		lookupStats.log(owner.URL, "final")
 	}
 
 	// Log processing summary
