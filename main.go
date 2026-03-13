@@ -345,6 +345,33 @@ Examples:
 			crawlerCfg.MinChannelVideos = 10 // Default value
 		}
 
+		// Load Telegram rate limit configuration (defaults applied if not set)
+		crawlerCfg.RateLimitConfig = common.DefaultTelegramRateLimitConfig()
+		if v := viper.GetFloat64("telegram.ratelimit.get_chat_history_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetChatHistoryRate = v
+		}
+		if v := viper.GetFloat64("telegram.ratelimit.search_public_chat_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.SearchPublicChatRate = v
+		}
+		if v := viper.GetFloat64("telegram.ratelimit.get_supergroup_info_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetSupergroupInfoRate = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.get_chat_history_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetChatHistoryJitterMs = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.search_public_chat_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.SearchPublicChatJitterMs = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.get_supergroup_info_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetSupergroupInfoJitterMs = v
+		}
+		if v := viper.GetFloat64("telegram.ratelimit.get_message_server_hit_rate"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetMessageServerHitRate = v
+		}
+		if v := viper.GetInt("telegram.ratelimit.get_message_server_hit_jitter_ms"); v > 0 {
+			crawlerCfg.RateLimitConfig.GetMessageServerHitJitterMs = v
+		}
+
 		log.Debug().
 			Int("min_users", crawlerCfg.MinUsers).
 			Str("crawl_id", crawlerCfg.CrawlID).

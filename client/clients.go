@@ -38,6 +38,10 @@ func (t *TelegramClient) Connect(ctx context.Context) error {
 	tdlibDatabaseURLs, _ := t.config["tdlib_database_urls"].([]string)
 	storageRoot, _ := t.config["storage_root"].(string)
 	verbosityLevel, _ := t.config["tdlib_verbosity"].(int)
+	rateLimitConfig, ok := t.config["rate_limit_config"].(common.TelegramRateLimitConfig)
+	if !ok {
+		rateLimitConfig = common.DefaultTelegramRateLimitConfig()
+	}
 
 	// Log connection parameters
 	log.Info().
@@ -59,6 +63,7 @@ func (t *TelegramClient) Connect(ctx context.Context) error {
 			TDLibDatabaseURLs: tdlibDatabaseURLs,
 			Verbosity:         verbosityLevel,
 			StorageRoot:       storageRoot,
+			RateLimitConfig:   rateLimitConfig,
 		}
 
 		log.Info().

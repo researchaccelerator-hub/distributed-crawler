@@ -49,6 +49,7 @@ func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerCon
 			TDLibDatabaseURLs: cfg.TDLibDatabaseURLs,
 			Verbosity:         cfg.TDLibVerbosity,
 			StorageRoot:       storagePrefix,
+			RateLimitConfig:   cfg.RateLimitConfig,
 		}
 
 		pool, err := telegramhelper.NewConnectionPool(poolConfig)
@@ -369,12 +370,6 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 	// limit=1 means get only one message
 	// Use 0 for the fromMessageID parameter to get the most recent message
 
-	// TODO: Replace with client level rate limiting
-	sleepMS := 1600 + rand.IntN(900)
-	log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
-	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
-
-	getChatHistoryStart := time.Now()
 	messages, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 		ChatId:        chatID,
 		FromMessageId: 0, // 0 means get from the latest message
@@ -382,7 +377,6 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 		Limit:         1, // Only need 1 message (the latest one)
 		OnlyLocal:     false,
 	})
-	telegramhelper.DetectCacheOrServer(getChatHistoryStart, "GetChatHistory")
 
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get chat history: %v", err)
@@ -575,16 +569,9 @@ func getChannelInfoWithDeps(
 			return nil, nil, err
 		}
 	} else {
-		// TODO: Replace with client level rate limiting
-		sleepMS := 9600 + rand.IntN(900)
-		log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
-		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
-
-		searchPublicChatStart := time.Now()
 		chat, err = tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 			Username: page.URL,
 		})
-		telegramhelper.DetectCacheOrServer(searchPublicChatStart, "SearchPublicChat")
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
 			return nil, nil, err
@@ -900,16 +887,9 @@ func processAllMessagesWithProcessor(
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
 								sm.AddDiscoveredChannel(o)
 							} else {
-								// TODO: Replace with client level rate limiting
-								sleepMS := 9600 + rand.IntN(900)
-								log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
-								time.Sleep(time.Duration(sleepMS) * time.Millisecond)
-
-								searchPublicChatStart := time.Now()
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
-								telegramhelper.DetectCacheOrServer(searchPublicChatStart, "SearchPublicChat")
 
 								if err != nil {
 									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")

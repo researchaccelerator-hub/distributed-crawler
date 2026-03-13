@@ -13,6 +13,38 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// TelegramRateLimitConfig configures per-connection rate limiting for Telegram API calls.
+// Rates are in calls per minute; jitter values add a random delay after each rate-limited
+// call to reduce fingerprinting.
+type TelegramRateLimitConfig struct {
+	GetChatHistoryRate        float64 // max calls per minute (default: 30)
+	SearchPublicChatRate      float64 // max calls per minute (default: 6)
+	GetSupergroupInfoRate     float64 // max calls per minute (default: 20)
+	GetChatHistoryJitterMs    int     // max jitter in milliseconds (default: 500)
+	SearchPublicChatJitterMs  int     // max jitter in milliseconds (default: 1500)
+	GetSupergroupInfoJitterMs int     // max jitter in milliseconds (default: 800)
+
+	// GetMessage is handled reactively: a token is only consumed when the call
+	// misses TDLib's local cache and hits the Telegram server. Cache hits are free.
+	GetMessageServerHitRate      float64 // max server-hitting GetMessage calls per minute (default: 60)
+	GetMessageServerHitJitterMs  int     // max jitter added after a server-hit throttle (default: 300)
+}
+
+// DefaultTelegramRateLimitConfig returns conservative defaults that approximate the
+// historical sleep-based behaviour.
+func DefaultTelegramRateLimitConfig() TelegramRateLimitConfig {
+	return TelegramRateLimitConfig{
+		GetChatHistoryRate:           30,
+		SearchPublicChatRate:         6,
+		GetSupergroupInfoRate:        20,
+		GetChatHistoryJitterMs:       500,
+		SearchPublicChatJitterMs:     1500,
+		GetSupergroupInfoJitterMs:    800,
+		GetMessageServerHitRate:      60,
+		GetMessageServerHitJitterMs:  300,
+	}
+}
+
 // Configuration structure
 type CrawlerConfig struct {
 	DaprMode           bool
@@ -55,6 +87,7 @@ type CrawlerConfig struct {
 	NullValidator      null_handler.Validator // Null Validator object
 	ExitOnComplete     bool                   // Exit with code 0 after a successful crawl (useful for Kubernetes cron jobs)
 	MaxCrawlDuration   time.Duration          // Maximum wall-clock duration for a random-walk crawl (0 = unlimited)
+	RateLimitConfig    TelegramRateLimitConfig // Per-connection Telegram API rate limits
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.
