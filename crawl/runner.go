@@ -900,11 +900,17 @@ func processAllMessagesWithProcessor(
 								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
 								sm.AddDiscoveredChannel(o)
 							} else {
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Sleeping for 2 seconds then checking if valid public channel.")
-								time.Sleep(2000 * time.Millisecond)
+								// TODO: Replace with client level rate limiting
+								sleepMS := 9600 + rand.IntN(900)
+								log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
+								time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+
+								searchPublicChatStart := time.Now()
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
+								telegramhelper.DetectCacheOrServer(searchPublicChatStart, "SearchPublicChat")
+
 								if err != nil {
 									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
 									if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
