@@ -90,10 +90,14 @@ func TestConnectionPoolReuseWithoutDisconnect(t *testing.T) {
 		t.Errorf("Expected 1 client to be created, got %d", len(mockService.CreatedClients))
 	}
 
-	// Cast to mock client to check state
-	mockClient1, ok := client1.(*MockTDLibClient)
+	// Cast to mock client to check state (GetConnection wraps with RateLimitedTDLibClient)
+	wrapped1, ok := client1.(*RateLimitedTDLibClient)
 	if !ok {
-		t.Fatalf("Expected MockTDLibClient, got %T", client1)
+		t.Fatalf("Expected *RateLimitedTDLibClient, got %T", client1)
+	}
+	mockClient1, ok := wrapped1.inner.(*MockTDLibClient)
+	if !ok {
+		t.Fatalf("Expected inner MockTDLibClient, got %T", wrapped1.inner)
 	}
 
 	// Verify the client is not closed initially
@@ -167,10 +171,14 @@ func TestConnectionPoolErrorHandling(t *testing.T) {
 		t.Fatalf("Failed to get connection: %v", err)
 	}
 
-	// Cast to mock client to check state
-	mockClient1, ok := client1.(*MockTDLibClient)
+	// Cast to mock client to check state (GetConnection wraps with RateLimitedTDLibClient)
+	wrapped1, ok := client1.(*RateLimitedTDLibClient)
 	if !ok {
-		t.Fatalf("Expected MockTDLibClient, got %T", client1)
+		t.Fatalf("Expected *RateLimitedTDLibClient, got %T", client1)
+	}
+	mockClient1, ok := wrapped1.inner.(*MockTDLibClient)
+	if !ok {
+		t.Fatalf("Expected inner MockTDLibClient, got %T", wrapped1.inner)
 	}
 
 	// Handle connection error - this SHOULD disconnect and create a new one
