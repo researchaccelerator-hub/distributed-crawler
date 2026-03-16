@@ -222,6 +222,7 @@ func TestGetChannelInfo(t *testing.T) {
 				tc.getTotalViewsFn,
 				tc.getMessageCountFn,
 				tc.getMemberCountFn,
+				0, // no cached chat ID in tests
 				testConfig,
 			)
 

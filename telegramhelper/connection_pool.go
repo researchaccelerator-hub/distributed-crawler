@@ -27,6 +27,7 @@ type ConnectionPool struct {
 	storagePrefix   string                         // Prefix for storage paths
 	defaultConfig   common.CrawlerConfig           // Default configuration for new connections
 	connectionCount int                            // Counter for assigning unique connection IDs
+	rateLimitConfig common.TelegramRateLimitConfig // Per-connection rate limit configuration
 
 	// Maps connection IDs to directory names for tracking storage paths
 	connDirMap map[string]string // Maps connection IDs to their directory paths
@@ -34,10 +35,11 @@ type ConnectionPool struct {
 
 // ConnectionPoolConfig provides configuration options for the connection pool
 type ConnectionPoolConfig struct {
-	PoolSize          int      // Number of connections to maintain in the pool
-	TDLibDatabaseURLs []string // URLs to pre-seeded TDLib database archives
-	Verbosity         int      // TDLib verbosity level (0-10, where 10 is most verbose)
+	PoolSize          int                            // Number of connections to maintain in the pool
+	TDLibDatabaseURLs []string                       // URLs to pre-seeded TDLib database archives
+	Verbosity         int                            // TDLib verbosity level (0-10, where 10 is most verbose)
 	StorageRoot       string
+	RateLimitConfig   common.TelegramRateLimitConfig // Per-connection Telegram API rate limits
 }
 
 // NewConnectionPool creates a new connection pool with the specified configuration.
@@ -50,6 +52,11 @@ type ConnectionPoolConfig struct {
 // Returns:
 //   - A fully initialized connection pool ready for use
 func NewConnectionPool(config ConnectionPoolConfig) (*ConnectionPool, error) {
+	rateLimitCfg := config.RateLimitConfig
+	if rateLimitCfg.GetChatHistoryRate == 0 && rateLimitCfg.SearchPublicChatRate == 0 {
+		rateLimitCfg = common.DefaultTelegramRateLimitConfig()
+	}
+
 	pool := &ConnectionPool{
 		availableConns: make(map[string]crawler.TDLibClient),
 		inUseConns:     make(map[string]crawler.TDLibClient),
@@ -60,10 +67,11 @@ func NewConnectionPool(config ConnectionPoolConfig) (*ConnectionPool, error) {
 			TDLibDatabaseURLs: config.TDLibDatabaseURLs,
 			TDLibVerbosity:    config.Verbosity,
 		},
-		//storagePrefix:  storagePrefix,
-		//defaultConfig:  defaultConfig,
-		connDirMap: make(map[string]string),
+		connDirMap:      make(map[string]string),
+		rateLimitConfig: rateLimitCfg,
 	}
+
+	LogRateLimitConfig(rateLimitCfg)
 
 	// If there are pre-configured database URLs, initialize connections with them
 	if len(config.TDLibDatabaseURLs) > 0 {
@@ -132,8 +140,8 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 		// Store the mapping
 		p.connDirMap[connID] = dirName
 
-		// Add to available connections
-		p.availableConns[connID] = client
+		// Add to available connections (wrapped with per-connection rate limiter)
+		p.availableConns[connID] = NewRateLimitedTDLibClient(client, p.rateLimitConfig)
 		log.Info().Str("connectionID", connID).Str("databaseURL", databaseURLs[i]).Msg("Added connection to pool")
 	}
 
@@ -218,12 +226,13 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 		p.connectionCount++
 		connID := dirName
 
-		// Store the mapping
+		// Store the mapping (wrapped with per-connection rate limiter)
+		wrapped := NewRateLimitedTDLibClient(client, p.rateLimitConfig)
 		p.connDirMap[connID] = dirName
-		p.inUseConns[connID] = client
+		p.inUseConns[connID] = wrapped
 
 		log.Info().Str("connectionID", connID).Msg("Created new connection in pool")
-		return client, connID, nil
+		return wrapped, connID, nil
 	}
 
 	// If we get here, the pool is exhausted
@@ -395,11 +404,12 @@ func (p *ConnectionPool) HandleConnectionError(ctx context.Context, connID strin
 		return nil, "", fmt.Errorf("failed to create fresh connection after error: %w", err)
 	}
 
-	// Put the new connection directly back into in-use
-	p.inUseConns[connID] = newClient
+	// Put the new connection directly back into in-use (wrapped with per-connection rate limiter)
+	wrapped := NewRateLimitedTDLibClient(newClient, p.rateLimitConfig)
+	p.inUseConns[connID] = wrapped
 
 	log.Info().Str("connectionID", connID).Msg("Successfully created fresh connection after error")
-	return newClient, connID, nil
+	return wrapped, connID, nil
 }
 
 // Stats returns statistics about the current state of the connection pool,

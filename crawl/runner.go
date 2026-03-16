@@ -49,6 +49,7 @@ func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerCon
 			TDLibDatabaseURLs: cfg.TDLibDatabaseURLs,
 			Verbosity:         cfg.TDLibVerbosity,
 			StorageRoot:       storagePrefix,
+			RateLimitConfig:   cfg.RateLimitConfig,
 		}
 
 		pool, err := telegramhelper.NewConnectionPool(poolConfig)
@@ -217,7 +218,7 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 	// Get a client from the connection pool
 	tdlibClient, connID, err := GetConnectionFromPool(ctx)
 	if err != nil {
-		log.Error().Err(err).Msgf("Failed to get client from pool for channel %s", p.URL)
+		log.Error().Err(err).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Failed to get client from pool")
 		// Fall back to creating a new connection if pool is exhausted or not initialized
 		tdlibClient, err = Connect(storagePrefix, cfg)
 		if err != nil {
@@ -230,7 +231,7 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 		defer ReleaseConnectionToPool(connID)
 	}
 	p.ConnectionID = connID
-	log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Msg("random-walk-connection-pool: Started connection")
+	log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Started connection")
 	// Continue with the regular channel processing
 	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }
@@ -254,8 +255,26 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 // and member count to determine whether the channel should be fully processed.
 func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
 
+	// In random-walk mode, use the cached chat ID (from seed_channels) to skip
+	// the expensive SearchPublicChat RPC when we already know the ID.
+	var cachedChatID int64
+	if cfg.SamplingMethod == "random-walk" {
+		if id, ok := sm.GetCachedChatID(p.URL); ok {
+			cachedChatID = id
+		}
+
+		// If this channel was crawled before, only fetch messages newer than the
+		// last crawl time to avoid re-processing already-seen content.
+		if lastCrawled, err := sm.GetChannelLastCrawled(p.URL); err != nil {
+			log.Warn().Err(err).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to get last crawled time, fetching full history")
+		} else if !lastCrawled.IsZero() && lastCrawled.After(cfg.MinPostDate) {
+			log.Info().Str("channel", p.URL).Time("since", lastCrawled).Str("log_tag", "rw_channel").Msg("Channel previously crawled, fetching only new messages")
+			cfg.MinPostDate = lastCrawled
+		}
+	}
+
 	// Get channel information
-	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cfg)
+	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cachedChatID, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +314,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	if cfg.SamplingMethod == "random-walk" {
 		err := sm.StoreChannelData(p.URL, channelData)
 		if err != nil {
-			log.Error().Err(err).Msg("random-walk-channel-info: failed to store channel data")
+			log.Error().Err(err).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to store channel data")
 		}
 	}
 
@@ -303,7 +322,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	if err != nil {
 		return nil, err
 	}
-	if !active || channelInfo.messageCount == 0 || (cfg.MinUsers > 0 && channelInfo.memberCount < int32(cfg.MinUsers)) {
+	if !active || channelInfo.messageCount == 0 || (cfg.SamplingMethod != "random-walk" && cfg.MinUsers > 0 && channelInfo.memberCount < int32(cfg.MinUsers)) {
 		log.Info().Msg("Not enough members in the channel, considering it private and skipping.")
 		p.Status = "deadend"
 		err := sm.SaveState()
@@ -317,6 +336,14 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	discoveredChannels, err := processAllMessages(tdlibClient, channelInfo, messages, cfg.CrawlID, p.URL, sm, p, cfg)
 	if err != nil {
 		return nil, err
+	}
+
+	// In random-walk mode, record that this channel has been crawled so future
+	// runs can skip already-seen messages and avoid SearchPublicChat.
+	if cfg.SamplingMethod == "random-walk" {
+		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id); markErr != nil {
+			log.Warn().Err(markErr).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to mark channel as crawled")
+		}
 	}
 
 	return discoveredChannels, nil
@@ -343,12 +370,6 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 	// limit=1 means get only one message
 	// Use 0 for the fromMessageID parameter to get the most recent message
 
-	// TODO: Replace with client level rate limiting
-	sleepMS := 1600 + rand.IntN(900)
-	log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "GetChatHistory").Msg("Telegram API Call Sleep")
-	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
-
-	getChatHistoryStart := time.Now()
 	messages, err := tdlibClient.GetChatHistory(&client.GetChatHistoryRequest{
 		ChatId:        chatID,
 		FromMessageId: 0, // 0 means get from the latest message
@@ -356,7 +377,6 @@ func getLatestMessageTime(tdlibClient crawler.TDLibClient, chatID int64) (time.T
 		Limit:         1, // Only need 1 message (the latest one)
 		OnlyLocal:     false,
 	})
-	telegramhelper.DetectCacheOrServer(getChatHistoryStart, "GetChatHistory")
 
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to get chat history: %v", err)
@@ -486,13 +506,14 @@ type MemberCountGetter func(client crawler.TDLibClient, channelId int64) (int, e
 // This function uses the standard implementations for retrieving views, message count,
 // and member count from the telegramhelper package. For testing or custom implementations,
 // use getChannelInfoWithDeps directly.
-func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cfg common.CrawlerConfig) (*channelInfo, []*client.Message, error) {
+func getChannelInfo(tdlibClient crawler.TDLibClient, page *state.Page, cachedChatID int64, cfg common.CrawlerConfig) (*channelInfo, []*client.Message, error) {
 	return getChannelInfoWithDeps(
 		tdlibClient,
 		page,
 		telegramhelper.GetTotalChannelViews,
 		telegramhelper.GetMessageCount,
 		telegramhelper.GetChannelMemberCount,
+		cachedChatID,
 		cfg,
 	)
 }
@@ -527,27 +548,36 @@ func getChannelInfoWithDeps(
 	getTotalViewsFn TotalViewsGetter,
 	getMessageCountFn MessageCountGetter,
 	getMemberCountFn MemberCountGetter,
+	cachedChatID int64,
 	cfg common.CrawlerConfig,
 ) (*channelInfo, []*client.Message, error) {
 
 	// TODO: REMOVE THIS AFTER DONE TESTING SPLIT CRAWLER
 	testIP()
 
-	// TODO: Replace with client level rate limiting
-	sleepMS := 9600 + rand.IntN(900)
-	log.Debug().Int("sleep_ms", sleepMS).Str("api_call", "SearchPublicChat").Msg("Telegram API Call Sleep")
-	time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	var chat *client.Chat
+	var err error
 
-	searchPublicChatStart := time.Now()
-	// Search for the channel
-	chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
-		Username: page.URL,
-	})
-	telegramhelper.DetectCacheOrServer(searchPublicChatStart, "SearchPublicChat")
-	if err != nil {
-		log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
-		return nil, nil, err
+	if cachedChatID != 0 {
+		// Skip SearchPublicChat — use the cached chat ID directly.
+		log.Debug().Str("channel", page.URL).Int64("chat_id", cachedChatID).Msg("Using cached chat ID, skipping SearchPublicChat")
+		getChatStart := time.Now()
+		chat, err = tdlibClient.GetChat(&client.GetChatRequest{ChatId: cachedChatID})
+		telegramhelper.DetectCacheOrServer(getChatStart, "GetChat")
+		if err != nil {
+			log.Error().Err(err).Stack().Msgf("Failed to get chat by cached ID for: %v", page.URL)
+			return nil, nil, err
+		}
+	} else {
+		chat, err = tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+			Username: page.URL,
+		})
+		if err != nil {
+			log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
+			return nil, nil, err
+		}
 	}
+
 	// should be cached. not sleeping
 	getChatStart := time.Now()
 	chatDetails, err := tdlibClient.GetChat(&client.GetChatRequest{
@@ -691,6 +721,47 @@ func (p *DefaultMessageProcessor) ProcessMessage(tdlibClient crawler.TDLibClient
 	return processMessage(tdlibClient, message, messageId, chatId, info, crawlID, channelUsername, *sm, cfg)
 }
 
+// searchLookupStats tracks SearchPublicChat hit/miss counts broken down by the
+// SourceType of the mention that produced the username (mention, text_url, url, plaintext).
+type searchLookupStats struct {
+	bySource map[string][2]int // [0]=hits, [1]=misses
+	total    int
+}
+
+func newSearchLookupStats() *searchLookupStats {
+	return &searchLookupStats{bySource: make(map[string][2]int)}
+}
+
+func (s *searchLookupStats) record(sourceType string, hit bool) {
+	counts := s.bySource[sourceType]
+	if hit {
+		counts[0]++
+	} else {
+		counts[1]++
+	}
+	s.bySource[sourceType] = counts
+	s.total++
+}
+
+func (s *searchLookupStats) log(channel string, tag string) {
+	e := log.Info().
+		Str("channel", channel).
+		Str("log_tag", "rw_lookup_stats").
+		Str("event", tag).
+		Int("total_lookups", s.total)
+	for src, counts := range s.bySource {
+		hitRate := 0.0
+		if counts[0]+counts[1] > 0 {
+			hitRate = float64(counts[0]) / float64(counts[0]+counts[1])
+		}
+		e = e.
+			Int(src+"_hits", counts[0]).
+			Int(src+"_misses", counts[1]).
+			Float64(src+"_hit_rate", hitRate)
+	}
+	e.Msg("SearchPublicChat lookup stats")
+}
+
 // processAllMessages retrieves and processes all messages from a channel
 func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, messages []*client.Message, crawlID, channelUsername string, sm state.StateManagementInterface, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, error) {
 	processor := &DefaultMessageProcessor{}
@@ -735,8 +806,7 @@ func processAllMessagesWithProcessor(
 	// random-walk structs
 	discoveredEdges := make([]*state.EdgeRecord, 0)
 	newChannels := make(map[string]bool, 0)
-	oldChannels := make(map[string]bool, 0)
-	invalidChannels := make(map[string]bool, 0)
+	lookupStats := newSearchLookupStats()
 
 	// Process messages
 	for _, message := range messages {
@@ -825,6 +895,17 @@ func processAllMessagesWithProcessor(
 					// Get the current channel URL from the owner's URL
 					currentChannelURL := owner.URL
 
+					// For random-walk: build a name→sourceType map for this message so
+					// SearchPublicChat hits/misses can be broken down by mention type.
+					var msgSourceMap map[string]string
+					if cfg.SamplingMethod == "random-walk" {
+						links := telegramhelper.ExtractChannelLinksWithSource(discMessage)
+						msgSourceMap = make(map[string]string, len(links))
+						for _, l := range links {
+							msgSourceMap[l.Name] = l.SourceType
+						}
+					}
+
 					for _, o := range outlinks {
 						// Skip if the outlink is the same as the current channel
 						if o == currentChannelURL {
@@ -842,47 +923,78 @@ func processAllMessagesWithProcessor(
 							}
 							discoveredChannels = append(discoveredChannels, page)
 						} else {
-							// check if channel already found as new, old, or invalid and skip
-							if _, ok := invalidChannels[o]; ok {
+							// check if channel already found as invalid and skip
+							if sm.IsInvalidChannel(o) {
 								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already identified as invalid. Skipping")
 								continue
-							} else if _, ok := newChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already found as part of new channels. Skipping")
-								continue
-							} else if _, ok := oldChannels[o]; ok {
-								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already found as part of old channels. Skipping")
-								continue
 							}
-							// determine if a previously discovered channel and act accordingly
+							// determine if a previously discovered channel and act accordingly.
+							// For random-walk: skip the per-batch dedup guards so the same channel
+							// can produce edge records from multiple sources in the same layer.
+							// The IsDiscoveredChannel check still prevents redundant SearchPublicChat calls.
 							if sm.IsDiscoveredChannel(o) {
-								oldChannels[o] = true
+								continue
+							} else if _, ok := sm.GetCachedChatID(o); ok {
+								// Channel is a seed channel — not a newly discovered channel.
+								// Mark as discovered to avoid future SearchPublicChat calls, but skip edge creation.
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
+								sm.AddDiscoveredChannel(o)
 							} else {
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Sleeping for 2 seconds then checking if valid public channel.")
-								time.Sleep(2000 * time.Millisecond)
+								srcType, ok := msgSourceMap[o]
+								if !ok {
+									srcType = "unknown"
+								}
+
 								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
 									Username: o,
 								})
+
 								if err != nil {
-									log.Info().Err(err).Str("channel", o).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
-									invalidChannels[o] = true
+									log.Info().Err(err).Str("channel", o).Str("source_type", srcType).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
+									lookupStats.record(srcType, false)
+									if lookupStats.total%100 == 0 {
+										lookupStats.log(owner.URL, "periodic")
+									}
+									if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
+										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+									}
 									continue
 								}
 								chatType := string(chat.Type.ChatTypeType())
 
 								if chatType != "chatTypeSupergroup" {
-									log.Info().Str("chat_type", chatType).Str("chat", o).Msg("random-walk-channel: Not a valid chat type. Skipping")
-									invalidChannels[o] = true
+									log.Info().Str("chat_type", chatType).Str("chat", o).Str("source_type", srcType).Msg("random-walk-channel: Not a valid chat type. Skipping")
+									lookupStats.record(srcType, false)
+									if lookupStats.total%100 == 0 {
+										lookupStats.log(owner.URL, "periodic")
+									}
+									if invalidErr := sm.MarkChannelInvalid(o, "not_supergroup"); invalidErr != nil {
+										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+									}
 									continue
 								}
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Adding channel to discovered channels")
+								lookupStats.record(srcType, true)
+								if lookupStats.total%100 == 0 {
+									lookupStats.log(owner.URL, "periodic")
+								}
+								log.Info().Str("channel", o).Str("source_channel", owner.URL).Str("source_type", srcType).Msg("random-walk-channel: Adding channel to discovered channels")
 								sm.AddDiscoveredChannel(o)
 								newChannels[o] = true
+								// Cache the chat ID so future runs can skip SearchPublicChat for this channel
+								if upsertErr := sm.UpsertSeedChannelChatID(o, chat.Id); upsertErr != nil {
+									log.Warn().Err(upsertErr).Str("channel", o).Msg("random-walk-channel: Failed to cache chat ID")
+								}
 							}
 						}
 					}
 				}
 			}
 		}
+	}
+
+	// Log final SearchPublicChat lookup stats for this channel (random-walk only)
+	if cfg.SamplingMethod == "random-walk" && lookupStats.total > 0 {
+		lookupStats.log(owner.URL, "final")
 	}
 
 	// Log processing summary
@@ -924,8 +1036,9 @@ func processAllMessagesWithProcessor(
 		if walkback || cfg.WalkbackRate >= rndNum {
 			linkToFollow.Walkback = true
 			// get walkback channel, skipping new channels discovered on this page
+			const maxWalkbackAttempts = 10
 			var walkbackURL string
-			for {
+			for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
 				var randomErr error
 				walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
 				log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk-walkback: Random Walkback channel")
@@ -939,8 +1052,13 @@ func processAllMessagesWithProcessor(
 				} else {
 					break
 				}
+				if attempt == maxWalkbackAttempts-1 {
+					log.Warn().Str("channel", walkbackURL).Msg("random-walk-walkback: Exhausted walkback attempts, using last candidate as fallback")
+				}
 			}
 			page.URL = walkbackURL
+			// Walkback starts a new chain
+			page.SequenceID = uuid.New().String()
 		} else {
 			linkToFollow.Walkback = false
 
@@ -950,7 +1068,10 @@ func processAllMessagesWithProcessor(
 			}
 			page.URL = newChannelSlice[rand.IntN(len(newChannelSlice))]
 			delete(newChannels, page.URL) // remaining items in map will be used to create skipped edges
+			// Forward edge: propagate the current chain's sequence ID
+			page.SequenceID = owner.SequenceID
 		}
+		linkToFollow.SequenceID = page.SequenceID
 		linkToFollow.DestinationChannel = page.URL
 		log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
 			Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
@@ -972,6 +1093,7 @@ func processAllMessagesWithProcessor(
 					Skipped:            true,
 					SourceChannel:      owner.URL,
 					Walkback:           false,
+					SequenceID:         owner.SequenceID,
 				}
 				log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
 					Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).

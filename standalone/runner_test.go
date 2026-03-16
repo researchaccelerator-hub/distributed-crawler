@@ -197,6 +197,14 @@ func (m *MockDaprStateManager) UpdateMessage(pageID string, chatID int64, messag
 }
 
 // For random-walk sample
+func (m *MockDaprStateManager) LoadSeedChannels() error                               { return nil }
+func (m *MockDaprStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
+func (m *MockDaprStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
+func (m *MockDaprStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
+func (m *MockDaprStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
+func (m *MockDaprStateManager) LoadInvalidChannels() error                           { return nil }
+func (m *MockDaprStateManager) IsInvalidChannel(_ string) bool                       { return false }
+func (m *MockDaprStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
 func (m *MockDaprStateManager) InitializeDiscoveredChannels() error             { return nil }
 func (m *MockDaprStateManager) InitializeRandomWalkLayer() error                { return nil }
 func (m *MockDaprStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }
@@ -210,7 +218,7 @@ func (m *MockDaprStateManager) StoreChannelData(channelID string, channelData *m
 	return nil
 }
 
-func (m *MockDaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
+func (m *MockDaprStateManager) WipeLayerBuffer() error { return nil }
 func (m *MockDaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil
 }

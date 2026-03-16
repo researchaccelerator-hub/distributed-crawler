@@ -2,117 +2,117 @@ package main
 
 import (
 	"testing"
+
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
 )
 
 func TestValidateSamplingMethod(t *testing.T) {
 	tests := []struct {
-		name           string
-		platform       string
-		samplingMethod string
-		urlList        []string
-		urlFile        string
-		expectError    bool
-		errorContains  string
+		name          string
+		in            common.SamplingValidationInput
+		expectError   bool
+		errorContains string
 	}{
 		{
-			name:           "telegram channel sampling with URLs",
-			platform:       "telegram",
-			samplingMethod: "channel",
-			urlList:        []string{"https://t.me/test"},
-			urlFile:        "",
-			expectError:    false,
+			name:        "telegram channel sampling with URLs",
+			in:          common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "channel", URLList: []string{"https://t.me/test"}},
+			expectError: false,
 		},
 		{
-			name:           "telegram snowball sampling with URLs",
-			platform:       "telegram",
-			samplingMethod: "snowball",
-			urlList:        []string{"https://t.me/test1", "https://t.me/test2"},
-			urlFile:        "",
-			expectError:    false,
+			name:        "telegram snowball sampling with URLs",
+			in:          common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "snowball", URLList: []string{"https://t.me/test1", "https://t.me/test2"}},
+			expectError: false,
 		},
 		{
-			name:           "telegram random sampling - unsupported",
-			platform:       "telegram",
-			samplingMethod: "random",
-			urlList:        []string{},
-			urlFile:        "",
-			expectError:    true,
-			errorContains:  "not supported for platform 'telegram'",
+			name:          "telegram random sampling - unsupported",
+			in:            common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "random"},
+			expectError:   true,
+			errorContains: "not supported for platform 'telegram'",
 		},
 		{
-			name:           "youtube channel sampling with URLs",
-			platform:       "youtube",
-			samplingMethod: "channel",
-			urlList:        []string{"https://youtube.com/c/test"},
-			urlFile:        "",
-			expectError:    false,
+			name:        "youtube channel sampling with URLs",
+			in:          common.SamplingValidationInput{Platform: "youtube", SamplingMethod: "channel", URLList: []string{"https://youtube.com/c/test"}},
+			expectError: false,
 		},
 		{
-			name:           "youtube random sampling without URLs",
-			platform:       "youtube",
-			samplingMethod: "random",
-			urlList:        []string{},
-			urlFile:        "",
-			expectError:    false,
+			name:        "youtube random sampling without URLs",
+			in:          common.SamplingValidationInput{Platform: "youtube", SamplingMethod: "random"},
+			expectError: false,
 		},
 		{
-			name:           "youtube snowball sampling with URLs",
-			platform:       "youtube",
-			samplingMethod: "snowball",
-			urlList:        []string{"https://youtube.com/c/seed"},
-			urlFile:        "",
-			expectError:    false,
+			name:        "youtube snowball sampling with URLs",
+			in:          common.SamplingValidationInput{Platform: "youtube", SamplingMethod: "snowball", URLList: []string{"https://youtube.com/c/seed"}},
+			expectError: false,
 		},
 		{
-			name:           "channel sampling without URLs",
-			platform:       "youtube",
-			samplingMethod: "channel",
-			urlList:        []string{},
-			urlFile:        "",
-			expectError:    true,
-			errorContains:  "channel sampling requires URLs",
+			name:          "channel sampling without URLs",
+			in:            common.SamplingValidationInput{Platform: "youtube", SamplingMethod: "channel"},
+			expectError:   true,
+			errorContains: "channel sampling requires URLs",
 		},
 		{
-			name:           "snowball sampling without URLs",
-			platform:       "telegram",
-			samplingMethod: "snowball",
-			urlList:        []string{},
-			urlFile:        "",
-			expectError:    true,
-			errorContains:  "snowball sampling requires URLs",
+			name:          "snowball sampling without URLs",
+			in:            common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "snowball"},
+			expectError:   true,
+			errorContains: "snowball sampling requires URLs",
 		},
 		{
-			name:           "channel sampling with URL file",
-			platform:       "youtube",
-			samplingMethod: "channel",
-			urlList:        []string{},
-			urlFile:        "/path/to/urls.txt",
-			expectError:    false,
+			name:        "channel sampling with URL file",
+			in:          common.SamplingValidationInput{Platform: "youtube", SamplingMethod: "channel", URLFile: "/path/to/urls.txt"},
+			expectError: false,
 		},
 		{
-			name:           "unsupported platform",
-			platform:       "unsupported",
-			samplingMethod: "channel",
-			urlList:        []string{"https://example.com"},
-			urlFile:        "",
-			expectError:    true,
-			errorContains:  "unsupported platform",
+			name:          "unsupported platform",
+			in:            common.SamplingValidationInput{Platform: "unsupported", SamplingMethod: "channel", URLList: []string{"https://example.com"}},
+			expectError:   true,
+			errorContains: "unsupported platform",
 		},
 		{
-			name:           "invalid sampling method",
-			platform:       "youtube",
-			samplingMethod: "invalid",
-			urlList:        []string{"https://youtube.com/c/test"},
-			urlFile:        "",
-			expectError:    true,
-			errorContains:  "not supported for platform 'youtube'",
+			name:          "invalid sampling method",
+			in:            common.SamplingValidationInput{Platform: "youtube", SamplingMethod: "invalid", URLList: []string{"https://youtube.com/c/test"}},
+			expectError:   true,
+			errorContains: "not supported for platform 'youtube'",
+		},
+		// random-walk cases
+		{
+			name:        "random-walk with seed size only",
+			in:          common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "random-walk", SeedSize: 100, CrawlID: "my-crawl"},
+			expectError: false,
+		},
+		{
+			name:        "random-walk with URL list only",
+			in:          common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "random-walk", URLList: []string{"chan1", "chan2"}, CrawlID: "my-crawl"},
+			expectError: false,
+		},
+		{
+			name:        "random-walk with url-file-url only",
+			in:          common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "random-walk", URLFileURL: "https://example.com/seeds.txt", CrawlID: "my-crawl"},
+			expectError: false,
+		},
+		{
+			name:          "random-walk with neither URLs nor seed size",
+			in:            common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "random-walk", CrawlID: "my-crawl"},
+			expectError:   true,
+			errorContains: "must provide either seed urls or seed size",
+		},
+		{
+			name:          "random-walk with both URLs and seed size",
+			in:            common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "random-walk", URLList: []string{"chan1"}, SeedSize: 100, CrawlID: "my-crawl"},
+			expectError:   true,
+			errorContains: "must provide either seed urls or seed size",
+		},
+		{
+			name:          "random-walk crawl ID too long",
+			in:            common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "random-walk", SeedSize: 100, CrawlID: "this-crawl-id-is-way-too-long-and-exceeds-32-chars"},
+			expectError:   true,
+			errorContains: "crawl IDs cannot exceed 32 characters",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSamplingMethod(tt.platform, tt.samplingMethod, tt.urlList, tt.urlFile, "")
-			
+			err := validateSamplingMethod(tt.in)
+
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error but got none")
@@ -131,56 +131,58 @@ func TestValidateSamplingMethod(t *testing.T) {
 }
 
 func TestValidateSamplingMethodSupportedMethods(t *testing.T) {
-	// Test that the correct methods are supported for each platform
-	telegramMethods := []string{"channel", "snowball"}
+	telegramMethods := []string{"channel", "snowball", "random-walk"}
 	youtubeMethods := []string{"channel", "random", "snowball"}
-	
-	// Test Telegram supported methods
+
 	for _, method := range telegramMethods {
-		err := validateSamplingMethod("telegram", method, []string{"https://t.me/test"}, "", "")
-		if err != nil {
+		in := common.SamplingValidationInput{Platform: "telegram", SamplingMethod: method}
+		switch method {
+		case "channel", "snowball":
+			in.URLList = []string{"https://t.me/test"}
+		case "random-walk":
+			in.SeedSize = 100
+		}
+		if err := validateSamplingMethod(in); err != nil {
 			t.Errorf("Telegram should support method '%s', but got error: %s", method, err.Error())
 		}
 	}
-	
-	// Test YouTube supported methods
+
 	for _, method := range youtubeMethods {
-		var urlList []string
+		in := common.SamplingValidationInput{Platform: "youtube", SamplingMethod: method}
 		if method != "random" {
-			urlList = []string{"https://youtube.com/c/test"}
+			in.URLList = []string{"https://youtube.com/c/test"}
 		}
-		err := validateSamplingMethod("youtube", method, urlList, "", "")
-		if err != nil {
+		if err := validateSamplingMethod(in); err != nil {
 			t.Errorf("YouTube should support method '%s', but got error: %s", method, err.Error())
 		}
 	}
 }
 
-// TestValidateSamplingMethodDaprJobMode tests that URL validation is skipped in dapr-job mode
 func TestValidateSamplingMethodDaprJobMode(t *testing.T) {
-	// Test that channel sampling without URLs is allowed in dapr-job mode
-	err := validateSamplingMethod("telegram", "channel", []string{}, "", "dapr-job")
+	err := validateSamplingMethod(common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "channel", Mode: "dapr-job"})
 	if err != nil {
 		t.Errorf("Expected no error for channel sampling without URLs in dapr-job mode, got: %s", err.Error())
 	}
 
-	// Test that snowball sampling without URLs is allowed in dapr-job mode
-	err = validateSamplingMethod("youtube", "snowball", []string{}, "", "dapr-job")
+	err = validateSamplingMethod(common.SamplingValidationInput{Platform: "youtube", SamplingMethod: "snowball", Mode: "dapr-job"})
 	if err != nil {
 		t.Errorf("Expected no error for snowball sampling without URLs in dapr-job mode, got: %s", err.Error())
 	}
 
-	// Test that other modes still require URLs
-	err = validateSamplingMethod("telegram", "channel", []string{}, "", "standalone")
+	err = validateSamplingMethod(common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "channel", Mode: "standalone"})
 	if err == nil {
 		t.Errorf("Expected error for channel sampling without URLs in standalone mode")
 	}
+
+	err = validateSamplingMethod(common.SamplingValidationInput{Platform: "telegram", SamplingMethod: "channel"})
+	if err == nil {
+		t.Errorf("Expected error for channel sampling without URLs in empty mode")
+	}
 }
 
-// Helper function to check if a string contains a substring
 func containsString(s, substr string) bool {
-	return len(substr) == 0 || (len(s) >= len(substr) && s[:len(substr)] == substr) || 
-		   (len(s) > len(substr) && containsStringHelper(s, substr))
+	return len(substr) == 0 || (len(s) >= len(substr) && s[:len(substr)] == substr) ||
+		(len(s) > len(substr) && containsStringHelper(s, substr))
 }
 
 func containsStringHelper(s, substr string) bool {

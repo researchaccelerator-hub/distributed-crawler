@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/chunk"
@@ -142,7 +144,9 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	}
 
 	// For random sampling, URLs are not required since we discover content randomly
-	if len(urls) == 0 && !(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") {
+	noURLsRequired := (crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") ||
+		crawlerCfg.SamplingMethod == "random-walk"
+	if len(urls) == 0 && !noURLsRequired {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
 	}
 
@@ -268,6 +272,18 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if crawlCfg.SamplingMethod == "random" && crawlCfg.Platform == "youtube" {
 		RunRandomYoutubeSample(context.Background(), sm, crawlCfg)
 	} else {
+		// Normalize seed URLs for Telegram random-walk: strip any t.me prefix and
+		// lowercase so they match the seed_channels table (VARCHAR PK is case-sensitive).
+		if crawlCfg.SamplingMethod == "random-walk" && crawlCfg.Platform == "telegram" {
+			for i, u := range stringList {
+				u = strings.TrimPrefix(u, "https://t.me/")
+				u = strings.TrimPrefix(u, "http://t.me/")
+				u = strings.TrimPrefix(u, "t.me/")
+				u = strings.TrimPrefix(u, "@")
+				stringList[i] = strings.ToLower(u)
+			}
+		}
+
 		// Create a global map to track all URLs we've seen across all layers
 		seenURLs := make(map[string]bool)
 
@@ -283,7 +299,15 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			return
 		}
 		if crawlCfg.SamplingMethod == "random-walk" {
-			// pull discovered channels from database
+			// load seed channels (populates DiscoveredChannels + chatID cache)
+			if seedErr := sm.LoadSeedChannels(); seedErr != nil {
+				log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
+			}
+			// load shared invalid channel cache (shared across all pods)
+			if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
+				log.Warn().Err(invalidErr).Msg("random-walk-init: failed to load invalid channels (continuing)")
+			}
+			// pull discovered channels from edge_records
 			err := sm.InitializeDiscoveredChannels()
 			if err != nil {
 				log.Fatal().Err(err).Msg("random-walk-init: failed to pull discovered channels")
@@ -325,7 +349,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 // processLayerInParallel processes all pages in a layer with a maximum of maxWorkers concurrent goroutines.
 // It uses a semaphore pattern to limit concurrency and ensures all pages are processed before returning.
 // This version uses the connection pool for efficient client management.
-func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, shouldStop *atomic.Bool, crawlStart time.Time) {
 	// In dapr mode it's harder to accurately detect this, so we'll simplify the approach
 	// to prevent reprocessing of fetched pages, always skip them
 	isResumingSameCrawlExecution := true
@@ -406,6 +430,12 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				}
 				// Continue processing this page
 			}
+		}
+
+		// Stop dispatching new channels if the crawl duration has been exceeded
+		if shouldStop != nil && shouldStop.Load() {
+			log.Info().Str("url", pageToProcess.URL).Msg("Max crawl duration reached, skipping remaining channels in layer")
+			break
 		}
 
 		// Acquire semaphore slot (block if we're at max workers)
@@ -521,7 +551,15 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 					mu.Unlock()
 				}
 			}
-		}(pageToProcess)
+
+		// After each channel completes, check if the crawl duration has been exceeded
+		if shouldStop != nil && crawlCfg.SamplingMethod == "random-walk" && crawlCfg.MaxCrawlDuration > 0 {
+			if time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
+				log.Info().Str("url", page.URL).Dur("max_crawl_duration", crawlCfg.MaxCrawlDuration).Msg("Max crawl duration exceeded after channel completed, signalling stop")
+				shouldStop.Store(true)
+			}
+		}
+	}(pageToProcess)
 	}
 
 	// Wait for all pages to be processed
@@ -610,7 +648,7 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				log.Error().Err(err).Msg("Failed to save state after adding new layer")
 			}
 			if crawlCfg.SamplingMethod == "random-walk" {
-				if err := sm.WipeLayerBuffer(true); err != nil {
+				if err := sm.WipeLayerBuffer(); err != nil {
 					log.Error().Err(err).Msg("random-walk-layer: Failed to wipe layer buffer after adding new layer")
 				}
 			}
@@ -699,6 +737,8 @@ func DetermineCrawlID(tempSM state.StateManagementInterface, crawlCfg common.Cra
 
 func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, isResumingSameCrawlExecution bool) {
 	depth := 0
+	crawlStart := time.Now()
+	var shouldStop atomic.Bool
 	for {
 		log.Info().Msgf("Starting loop for depth: %v", depth)
 		// Check current maximum depth at the beginning of each iteration
@@ -748,7 +788,7 @@ func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common
 			continue
 		}
 
-		if depth > crawlCfg.MaxDepth {
+		if crawlCfg.MaxDepth >= 0 && depth > crawlCfg.MaxDepth {
 			log.Info().Msgf("Processed all layers up to max depth %d", maxDepth)
 			break
 		}
@@ -761,10 +801,19 @@ func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common
 		}
 
 		// Process pages in current layer in parallel
-		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg)
+		processLayerInParallel(layer, crawlCfg.Concurrency, sm, crawlCfg, &shouldStop, crawlStart)
 
 		// Log progress after completing a layer
 		log.Info().Msgf("Completed layer at depth %d", depth)
+
+		// For random-walk, stop if any channel completion triggered the duration limit
+		if crawlCfg.SamplingMethod == "random-walk" && shouldStop.Load() {
+			log.Info().
+				Dur("elapsed", time.Since(crawlStart)).
+				Dur("max_crawl_duration", crawlCfg.MaxCrawlDuration).
+				Msg("Max crawl duration reached, stopping random walk")
+			break
+		}
 
 		// Move to the next depth
 		depth++

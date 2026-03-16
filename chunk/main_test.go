@@ -45,6 +45,14 @@ func (m *mockStateManager) UpdateCrawlMetadata(_ string, _ map[string]interface{
 func (m *mockStateManager) FindIncompleteCrawl(_ string) (string, bool, error)                 { return "", false, nil }
 func (m *mockStateManager) HasProcessedMedia(_ string) (bool, error)                           { return false, nil }
 func (m *mockStateManager) MarkMediaAsProcessed(_ string) error                                { return nil }
+func (m *mockStateManager) LoadSeedChannels() error                                                { return nil }
+func (m *mockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error                        { return nil }
+func (m *mockStateManager) GetCachedChatID(_ string) (int64, bool)                                 { return 0, false }
+func (m *mockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)                      { return time.Time{}, nil }
+func (m *mockStateManager) MarkChannelCrawled(_ string, _ int64) error                             { return nil }
+func (m *mockStateManager) LoadInvalidChannels() error                                             { return nil }
+func (m *mockStateManager) IsInvalidChannel(_ string) bool                                         { return false }
+func (m *mockStateManager) MarkChannelInvalid(_ string, _ string) error                            { return nil }
 func (m *mockStateManager) InitializeDiscoveredChannels() error                                { return nil }
 func (m *mockStateManager) InitializeRandomWalkLayer() error                                   { return nil }
 func (m *mockStateManager) GetRandomDiscoveredChannel() (string, error)                        { return "", nil }
@@ -53,7 +61,7 @@ func (m *mockStateManager) AddDiscoveredChannel(_ string) error                 
 func (m *mockStateManager) StoreChannelData(_ string, _ *model.ChannelData) error             { return nil }
 func (m *mockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error                        { return nil }
 func (m *mockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error)                    { return nil, nil }
-func (m *mockStateManager) WipeLayerBuffer(_ bool) error                                       { return nil }
+func (m *mockStateManager) WipeLayerBuffer() error                                             { return nil }
 func (m *mockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error                   { return nil }
 func (m *mockStateManager) AddPageToLayerBuffer(_ *state.Page) error                           { return nil }
 func (m *mockStateManager) Close() error                                                        { return nil }

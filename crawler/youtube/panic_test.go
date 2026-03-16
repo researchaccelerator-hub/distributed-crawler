@@ -82,6 +82,14 @@ func (m *MockStateManager) Close() error                                   { ret
 
 // Used for random-walk sampling
 
+func (m *MockStateManager) LoadSeedChannels() error                               { return nil }
+func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
+func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
+func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
+func (m *MockStateManager) LoadInvalidChannels() error                           { return nil }
+func (m *MockStateManager) IsInvalidChannel(_ string) bool                       { return false }
+func (m *MockStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
 func (m *MockStateManager) InitializeDiscoveredChannels() error             { return nil }
 func (m *MockStateManager) InitializeRandomWalkLayer() error                { return nil }
 func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }
@@ -99,7 +107,7 @@ func (m *MockStateManager) UploadCombinedFile(filename string) error { return ni
 func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
 	return []state.Page{}, nil
 }
-func (m *MockStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error               { return nil }
+func (m *MockStateManager) WipeLayerBuffer() error                                       { return nil }
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
 func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error                  { return nil }
 

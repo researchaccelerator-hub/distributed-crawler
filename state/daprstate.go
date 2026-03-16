@@ -57,6 +57,14 @@ type DaprStateManager struct {
 	urlCache      map[string]string // Maps URL -> "crawlID:pageID" for all known URLs
 	urlCacheMutex sync.RWMutex      // Separate mutex for URL cache to reduce contention
 
+	// Seed channel chat ID cache: username -> TDLib chat ID
+	chatIDCache   map[string]int64
+	chatIDCacheMu sync.RWMutex
+
+	// Invalid channel cache: username -> time it was marked invalid (TTL = 30 days)
+	invalidChannelCache   map[string]time.Time
+	invalidChannelCacheMu sync.RWMutex
+
 	// Cache configuration
 	maxCacheItemsPerShard int // Maximum number of items per shard
 	cacheExpirationDays   int // Number of days after which cache entries are considered stale
@@ -182,6 +190,9 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 		// Default configuration
 		maxCacheItemsPerShard: maxCacheItemsPerShard,
 		cacheExpirationDays:   cacheExpirationDays,
+
+		chatIDCache:         make(map[string]int64),
+		invalidChannelCache: make(map[string]time.Time),
 	}
 
 	// Load the media cache index as part of initialization
@@ -271,11 +282,6 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 
 	if dsm.config.SamplingMethod == "random-walk" {
 		dsm.databaseBinding = databaseStorageBinding
-		err := dsm.WipeLayerBuffer(false)
-		if err != nil {
-			log.Error().Err(err).Msg("random-walk-layer: failed to wipe layer buffer")
-		}
-
 	}
 
 	// First, check if we're resuming a specific execution ID
@@ -501,13 +507,18 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	// Create pages from the unique seed URLs
 	pages := make([]Page, 0, len(uniqueSeedURLs))
 	for _, url := range uniqueSeedURLs {
-		pages = append(pages, Page{
+		page := Page{
 			ID:        uuid.New().String(),
 			URL:       url,
 			Depth:     0,
 			Status:    "unfetched",
 			Timestamp: time.Now(),
-		})
+		}
+		// In random-walk mode each seed channel starts its own chain
+		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
+			page.SequenceID = uuid.New().String()
+		}
+		pages = append(pages, page)
 	}
 
 	// In case it's a random-walk without seed urls
@@ -624,7 +635,7 @@ func (dsm *DaprStateManager) AddLayer(pages []Page) error {
 	duplicateCount := 0
 
 	if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-		log.Info().Msgf("random-walk-layer: Sampling Method %s allows for duplicate visits to a URL. SKipping de-duplication process", dsm.BaseStateManager.config.SamplingMethod)
+		log.Info().Msgf("random-walk-layer: Sampling Method %s allows for duplicate visits to a URL. Skipping de-duplication process", dsm.BaseStateManager.config.SamplingMethod)
 	}
 
 	for i := range pages {
@@ -3077,6 +3088,23 @@ func (dsm *DaprStateManager) StoreChannelData(channelID string, channelData *mod
 
 	channelJSON = append(channelJSON, '\n')
 
+	if dsm.BaseStateManager.config.CombineFiles {
+		tempFilename := fmt.Sprintf("%s/temp_channel_%s_%d.jsonl", dsm.BaseStateManager.config.CombineTempDir, channelID, time.Now().UnixNano())
+		watchFilename := fmt.Sprintf("%s/channel_%s_%d.jsonl", dsm.BaseStateManager.config.CombineWatchDir, channelID, time.Now().UnixNano())
+
+		err = os.WriteFile(tempFilename, channelJSON, 0644)
+		if err != nil {
+			return fmt.Errorf("random-walk-channel-info: unable to write to temp file %s: %w", tempFilename, err)
+		}
+
+		err = os.Rename(tempFilename, watchFilename)
+		if err != nil {
+			return fmt.Errorf("random-walk-channel-info: unable to move %s to %s: %w", tempFilename, watchFilename, err)
+		}
+
+		return nil
+	}
+
 	storagePath, err := dsm.generateCrawlExecutableStoragePath(
 		channelID,
 		"channel_data.jsonl",
@@ -3119,28 +3147,28 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	// ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	// defer cancel()
 
-	log.Info().Msg("random-walk-edge: copying records before saving")
+	log.Info().Str("log_tag", "rw_edge").Msg("Copying records before saving")
 	edgesCopy := make([]*EdgeRecord, len(edges))
 	copy(edgesCopy, edges)
 
 	// Add Edges in Memory
 	baseErr := dsm.BaseStateManager.SaveEdgeRecords(edgesCopy)
 	if baseErr != nil {
-		log.Error().Err(baseErr).Msg("random-walk-edge: Failed to add edge records")
+		log.Error().Err(baseErr).Str("log_tag", "rw_edge").Msg("Failed to add edge records")
 		return baseErr
 	}
 	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Str("source_channel", edges[0].SourceChannel).
-		Msg("random-walk-edge: Adding new edges")
+		Str("log_tag", "rw_edge").Msg("Adding new edges")
 
-	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id) VALUES ($1, $2, $3, $4, $5, $6);`
+	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
 	for i, record := range edgesCopy {
 
-		log.Debug().Int("index", i).Msg("random-walk-edge: processing record")
+		log.Debug().Int("index", i).Str("log_tag", "rw_edge").Msg("Processing record")
 
 		// Check if this specific record is nil
 		if record == nil {
-			log.Error().Int("index", i).Msg("random-walk-edge: skipping nil record")
+			log.Error().Int("index", i).Str("log_tag", "rw_edge").Msg("Skipping nil record")
 			continue
 		}
 
@@ -3151,9 +3179,8 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			record.Skipped,
 			record.DiscoveryTime,
 			dsm.config.CrawlID,
+			record.SequenceID,
 		}
-
-		log.Info().Str("source_channel", record.SourceChannel).Str("destination_channel", record.DestinationChannel).Msg("random-walk-edge: adding edge record")
 
 		err := dsm.ExecuteDatabaseOperation(sqlQuery, values)
 
@@ -3161,14 +3188,14 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			return err
 		}
 
-		log.Debug().Int("index", i).Msg("random-walk-edge: finished processing record")
+		log.Debug().Int("index", i).Str("log_tag", "rw_edge").Msg("Finished processing record")
 	}
 
 	return nil
 }
 
 func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
-	log.Info().Msg("random-walk-init: initializing discovered channels")
+	log.Info().Str("log_tag", "rw_init").Msg("Initializing discovered channels")
 	// TODO: add to config
 	dsm.databaseBinding = databaseStorageBinding
 
@@ -3189,25 +3216,255 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	var discoveredChannels [][]string
 
 	if err := json.Unmarshal(res.Data, &discoveredChannels); err != nil {
-		log.Error().Str("result_data", string(res.Data)).Msg("random-walk-init: result data")
+		log.Error().Str("result_data", string(res.Data)).Str("log_tag", "rw_init").Msg("Failed to unmarshal discovered channels response")
 		return fmt.Errorf("random-walk-init: Failed to unmarshal response for discovered channels: %v", err)
 	}
 
 	if len(discoveredChannels) > 0 {
-		log.Printf("random-walk-init: Found %d previously discovered channels:\n", len(discoveredChannels))
+		log.Info().Int("count", len(discoveredChannels)).Str("log_tag", "rw_init").Msg("Found previously discovered channels")
 		for _, row := range discoveredChannels {
 			for _, channel := range row {
 				err := dsm.BaseStateManager.AddDiscoveredChannel(channel)
 				if err != nil {
-					log.Info().Err(err).Msg("random-walk-init: error encountered adding discovered channel")
+					log.Warn().Err(err).Str("channel", channel).Str("log_tag", "rw_init").Msg("Error adding discovered channel")
 				}
 			}
 		}
 	} else {
-		log.Info().Msg("random-walk-init: No discovered channels found")
+		log.Info().Str("log_tag", "rw_init").Msg("No discovered channels found")
 	}
 
 	return nil
+}
+
+// LoadSeedChannels queries the seed_channels table, adds all usernames to the
+// in-memory DiscoveredChannels set, and populates the chatID cache for any rows
+// that have a resolved chat_id.  Call this during initialization before
+// InitializeDiscoveredChannels so seed channels are immediately treated as known.
+func (dsm *DaprStateManager) LoadSeedChannels() error {
+	log.Info().Str("log_tag", "rw_seed").Msg("Loading seed channels")
+	dsm.databaseBinding = databaseStorageBinding
+
+	query := "SELECT channel_username, chat_id FROM seed_channels;"
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql": query,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("random-walk-seed: failed to query seed_channels: %w", err)
+	}
+
+	var rows [][]interface{}
+	if err := json.Unmarshal(res.Data, &rows); err != nil {
+		log.Error().Str("result_data", string(res.Data)).Str("log_tag", "rw_seed").Msg("Failed to unmarshal seed_channels response")
+		return fmt.Errorf("random-walk-seed: failed to unmarshal seed_channels response: %w", err)
+	}
+
+	dsm.chatIDCacheMu.Lock()
+	defer dsm.chatIDCacheMu.Unlock()
+
+	loaded := 0
+	for _, row := range rows {
+		if len(row) < 2 {
+			continue
+		}
+		username, ok := row[0].(string)
+		if !ok || username == "" {
+			continue
+		}
+		if addErr := dsm.BaseStateManager.AddDiscoveredChannel(username); addErr != nil {
+			// Already in the set — not an error worth logging at warn level
+			log.Debug().Str("channel", username).Str("log_tag", "rw_seed").Msg("Channel already in discovered set")
+		}
+		if row[1] != nil {
+			if chatIDFloat, ok := row[1].(float64); ok {
+				dsm.chatIDCache[username] = int64(chatIDFloat)
+			}
+		}
+		loaded++
+	}
+
+	log.Info().Int("loaded", loaded).Str("log_tag", "rw_seed").Msg("Finished loading seed channels")
+	return nil
+}
+
+// UpsertSeedChannelChatID stores (or updates) the TDLib chat ID for a channel
+// username in both the in-memory cache and the seed_channels table.  Call this
+// after a successful SearchPublicChat so future crawl runs can skip the RPC.
+func (dsm *DaprStateManager) UpsertSeedChannelChatID(username string, chatID int64) error {
+	dsm.chatIDCacheMu.Lock()
+	dsm.chatIDCache[username] = chatID
+	dsm.chatIDCacheMu.Unlock()
+
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id) VALUES ($1, $2) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id;`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+}
+
+// GetCachedChatID returns the TDLib chat ID for username if it is present in
+// the in-memory cache, along with a boolean indicating whether a value was found.
+func (dsm *DaprStateManager) GetCachedChatID(username string) (int64, bool) {
+	dsm.chatIDCacheMu.RLock()
+	defer dsm.chatIDCacheMu.RUnlock()
+	id, ok := dsm.chatIDCache[username]
+	return id, ok
+}
+
+// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
+// for the given username. Returns zero time if the channel has no recorded crawl.
+func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, error) {
+	dsm.databaseBinding = databaseStorageBinding
+
+	query := "SELECT last_crawled_at FROM seed_channels WHERE channel_username = $1;"
+	paramsJSON, err := json.Marshal([]any{username})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("random-walk-seed: failed to marshal params: %w", err)
+	}
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql":    query,
+			"params": string(paramsJSON),
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("random-walk-seed: failed to query last_crawled_at for %s: %w", username, err)
+	}
+
+	var rows [][]interface{}
+	if err := json.Unmarshal(res.Data, &rows); err != nil {
+		return time.Time{}, fmt.Errorf("random-walk-seed: failed to unmarshal last_crawled_at response: %w", err)
+	}
+
+	if len(rows) == 0 || len(rows[0]) == 0 || rows[0][0] == nil {
+		return time.Time{}, nil
+	}
+
+	switch v := rows[0][0].(type) {
+	case string:
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			// Try common Postgres format
+			t, err = time.Parse("2006-01-02T15:04:05Z", v)
+			if err != nil {
+				return time.Time{}, fmt.Errorf("random-walk-seed: failed to parse last_crawled_at %q: %w", v, err)
+			}
+		}
+		return t, nil
+	case float64:
+		return time.Unix(int64(v), 0), nil
+	default:
+		return time.Time{}, fmt.Errorf("random-walk-seed: unexpected type %T for last_crawled_at", v)
+	}
+}
+
+// MarkChannelCrawled upserts the channel into seed_channels, setting last_crawled_at
+// to NOW() and caching the resolved chatID for future SearchPublicChat avoidance.
+func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64) error {
+	dsm.chatIDCacheMu.Lock()
+	dsm.chatIDCache[username] = chatID
+	dsm.chatIDCacheMu.Unlock()
+
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at) VALUES ($1, $2, NOW()) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+}
+
+const invalidChannelTTL = 30 * 24 * time.Hour
+
+// LoadInvalidChannels queries the invalid_channels table for rows within the
+// 30-day TTL window and populates the in-memory cache.  Call this during
+// initialization so all pods share the same set of known-invalid channels.
+func (dsm *DaprStateManager) LoadInvalidChannels() error {
+	log.Info().Str("log_tag", "rw_invalid").Msg("Loading invalid channels")
+	dsm.databaseBinding = databaseStorageBinding
+
+	query := "SELECT channel_username, invalidated_at FROM invalid_channels WHERE invalidated_at > NOW() - INTERVAL '30 days';"
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Data:      nil,
+		Metadata: map[string]string{
+			"sql": query,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	if err != nil {
+		return fmt.Errorf("random-walk-invalid: failed to query invalid_channels: %w", err)
+	}
+
+	var rows [][]interface{}
+	if err := json.Unmarshal(res.Data, &rows); err != nil {
+		return fmt.Errorf("random-walk-invalid: failed to unmarshal invalid_channels response: %w", err)
+	}
+
+	dsm.invalidChannelCacheMu.Lock()
+	defer dsm.invalidChannelCacheMu.Unlock()
+
+	loaded := 0
+	for _, row := range rows {
+		if len(row) < 2 {
+			continue
+		}
+		username, ok := row[0].(string)
+		if !ok || username == "" {
+			continue
+		}
+		var invalidatedAt time.Time
+		switch v := row[1].(type) {
+		case string:
+			t, parseErr := time.Parse(time.RFC3339, v)
+			if parseErr != nil {
+				t, parseErr = time.Parse("2006-01-02T15:04:05Z", v)
+				if parseErr != nil {
+					log.Warn().Str("channel", username).Str("value", v).Str("log_tag", "rw_invalid").Msg("Failed to parse invalidated_at, skipping")
+					continue
+				}
+			}
+			invalidatedAt = t
+		case float64:
+			invalidatedAt = time.Unix(int64(v), 0)
+		default:
+			continue
+		}
+		dsm.invalidChannelCache[username] = invalidatedAt
+		loaded++
+	}
+
+	log.Info().Int("loaded", loaded).Str("log_tag", "rw_invalid").Msg("Finished loading invalid channels")
+	return nil
+}
+
+// IsInvalidChannel returns true if the channel is present in the in-memory
+// invalid cache and its 30-day TTL has not expired.
+func (dsm *DaprStateManager) IsInvalidChannel(username string) bool {
+	dsm.invalidChannelCacheMu.RLock()
+	t, ok := dsm.invalidChannelCache[username]
+	dsm.invalidChannelCacheMu.RUnlock()
+	if !ok {
+		return false
+	}
+	return time.Since(t) < invalidChannelTTL
+}
+
+// MarkChannelInvalid persists the channel to the invalid_channels table and
+// adds it to the in-memory cache so subsequent calls to IsInvalidChannel return
+// true without a DB round-trip.
+func (dsm *DaprStateManager) MarkChannelInvalid(username string, reason string) error {
+	now := time.Now()
+
+	dsm.invalidChannelCacheMu.Lock()
+	dsm.invalidChannelCache[username] = now
+	dsm.invalidChannelCacheMu.Unlock()
+
+	sqlQuery := `INSERT INTO invalid_channels (channel_username, reason, invalidated_at) VALUES ($1, $2, NOW()) ON CONFLICT (channel_username) DO UPDATE SET reason = EXCLUDED.reason, invalidated_at = NOW();`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, reason})
 }
 
 func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
@@ -3226,19 +3483,20 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 			return fmt.Errorf("random-walk-init: unable to get random discovered channel during ")
 		}
 		if _, ok := seedChannels[url]; ok {
-			log.Info().Str("seed_url", url).Msg("random-walk-init: url previously selected. skipping")
+			log.Info().Str("seed_url", url).Str("log_tag", "rw_init").Msg("URL previously selected, skipping")
 			continue
 		}
 		seedChannels[url] = true
 		pages = append(pages, Page{
-			ID:        uuid.New().String(),
-			URL:       url,
-			Depth:     0,
-			Status:    "unfetched",
-			Timestamp: time.Now(),
+			ID:         uuid.New().String(),
+			URL:        url,
+			Depth:      0,
+			Status:     "unfetched",
+			Timestamp:  time.Now(),
+			SequenceID: uuid.New().String(),
 		})
 		if len(seedChannels) >= dsm.BaseStateManager.config.SeedSize {
-			log.Info().Int("seed_size", dsm.BaseStateManager.config.SeedSize).Int("seed_channel_size", len(seedChannels)).Msg("random-walk-init: finished selecting seed channels")
+			log.Info().Int("seed_size", dsm.BaseStateManager.config.SeedSize).Int("seed_channel_size", len(seedChannels)).Str("log_tag", "rw_init").Msg("Finished selecting seed channels")
 			break
 		}
 	}
@@ -3252,8 +3510,7 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 
 // TODO: generalize the process of inserting records to function that takes in query and params
 func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
-	log.Info().Str("url", page.URL).Msg("random-walk-layer: Adding page to layer buffer")
-	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id) VALUES ($1, $2, $3, $4, $5);`
+	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6);`
 
 	values := []any{
 		page.ID,
@@ -3261,9 +3518,12 @@ func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
 		page.Depth,
 		page.URL,
 		dsm.config.CrawlID,
+		page.SequenceID,
 	}
 
-	dsm.ExecuteDatabaseOperation(sqlQuery, values)
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, values); err != nil {
+		return fmt.Errorf("random-walk-layer: failed to add page to layer buffer: %w", err)
+	}
 
 	return nil
 }
@@ -3286,18 +3546,16 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 		},
 	}
 
-	log.Info().Str("sql_query", sqlQuery).Str("params", string(jsonData)).Msg("random-walk-insert: running insert query")
 	if resp, err := (*dsm.client).InvokeBinding(ctx, req); err != nil {
 		if strings.Contains(err.Error(), "invalid header field value") {
-			if resp == nil {
-			} else if resp.Metadata == nil {
-				log.Info().Msg("random-walk-insert: response.metadata does not exist")
-			} else if val, ok := resp.Metadata["sql"]; ok {
-				log.Info().Str("metadata.sql", val).Msg("random-walk-insert: metadata.sql values")
-			} else {
-				log.Info().Msg("random-walk-init: response.metadata[\"sql\"] does not exist")
+			if resp != nil && resp.Metadata != nil {
+				if val, ok := resp.Metadata["sql"]; ok {
+					log.Error().Str("metadata_sql", val).Str("log_tag", "rw_db").Msg("Invalid header field value error with metadata")
+				} else {
+					log.Error().Str("log_tag", "rw_db").Msg("Invalid header field value error, no sql metadata key")
+				}
 			}
-			log.Info().Err(err).Msg("random-walk-init: ignoring invalid header field value error")
+			log.Error().Err(err).Str("log_tag", "rw_db").Msg("Ignoring invalid header field value error")
 		} else {
 			return fmt.Errorf("random-walk-init: failed to invoke Dapr binding: %w", err)
 		}
@@ -3306,17 +3564,12 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 
 }
 
-func (dsm *DaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
-	log.Info().Bool("wipe_current_crawl", includeCurrentCrawl).Msg("random-walk-layer: Wiping layer buffer")
+func (dsm *DaprStateManager) WipeLayerBuffer() error {
+	log.Info().Str("crawl_id", dsm.config.CrawlID).Str("log_tag", "rw_layer").Msg("Wiping layer buffer")
 	values := []any{
 		dsm.config.CrawlID,
 	}
-	sqlQuery := `DELETE FROM layer_buffer WHERE crawl_id <> $1;`
-
-	if includeCurrentCrawl {
-		sqlQuery = `DELETE FROM layer_buffer;`
-		values = []any{}
-	}
+	sqlQuery := `DELETE FROM layer_buffer WHERE crawl_id = $1;`
 
 	err := dsm.ExecuteDatabaseOperation(sqlQuery, values)
 
@@ -3329,10 +3582,10 @@ func (dsm *DaprStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error {
 }
 
 func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
-	log.Info().Msg("random-walk-layer: getting pages from layer buffer")
+	log.Info().Str("log_tag", "rw_layer").Msg("Getting pages from layer buffer")
 	pages := make([]Page, 0)
 
-	query := "SELECT page_id, parent_id, depth, url, crawl_id FROM layer_buffer;"
+	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM layer_buffer WHERE crawl_id = '%s';", dsm.config.CrawlID)
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
@@ -3349,25 +3602,30 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 	var pageResults [][]any
 
 	if err := json.Unmarshal(res.Data, &pageResults); err != nil {
-		log.Error().Str("result_data", string(res.Data)).Msg("random-walk-layer: result data")
+		log.Error().Str("result_data", string(res.Data)).Str("log_tag", "rw_layer").Msg("Failed to unmarshal layer buffer response")
 		return pages, fmt.Errorf("random-walk-layer: Failed to unmarshal response for layer buffer: %v", err)
 	}
 
 	if len(pageResults) > 0 {
-		log.Printf("random-walk-layer: Found %d pages in layer buffer:\n", len(pageResults))
+		log.Info().Int("count", len(pageResults)).Str("log_tag", "rw_layer").Msg("Found pages in layer buffer")
 		for _, page := range pageResults {
+			seqID := ""
+			if len(page) > 5 && page[5] != nil {
+				seqID, _ = page[5].(string)
+			}
 			pages = append(pages, Page{
-				ID:        string(page[0].(string)),
-				ParentID:  string(page[1].(string)),
-				Depth:     int(page[2].(float64)),
-				URL:       string(page[3].(string)),
-				Status:    "unfetched",
-				Timestamp: time.Now(),
+				ID:         page[0].(string),
+				ParentID:   page[1].(string),
+				Depth:      int(page[2].(float64)),
+				URL:        page[3].(string),
+				Status:     "unfetched",
+				Timestamp:  time.Now(),
+				SequenceID: seqID,
 			})
 		}
 		return pages, nil
 	} else {
-		log.Error().Msg("random-walk-layer: no pages found")
+		log.Error().Str("log_tag", "rw_layer").Msg("No pages found in layer buffer")
 		return pages, nil
 	}
 }

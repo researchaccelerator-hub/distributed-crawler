@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,7 +53,9 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 	}
 
 	// For random sampling, URLs are not required since we discover content randomly
-	if !generateCode && len(urls) == 0 && !(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") {
+	noURLsRequired := (crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") ||
+		crawlerCfg.SamplingMethod == "random-walk"
+	if !generateCode && len(urls) == 0 && !noURLsRequired {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
 	}
 
@@ -319,6 +322,18 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	shutdownSM = sm
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
+	// Normalize seed URLs for Telegram random-walk: strip any t.me prefix and
+	// lowercase so they match the seed_channels table (VARCHAR PK is case-sensitive).
+	if crawlCfg.SamplingMethod == "random-walk" && crawlCfg.Platform == "telegram" {
+		for i, u := range stringList {
+			u = strings.TrimPrefix(u, "https://t.me/")
+			u = strings.TrimPrefix(u, "http://t.me/")
+			u = strings.TrimPrefix(u, "t.me/")
+			u = strings.TrimPrefix(u, "@")
+			stringList[i] = strings.ToLower(u)
+		}
+	}
+
 	// Initialize with seed URLs if this is a new crawl
 	// If resuming an existing crawl, this is a no-op
 	// as the state manager already has the data
@@ -326,6 +341,21 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to initialize state")
 		return
+	}
+
+	if crawlCfg.SamplingMethod == "random-walk" {
+		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
+			log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
+		}
+		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
+			log.Warn().Err(invalidErr).Msg("random-walk-init: failed to load invalid channels (continuing)")
+		}
+		if discErr := sm.InitializeDiscoveredChannels(); discErr != nil {
+			log.Fatal().Err(discErr).Msg("random-walk-init: failed to pull discovered channels")
+		}
+		if len(stringList) == 0 {
+			sm.InitializeRandomWalkLayer()
+		}
 	}
 
 	// Initialize connection pool with an appropriate size

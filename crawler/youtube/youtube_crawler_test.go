@@ -78,6 +78,14 @@ func (m *MockYouTubeStateManager) MarkMediaAsProcessed(mediaID string) error    
 func (m *MockYouTubeStateManager) Close() error                                   { return nil }
 
 // Used for random-walk sampling
+func (m *MockYouTubeStateManager) LoadSeedChannels() error                               { return nil }
+func (m *MockYouTubeStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
+func (m *MockYouTubeStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
+func (m *MockYouTubeStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
+func (m *MockYouTubeStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
+func (m *MockYouTubeStateManager) LoadInvalidChannels() error                           { return nil }
+func (m *MockYouTubeStateManager) IsInvalidChannel(_ string) bool                       { return false }
+func (m *MockYouTubeStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
 func (m *MockYouTubeStateManager) InitializeDiscoveredChannels() error         { return nil }
 func (m *MockYouTubeStateManager) InitializeRandomWalkLayer() error            { return nil }
 func (m *MockYouTubeStateManager) GetRandomDiscoveredChannel() (string, error) { return "", nil }
@@ -95,7 +103,7 @@ func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) err
 func (m *MockYouTubeStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
 	return []state.Page{}, nil
 }
-func (m *MockYouTubeStateManager) WipeLayerBuffer(includeCurrentCrawl bool) error { return nil }
+func (m *MockYouTubeStateManager) WipeLayerBuffer() error                          { return nil }
 func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil
 }

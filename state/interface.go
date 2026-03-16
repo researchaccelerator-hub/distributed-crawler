@@ -6,6 +6,8 @@
 package state
 
 import (
+	"time"
+
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 )
 
@@ -75,6 +77,15 @@ type StateManagementInterface interface {
 
 	// Used for random-walk sampling
 
+	// LoadSeedChannels loads seed_channels table rows into the in-memory
+	// DiscoveredChannels set and chat ID cache.  Only implemented for DAPR.
+	LoadSeedChannels() error
+	// UpsertSeedChannelChatID caches the TDLib chat ID for a username in both
+	// memory and the seed_channels DB table.
+	UpsertSeedChannelChatID(username string, chatID int64) error
+	// GetCachedChatID returns the cached TDLib chat ID for username, if known.
+	GetCachedChatID(username string) (int64, bool)
+
 	// Initializes discovered channels from database
 	// Only implemented for dapr currently
 	InitializeDiscoveredChannels() error
@@ -87,9 +98,26 @@ type StateManagementInterface interface {
 	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
 	GetPagesFromLayerBuffer() ([]Page, error)
-	WipeLayerBuffer(includeCurrentCrawl bool) error
+	WipeLayerBuffer() error
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
 	AddPageToLayerBuffer(page *Page) error
+
+	// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
+	// for the given username. Returns zero time if the channel has never been crawled.
+	GetChannelLastCrawled(username string) (time.Time, error)
+	// MarkChannelCrawled upserts the channel into seed_channels, recording the
+	// current time as last_crawled_at and caching the resolved chatID.
+	MarkChannelCrawled(username string, chatID int64) error
+
+	// LoadInvalidChannels populates the in-memory invalid channel cache from the
+	// invalid_channels table (rows within the 30-day TTL window only).
+	LoadInvalidChannels() error
+	// IsInvalidChannel returns true if the channel is cached as invalid and the
+	// 30-day TTL has not yet expired.
+	IsInvalidChannel(username string) bool
+	// MarkChannelInvalid persists the channel to the invalid_channels table and
+	// adds it to the in-memory cache.  reason should be "not_found" or "not_supergroup".
+	MarkChannelInvalid(username string, reason string) error
 
 	// Combined files
 	UploadCombinedFile(filename string) error
