@@ -55,6 +55,10 @@ type Page struct {
 
 	// Random-walk chain tracking
 	SequenceID string `json:"sequenceId,omitempty"` // UUID propagated through a forward chain; new UUID on walkback
+
+	// CrawlID overrides the state manager's own crawl_id when writing to page_buffer.
+	// Set by the validator when processing a batch belonging to a different crawl.
+	CrawlID string `json:"crawlId,omitempty"`
 }
 
 // Message represents a message associated with a page

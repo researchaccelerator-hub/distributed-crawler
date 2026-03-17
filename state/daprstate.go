@@ -3509,12 +3509,17 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 func (dsm *DaprStateManager) AddPageToPageBuffer(page *Page) error {
 	sqlQuery := `INSERT INTO page_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6);`
 
+	crawlID := page.CrawlID
+	if crawlID == "" {
+		crawlID = dsm.config.CrawlID
+	}
+
 	values := []any{
 		page.ID,
 		page.ParentID,
 		page.Depth,
 		page.URL,
-		dsm.config.CrawlID,
+		crawlID,
 		page.SequenceID,
 	}
 

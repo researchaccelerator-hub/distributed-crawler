@@ -317,7 +317,9 @@ func processWalkbackBatch(
 		sequenceID = batch.SequenceID
 	}
 
-	// Build next page for page_buffer
+	// Build next page for page_buffer.
+	// Set CrawlID from the batch so the page lands under the correct crawl
+	// even when a validator is processing a batch from a different crawl.
 	page := &state.Page{
 		ID:         uuid.New().String(),
 		ParentID:   batch.SourcePageID,
@@ -325,6 +327,7 @@ func processWalkbackBatch(
 		URL:        nextURL,
 		SequenceID: sequenceID,
 		Status:     "unfetched",
+		CrawlID:    batch.CrawlID,
 	}
 
 	// Write to page_buffer — unblocks the crawler
