@@ -222,7 +222,20 @@ func (m *MockDaprStateManager) WipeLayerBuffer() error { return nil }
 func (m *MockDaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil
 }
-func (m *MockDaprStateManager) AddPageToLayerBuffer(page *state.Page) error { return nil }
+func (m *MockDaprStateManager) AddPageToLayerBuffer(page *state.Page) error  { return nil }
+func (m *MockDaprStateManager) DeleteLayerBufferPages(_ []string) error      { return nil }
+func (m *MockDaprStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
+func (m *MockDaprStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
+func (m *MockDaprStateManager) ClosePendingBatch(_ string) error                                   { return nil }
+func (m *MockDaprStateManager) ClaimPendingEdges(_ int) ([]*state.PendingEdge, error)              { return nil, nil }
+func (m *MockDaprStateManager) UpdatePendingEdge(_ state.PendingEdgeUpdate) error                  { return nil }
+func (m *MockDaprStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*state.PendingEdge, error) { return nil, nil, nil }
+func (m *MockDaprStateManager) CompletePendingBatch(_ string) error                                { return nil }
+func (m *MockDaprStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
+func (m *MockDaprStateManager) GetRandomSeedChannel() (string, error)                              { return "", nil }
+func (m *MockDaprStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
+func (m *MockDaprStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
+func (m *MockDaprStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 
 // Combine Files
 func (m *MockDaprStateManager) UploadCombinedFile(filename string) error { return nil }
@@ -330,6 +343,43 @@ func (m *MockStateManager) GetPreviousCrawls() ([]string, error) {
 	args := m.Called()
 	return args.Get(0).([]string), args.Error(1)
 }
+
+// random-walk stubs
+func (m *MockStateManager) LoadSeedChannels() error                               { return nil }
+func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
+func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
+func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
+func (m *MockStateManager) LoadInvalidChannels() error                           { return nil }
+func (m *MockStateManager) IsInvalidChannel(_ string) bool                       { return false }
+func (m *MockStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
+func (m *MockStateManager) InitializeDiscoveredChannels() error                  { return nil }
+func (m *MockStateManager) InitializeRandomWalkLayer() error                     { return nil }
+func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error)          { return "", nil }
+func (m *MockStateManager) IsDiscoveredChannel(_ string) bool                    { return false }
+func (m *MockStateManager) AddDiscoveredChannel(_ string) error                  { return nil }
+func (m *MockStateManager) StoreChannelData(_ string, _ *model.ChannelData) error { return nil }
+func (m *MockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error          { return nil }
+func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error)       { return nil, nil }
+func (m *MockStateManager) WipeLayerBuffer() error                               { return nil }
+func (m *MockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error     { return nil }
+func (m *MockStateManager) AddPageToLayerBuffer(_ *state.Page) error             { return nil }
+func (m *MockStateManager) DeleteLayerBufferPages(_ []string) error              { return nil }
+func (m *MockStateManager) UploadCombinedFile(_ string) error                    { return nil }
+
+// pending-batch / validator stubs
+func (m *MockStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
+func (m *MockStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
+func (m *MockStateManager) ClosePendingBatch(_ string) error                                   { return nil }
+func (m *MockStateManager) ClaimPendingEdges(_ int) ([]*state.PendingEdge, error)              { return nil, nil }
+func (m *MockStateManager) UpdatePendingEdge(_ state.PendingEdgeUpdate) error                  { return nil }
+func (m *MockStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*state.PendingEdge, error) { return nil, nil, nil }
+func (m *MockStateManager) CompletePendingBatch(_ string) error                                { return nil }
+func (m *MockStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
+func (m *MockStateManager) GetRandomSeedChannel() (string, error)                              { return "", nil }
+func (m *MockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
+func (m *MockStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
+func (m *MockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 
 // MockStateManagerFactory mocks the state.StateManagerFactory interface
 type MockStateManagerFactory struct {

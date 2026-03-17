@@ -101,6 +101,9 @@ type StateManagementInterface interface {
 	WipeLayerBuffer() error
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
 	AddPageToLayerBuffer(page *Page) error
+	// DeleteLayerBufferPages removes specific pages by ID from the layer buffer.
+	// Used in tandem mode to avoid wiping pages the validator wrote after the read.
+	DeleteLayerBufferPages(pageIDs []string) error
 
 	// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
 	// for the given username. Returns zero time if the channel has never been crawled.
@@ -121,6 +124,58 @@ type StateManagementInterface interface {
 
 	// Combined files
 	UploadCombinedFile(filename string) error
+
+	// Validator / tandem-crawl methods
+
+	// CreatePendingBatch inserts a new batch row with status='open'.
+	// Called by the crawler when the first potential edge is found for a source channel.
+	CreatePendingBatch(batch *PendingEdgeBatch) error
+
+	// InsertPendingEdge writes a single pending edge row. Called as each edge is
+	// discovered (streaming — does not wait for the channel to finish).
+	InsertPendingEdge(edge *PendingEdge) error
+
+	// ClosePendingBatch sets status='closed' and closed_at=NOW(), signalling that
+	// the crawler has finished extracting edges from this source channel.
+	ClosePendingBatch(batchID string) error
+
+	// ClaimPendingEdges atomically claims up to limit edges with
+	// validation_status='pending', ordered by discovery_time.  Uses
+	// UPDATE ... WHERE pending_id IN (SELECT ... FOR UPDATE SKIP LOCKED)
+	// to allow concurrent validators.
+	ClaimPendingEdges(limit int) ([]*PendingEdge, error)
+
+	// UpdatePendingEdge sets validation_status, validation_reason, and
+	// validated_at for one edge.
+	UpdatePendingEdge(update PendingEdgeUpdate) error
+
+	// ClaimWalkbackBatch finds the oldest batch where status='closed' and no
+	// pending_edges have validation_status='pending'. Atomically sets
+	// status='processing'.  Returns (nil, nil, nil) if no batch is ready.
+	ClaimWalkbackBatch() (*PendingEdgeBatch, []*PendingEdge, error)
+
+	// CompletePendingBatch sets status='completed' and completed_at=NOW().
+	CompletePendingBatch(batchID string) error
+
+	// FlushBatchStats upserts source_type_stats for the batch, then DELETEs
+	// all pending_edges rows for that batch.
+	FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error
+
+	// GetRandomSeedChannel returns a random channel_username from seed_channels.
+	GetRandomSeedChannel() (string, error)
+
+	// ClaimDiscoveredChannel atomically claims first-discovery of a channel for a
+	// crawl.  Returns true if this call made the claim (INSERT succeeded), false
+	// if the channel was already claimed.
+	ClaimDiscoveredChannel(username, crawlID string) (bool, error)
+
+	// IsChannelDiscovered checks whether a channel has already been claimed for a
+	// crawl without inserting. Used by validators to skip HTTP calls.
+	IsChannelDiscovered(username, crawlID string) (bool, error)
+
+	// CountIncompleteBatches returns the count of pending_edge_batches with
+	// status != 'completed' for the given crawl_id.
+	CountIncompleteBatches(crawlID string) (int, error)
 
 	// Cleanup
 	// Close performs cleanup operations when shutting down

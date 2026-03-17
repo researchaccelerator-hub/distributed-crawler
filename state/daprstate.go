@@ -3581,6 +3581,29 @@ func (dsm *DaprStateManager) WipeLayerBuffer() error {
 
 }
 
+// DeleteLayerBufferPages removes specific pages by ID in a single query.
+// Used in tandem mode to avoid a race where WipeLayerBuffer deletes pages
+// the validator wrote between the read and the wipe.
+func (dsm *DaprStateManager) DeleteLayerBufferPages(pageIDs []string) error {
+	if len(pageIDs) == 0 {
+		return nil
+	}
+	// Build IN clause with escaped values: ('id1','id2','id3')
+	escaped := make([]string, len(pageIDs))
+	for i, pid := range pageIDs {
+		escaped[i] = "'" + strings.ReplaceAll(pid, "'", "''") + "'"
+	}
+	sqlQuery := fmt.Sprintf("DELETE FROM layer_buffer WHERE crawl_id = '%s' AND page_id IN (%s);",
+		strings.ReplaceAll(dsm.config.CrawlID, "'", "''"),
+		strings.Join(escaped, ","))
+
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
+		return fmt.Errorf("random-walk-layer: failed to delete %d pages from layer buffer: %w", len(pageIDs), err)
+	}
+	log.Info().Int("count", len(pageIDs)).Str("log_tag", "rw_layer").Msg("Deleted specific pages from layer buffer")
+	return nil
+}
+
 func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 	log.Info().Str("log_tag", "rw_layer").Msg("Getting pages from layer buffer")
 	pages := make([]Page, 0)
@@ -3752,4 +3775,450 @@ func (dsm *DaprStateManager) fetchAllPages(crawlID string, pageIDs []string) ([]
 	}
 
 	return pages, nil
+}
+
+// --- Validator / tandem-crawl methods ---
+
+// queryDatabase is a helper for SELECT queries that return rows.  It invokes
+// the DAPR postgres binding in "query" mode and unmarshals the JSON response
+// into a [][]any (one sub-slice per row).
+func (dsm *DaprStateManager) queryDatabase(sqlQuery string) ([][]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	req := &daprc.InvokeBindingRequest{
+		Name:      dsm.databaseBinding,
+		Operation: "query",
+		Metadata: map[string]string{
+			"sql": sqlQuery,
+		},
+	}
+	res, err := (*dsm.client).InvokeBinding(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("queryDatabase: failed to invoke binding: %w", err)
+	}
+
+	var rows [][]any
+	if err := json.Unmarshal(res.Data, &rows); err != nil {
+		return nil, fmt.Errorf("queryDatabase: failed to unmarshal response: %w", err)
+	}
+	return rows, nil
+}
+
+// CreatePendingBatch inserts a new batch row with status='open'.
+func (dsm *DaprStateManager) CreatePendingBatch(batch *PendingEdgeBatch) error {
+	sqlQuery := `INSERT INTO pending_edge_batches (batch_id, crawl_id, source_channel, source_page_id, source_depth, sequence_id, status) VALUES ($1, $2, $3, $4, $5, $6, $7);`
+	values := []any{
+		batch.BatchID,
+		batch.CrawlID,
+		batch.SourceChannel,
+		batch.SourcePageID,
+		batch.SourceDepth,
+		batch.SequenceID,
+		"open",
+	}
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, values); err != nil {
+		return fmt.Errorf("validator-db: failed to create pending batch: %w", err)
+	}
+	return nil
+}
+
+// InsertPendingEdge writes a single pending edge row.
+func (dsm *DaprStateManager) InsertPendingEdge(edge *PendingEdge) error {
+	sqlQuery := `INSERT INTO pending_edges (batch_id, crawl_id, destination_channel, source_channel, sequence_id, discovery_time, source_type, validation_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`
+	values := []any{
+		edge.BatchID,
+		edge.CrawlID,
+		edge.DestinationChannel,
+		edge.SourceChannel,
+		edge.SequenceID,
+		edge.DiscoveryTime,
+		edge.SourceType,
+		"pending",
+	}
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, values); err != nil {
+		return fmt.Errorf("validator-db: failed to insert pending edge: %w", err)
+	}
+	return nil
+}
+
+// ClosePendingBatch sets status='closed' and closed_at=NOW().
+func (dsm *DaprStateManager) ClosePendingBatch(batchID string) error {
+	sqlQuery := `UPDATE pending_edge_batches SET status = 'closed', closed_at = NOW() WHERE batch_id = $1;`
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, []any{batchID}); err != nil {
+		return fmt.Errorf("validator-db: failed to close pending batch: %w", err)
+	}
+	return nil
+}
+
+// ClaimPendingEdges atomically claims up to `limit` edges with
+// validation_status='pending' by setting them to 'validating'.
+// Uses a CTE with FOR UPDATE SKIP LOCKED for concurrent validator safety.
+func (dsm *DaprStateManager) ClaimPendingEdges(limit int) ([]*PendingEdge, error) {
+	// DAPR postgres binding supports parameterised queries for "exec" but not
+	// easily for "query".  We use a single UPDATE ... RETURNING which is a write
+	// that also returns rows — DAPR handles this via "exec" but we need to use
+	// "query" to get the RETURNING data back.  The DAPR postgres binding treats
+	// UPDATE ... RETURNING as a query that returns rows.
+	sqlQuery := fmt.Sprintf(`UPDATE pending_edges SET validation_status = 'validating', validated_at = NOW() WHERE pending_id IN ( SELECT pending_id FROM pending_edges WHERE validation_status = 'pending' ORDER BY discovery_time LIMIT %d FOR UPDATE SKIP LOCKED ) RETURNING pending_id, batch_id, crawl_id, destination_channel, source_channel, sequence_id, discovery_time, source_type;`, limit)
+
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("validator-db: failed to claim pending edges: %w", err)
+	}
+
+	edges := make([]*PendingEdge, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 8 {
+			continue
+		}
+		pendingID := 0
+		switch v := row[0].(type) {
+		case float64:
+			pendingID = int(v)
+		}
+
+		var discoveryTime time.Time
+		if ts, ok := row[6].(string); ok {
+			discoveryTime, _ = time.Parse(time.RFC3339, ts)
+			if discoveryTime.IsZero() {
+				discoveryTime, _ = time.Parse("2006-01-02T15:04:05Z", ts)
+			}
+		}
+
+		batchID, _ := row[1].(string)
+		crawlID, _ := row[2].(string)
+		destChan, _ := row[3].(string)
+		srcChan, _ := row[4].(string)
+		seqID, _ := row[5].(string)
+		srcType, _ := row[7].(string)
+
+		edges = append(edges, &PendingEdge{
+			PendingID:          pendingID,
+			BatchID:            batchID,
+			CrawlID:            crawlID,
+			DestinationChannel: destChan,
+			SourceChannel:      srcChan,
+			SequenceID:         seqID,
+			DiscoveryTime:      discoveryTime,
+			SourceType:         srcType,
+			ValidationStatus:   "validating",
+		})
+	}
+	return edges, nil
+}
+
+// UpdatePendingEdge sets validation_status, validation_reason, and validated_at.
+func (dsm *DaprStateManager) UpdatePendingEdge(update PendingEdgeUpdate) error {
+	sqlQuery := `UPDATE pending_edges SET validation_status = $1, validation_reason = $2, validated_at = NOW() WHERE pending_id = $3;`
+	values := []any{update.ValidationStatus, update.ValidationReason, update.PendingID}
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, values); err != nil {
+		return fmt.Errorf("validator-db: failed to update pending edge %d: %w", update.PendingID, err)
+	}
+	return nil
+}
+
+// ClaimWalkbackBatch finds the oldest batch where status='closed' and all
+// pending_edges are validated.  Atomically sets status='processing'.
+func (dsm *DaprStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*PendingEdge, error) {
+	// Step 1: Find and claim a closed batch that has no remaining 'pending' or 'validating' edges.
+	claimSQL := `UPDATE pending_edge_batches SET status = 'processing' WHERE batch_id = ( SELECT b.batch_id FROM pending_edge_batches b WHERE b.status = 'closed' AND NOT EXISTS ( SELECT 1 FROM pending_edges e WHERE e.batch_id = b.batch_id AND e.validation_status IN ('pending', 'validating') ) ORDER BY b.created_at LIMIT 1 FOR UPDATE SKIP LOCKED ) RETURNING batch_id, crawl_id, source_channel, source_page_id, source_depth, sequence_id;`
+
+	batchRows, err := dsm.queryDatabase(claimSQL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("validator-db: failed to claim walkback batch: %w", err)
+	}
+	if len(batchRows) == 0 {
+		return nil, nil, nil
+	}
+
+	row := batchRows[0]
+	if len(row) < 6 {
+		return nil, nil, fmt.Errorf("validator-db: unexpected row length %d for walkback batch", len(row))
+	}
+
+	batchID, _ := row[0].(string)
+	crawlID, _ := row[1].(string)
+	srcChan, _ := row[2].(string)
+	srcPageID, _ := row[3].(string)
+	srcDepth := 0
+	if v, ok := row[4].(float64); ok {
+		srcDepth = int(v)
+	}
+	seqID, _ := row[5].(string)
+
+	batch := &PendingEdgeBatch{
+		BatchID:       batchID,
+		CrawlID:       crawlID,
+		SourceChannel: srcChan,
+		SourcePageID:  srcPageID,
+		SourceDepth:   srcDepth,
+		SequenceID:    seqID,
+		Status:        "processing",
+	}
+
+	// Step 2: Fetch all edges for this batch.
+	edgeSQL := fmt.Sprintf(`SELECT pending_id, batch_id, crawl_id, destination_channel, source_channel, sequence_id, discovery_time, source_type, validation_status, validation_reason FROM pending_edges WHERE batch_id = '%s';`,
+		strings.ReplaceAll(batchID, "'", "''"))
+
+	edgeRows, err := dsm.queryDatabase(edgeSQL)
+	if err != nil {
+		return batch, nil, fmt.Errorf("validator-db: failed to fetch edges for batch %s: %w", batchID, err)
+	}
+
+	edges := make([]*PendingEdge, 0, len(edgeRows))
+	for _, erow := range edgeRows {
+		if len(erow) < 10 {
+			continue
+		}
+		pendingID := 0
+		if v, ok := erow[0].(float64); ok {
+			pendingID = int(v)
+		}
+		var discoveryTime time.Time
+		if ts, ok := erow[6].(string); ok {
+			discoveryTime, _ = time.Parse(time.RFC3339, ts)
+			if discoveryTime.IsZero() {
+				discoveryTime, _ = time.Parse("2006-01-02T15:04:05Z", ts)
+			}
+		}
+		eBatchID, _ := erow[1].(string)
+		eCrawlID, _ := erow[2].(string)
+		destChan, _ := erow[3].(string)
+		eSrcChan, _ := erow[4].(string)
+		eSeqID, _ := erow[5].(string)
+		eSrcType, _ := erow[7].(string)
+		valStatus, _ := erow[8].(string)
+		valReason, _ := erow[9].(string)
+
+		edges = append(edges, &PendingEdge{
+			PendingID:          pendingID,
+			BatchID:            eBatchID,
+			CrawlID:            eCrawlID,
+			DestinationChannel: destChan,
+			SourceChannel:      eSrcChan,
+			SequenceID:         eSeqID,
+			DiscoveryTime:      discoveryTime,
+			SourceType:         eSrcType,
+			ValidationStatus:   valStatus,
+			ValidationReason:   valReason,
+		})
+	}
+
+	return batch, edges, nil
+}
+
+// CompletePendingBatch sets status='completed' and completed_at=NOW().
+func (dsm *DaprStateManager) CompletePendingBatch(batchID string) error {
+	sqlQuery := `UPDATE pending_edge_batches SET status = 'completed', completed_at = NOW() WHERE batch_id = $1;`
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, []any{batchID}); err != nil {
+		return fmt.Errorf("validator-db: failed to complete pending batch: %w", err)
+	}
+	return nil
+}
+
+// FlushBatchStats upserts aggregated source_type counts into source_type_stats
+// for each distinct source_type in the batch, then DELETEs all pending_edges
+// rows for that batch.
+func (dsm *DaprStateManager) FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error {
+	// Aggregate counts by source_type
+	type counts struct {
+		total, valid, notChannel, invalid, alreadyDiscovered int
+	}
+	agg := make(map[string]*counts)
+	for _, e := range edges {
+		st := e.SourceType
+		if st == "" {
+			st = "unknown"
+		}
+		c, ok := agg[st]
+		if !ok {
+			c = &counts{}
+			agg[st] = c
+		}
+		c.total++
+		switch e.ValidationStatus {
+		case "valid":
+			c.valid++
+		case "not_channel":
+			c.notChannel++
+		case "invalid":
+			c.invalid++
+		case "already_discovered":
+			c.alreadyDiscovered++
+		}
+	}
+
+	// Upsert each source_type
+	upsertSQL := `INSERT INTO source_type_stats (crawl_id, source_type, total, valid, not_channel, invalid, already_discovered) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (crawl_id, source_type) DO UPDATE SET total = source_type_stats.total + EXCLUDED.total, valid = source_type_stats.valid + EXCLUDED.valid, not_channel = source_type_stats.not_channel + EXCLUDED.not_channel, invalid = source_type_stats.invalid + EXCLUDED.invalid, already_discovered = source_type_stats.already_discovered + EXCLUDED.already_discovered;`
+
+	for st, c := range agg {
+		if err := dsm.ExecuteDatabaseOperation(upsertSQL, []any{crawlID, st, c.total, c.valid, c.notChannel, c.invalid, c.alreadyDiscovered}); err != nil {
+			log.Warn().Err(err).Str("source_type", st).Msg("validator-db: failed to upsert source_type_stats")
+		}
+	}
+
+	// Delete pending_edges for this batch
+	deleteSQL := `DELETE FROM pending_edges WHERE batch_id = $1;`
+	if err := dsm.ExecuteDatabaseOperation(deleteSQL, []any{batchID}); err != nil {
+		return fmt.Errorf("validator-db: failed to delete pending edges for batch %s: %w", batchID, err)
+	}
+	return nil
+}
+
+// GetRandomSeedChannel returns a random channel_username from seed_channels.
+func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
+	sqlQuery := `SELECT channel_username FROM seed_channels ORDER BY RANDOM() LIMIT 1;`
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return "", fmt.Errorf("validator-db: failed to get random seed channel: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return "", fmt.Errorf("validator-db: no seed channels found")
+	}
+	username, ok := rows[0][0].(string)
+	if !ok {
+		return "", fmt.Errorf("validator-db: unexpected type for channel_username")
+	}
+	return username, nil
+}
+
+// ClaimDiscoveredChannel atomically claims first-discovery of a channel for a
+// crawl.  Returns true if this call inserted (first claim), false if already
+// claimed.
+//
+// Uses a CTE so the answer comes back in a single round-trip:
+//
+//	WITH ins AS (INSERT ... ON CONFLICT DO NOTHING RETURNING 1)
+//	SELECT COUNT(*) FROM ins;
+//
+// COUNT = 1 → we inserted (first claim).  COUNT = 0 → conflict (already claimed).
+func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
+	sqlQuery := fmt.Sprintf(
+		`WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id) VALUES ('%s', '%s') ON CONFLICT (channel_username, crawl_id) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`,
+		strings.ReplaceAll(username, "'", "''"),
+		strings.ReplaceAll(crawlID, "'", "''"))
+
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return false, fmt.Errorf("validator-db: failed to claim discovered channel: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return false, nil
+	}
+	switch v := rows[0][0].(type) {
+	case float64:
+		return v > 0, nil
+	case string:
+		return v == "1", nil
+	}
+	return false, nil
+}
+
+// IsChannelDiscovered checks whether a channel has already been claimed for a
+// crawl without inserting.
+func (dsm *DaprStateManager) IsChannelDiscovered(username, crawlID string) (bool, error) {
+	sqlQuery := fmt.Sprintf(`SELECT 1 FROM discovered_channels WHERE channel_username = '%s' AND crawl_id = '%s' LIMIT 1;`,
+		strings.ReplaceAll(username, "'", "''"),
+		strings.ReplaceAll(crawlID, "'", "''"))
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return false, fmt.Errorf("validator-db: failed to check discovered channel: %w", err)
+	}
+	return len(rows) > 0, nil
+}
+
+// CountIncompleteBatches returns the count of pending_edge_batches with
+// status != 'completed' for the given crawl_id.
+func (dsm *DaprStateManager) CountIncompleteBatches(crawlID string) (int, error) {
+	sqlQuery := fmt.Sprintf(`SELECT COUNT(*) FROM pending_edge_batches WHERE crawl_id = '%s' AND status <> 'completed';`,
+		strings.ReplaceAll(crawlID, "'", "''"))
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count incomplete batches: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return 0, nil
+	}
+	switch v := rows[0][0].(type) {
+	case float64:
+		return int(v), nil
+	case string:
+		// Some postgres drivers return count as string
+		var count int
+		fmt.Sscanf(v, "%d", &count)
+		return count, nil
+	}
+	return 0, nil
+}
+
+// RecoverStaleEdgeClaims resets pending_edges stuck in 'validating' for longer
+// than the given threshold back to 'pending'.  This recovers from validator
+// crashes that leave edges in limbo.  Call once at validator startup.
+func (dsm *DaprStateManager) RecoverStaleEdgeClaims(staleThreshold time.Duration) (int, error) {
+	minutes := int(staleThreshold.Minutes())
+	if minutes < 1 {
+		minutes = 1
+	}
+	sqlQuery := fmt.Sprintf(
+		`UPDATE pending_edges SET validation_status = 'pending', validated_at = NULL WHERE validation_status = 'validating' AND validated_at < NOW() - INTERVAL '%d minutes';`, minutes)
+
+	// We can't easily get affected row count from DAPR exec, so run a count query first.
+	countSQL := fmt.Sprintf(
+		`SELECT COUNT(*) FROM pending_edges WHERE validation_status = 'validating' AND validated_at < NOW() - INTERVAL '%d minutes';`, minutes)
+	rows, err := dsm.queryDatabase(countSQL)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count stale edge claims: %w", err)
+	}
+	staleCount := 0
+	if len(rows) > 0 && len(rows[0]) > 0 {
+		if v, ok := rows[0][0].(float64); ok {
+			staleCount = int(v)
+		}
+	}
+
+	if staleCount > 0 {
+		if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
+			return 0, fmt.Errorf("validator-db: failed to recover stale edge claims: %w", err)
+		}
+		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("validator-db: recovered stale edge claims")
+	}
+	return staleCount, nil
+}
+
+// RecoverStaleBatchClaims resets pending_edge_batches stuck in 'processing' for
+// longer than the given threshold back to 'closed'.  Call once at validator startup.
+func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duration) (int, error) {
+	minutes := int(staleThreshold.Minutes())
+	if minutes < 1 {
+		minutes = 1
+	}
+	// Batches in 'processing' that were claimed more than threshold ago but never completed.
+	// We use closed_at as proxy: batch was closed by crawler, then claimed for processing.
+	// A simpler approach: any 'processing' batch older than threshold is stale.
+	sqlQuery := fmt.Sprintf(
+		`UPDATE pending_edge_batches SET status = 'closed' WHERE status = 'processing' AND closed_at < NOW() - INTERVAL '%d minutes';`, minutes)
+
+	countSQL := fmt.Sprintf(
+		`SELECT COUNT(*) FROM pending_edge_batches WHERE status = 'processing' AND closed_at < NOW() - INTERVAL '%d minutes';`, minutes)
+	rows, err := dsm.queryDatabase(countSQL)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count stale batch claims: %w", err)
+	}
+	staleCount := 0
+	if len(rows) > 0 && len(rows[0]) > 0 {
+		if v, ok := rows[0][0].(float64); ok {
+			staleCount = int(v)
+		}
+	}
+
+	if staleCount > 0 {
+		if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
+			return 0, fmt.Errorf("validator-db: failed to recover stale batch claims: %w", err)
+		}
+		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("validator-db: recovered stale batch claims")
+	}
+	return staleCount, nil
 }

@@ -64,6 +64,19 @@ func (m *mockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error)      
 func (m *mockStateManager) WipeLayerBuffer() error                                             { return nil }
 func (m *mockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error                   { return nil }
 func (m *mockStateManager) AddPageToLayerBuffer(_ *state.Page) error                           { return nil }
+func (m *mockStateManager) DeleteLayerBufferPages(_ []string) error                            { return nil }
+func (m *mockStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
+func (m *mockStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
+func (m *mockStateManager) ClosePendingBatch(_ string) error                                   { return nil }
+func (m *mockStateManager) ClaimPendingEdges(_ int) ([]*state.PendingEdge, error)              { return nil, nil }
+func (m *mockStateManager) UpdatePendingEdge(_ state.PendingEdgeUpdate) error                  { return nil }
+func (m *mockStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*state.PendingEdge, error) { return nil, nil, nil }
+func (m *mockStateManager) CompletePendingBatch(_ string) error                                { return nil }
+func (m *mockStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
+func (m *mockStateManager) GetRandomSeedChannel() (string, error)                              { return "", nil }
+func (m *mockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
+func (m *mockStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
+func (m *mockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 func (m *mockStateManager) Close() error                                                        { return nil }
 
 // newTestChunker creates a Chunker wired to temp directories for use in tests.

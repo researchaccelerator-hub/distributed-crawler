@@ -808,6 +808,9 @@ func processAllMessagesWithProcessor(
 	newChannels := make(map[string]bool, 0)
 	lookupStats := newSearchLookupStats()
 
+	// tandem-mode: batch created lazily on first valid edge
+	var tandemBatch *state.PendingEdgeBatch
+
 	// Process messages
 	for _, message := range messages {
 		m := state.Message{
@@ -928,61 +931,110 @@ func processAllMessagesWithProcessor(
 								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already identified as invalid. Skipping")
 								continue
 							}
-							// determine if a previously discovered channel and act accordingly.
-							// For random-walk: skip the per-batch dedup guards so the same channel
-							// can produce edge records from multiple sources in the same layer.
-							// The IsDiscoveredChannel check still prevents redundant SearchPublicChat calls.
-							if sm.IsDiscoveredChannel(o) {
-								continue
-							} else if _, ok := sm.GetCachedChatID(o); ok {
-								// Channel is a seed channel — not a newly discovered channel.
-								// Mark as discovered to avoid future SearchPublicChat calls, but skip edge creation.
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
-								sm.AddDiscoveredChannel(o)
-							} else {
+
+							if cfg.TandemCrawl {
+								// Tandem mode: write edge to pending_edges for validator.
+								// No SearchPublicChat, no walkback decision here.
 								srcType, ok := msgSourceMap[o]
 								if !ok {
 									srcType = "unknown"
 								}
 
-								chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
-									Username: o,
-								})
+								// Pre-filter: reject usernames that can't be valid Telegram channels
+								if filterResult := telegramhelper.FilterUsername(o); !filterResult.Valid {
+									log.Debug().Str("channel", o).Str("reason", filterResult.Reason).
+										Msg("random-walk-tandem: Username failed pre-filter, skipping")
+									continue
+								}
 
-								if err != nil {
-									log.Info().Err(err).Str("channel", o).Str("source_type", srcType).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
-									lookupStats.record(srcType, false)
+								// Create batch on first edge (lazy init)
+								if tandemBatch == nil {
+									tandemBatch = &state.PendingEdgeBatch{
+										BatchID:       uuid.New().String(),
+										CrawlID:       cfg.CrawlID,
+										SourceChannel: owner.URL,
+										SourcePageID:  owner.ID,
+										SourceDepth:   owner.Depth,
+										SequenceID:    owner.SequenceID,
+										Status:        "open",
+									}
+									if batchErr := sm.CreatePendingBatch(tandemBatch); batchErr != nil {
+										log.Error().Err(batchErr).Msg("random-walk-tandem: Failed to create pending batch")
+										return nil, batchErr
+									}
+									log.Info().Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
+										Msg("random-walk-tandem: Created pending batch")
+								}
+
+								edge := &state.PendingEdge{
+									BatchID:            tandemBatch.BatchID,
+									CrawlID:            cfg.CrawlID,
+									DestinationChannel: o,
+									SourceChannel:      owner.URL,
+									SequenceID:         owner.SequenceID,
+									DiscoveryTime:      time.Now(),
+									SourceType:         srcType,
+									ValidationStatus:   "pending",
+								}
+								if edgeErr := sm.InsertPendingEdge(edge); edgeErr != nil {
+									log.Error().Err(edgeErr).Str("channel", o).Msg("random-walk-tandem: Failed to insert pending edge")
+									// Non-fatal — continue processing other edges
+								}
+							} else {
+								// Standard mode: validate via SearchPublicChat
+								// determine if a previously discovered channel and act accordingly.
+								if sm.IsDiscoveredChannel(o) {
+									continue
+								} else if _, ok := sm.GetCachedChatID(o); ok {
+									// Channel is a seed channel — not a newly discovered channel.
+									// Mark as discovered to avoid future SearchPublicChat calls, but skip edge creation.
+									log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
+									sm.AddDiscoveredChannel(o)
+								} else {
+									srcType, ok := msgSourceMap[o]
+									if !ok {
+										srcType = "unknown"
+									}
+
+									chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+										Username: o,
+									})
+
+									if err != nil {
+										log.Info().Err(err).Str("channel", o).Str("source_type", srcType).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
+										lookupStats.record(srcType, false)
+										if lookupStats.total%100 == 0 {
+											lookupStats.log(owner.URL, "periodic")
+										}
+										if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
+											log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+										}
+										continue
+									}
+									chatType := string(chat.Type.ChatTypeType())
+
+									if chatType != "chatTypeSupergroup" {
+										log.Info().Str("chat_type", chatType).Str("chat", o).Str("source_type", srcType).Msg("random-walk-channel: Not a valid chat type. Skipping")
+										lookupStats.record(srcType, false)
+										if lookupStats.total%100 == 0 {
+											lookupStats.log(owner.URL, "periodic")
+										}
+										if invalidErr := sm.MarkChannelInvalid(o, "not_supergroup"); invalidErr != nil {
+											log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+										}
+										continue
+									}
+									lookupStats.record(srcType, true)
 									if lookupStats.total%100 == 0 {
 										lookupStats.log(owner.URL, "periodic")
 									}
-									if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
-										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+									log.Info().Str("channel", o).Str("source_channel", owner.URL).Str("source_type", srcType).Msg("random-walk-channel: Adding channel to discovered channels")
+									sm.AddDiscoveredChannel(o)
+									newChannels[o] = true
+									// Cache the chat ID so future runs can skip SearchPublicChat for this channel
+									if upsertErr := sm.UpsertSeedChannelChatID(o, chat.Id); upsertErr != nil {
+										log.Warn().Err(upsertErr).Str("channel", o).Msg("random-walk-channel: Failed to cache chat ID")
 									}
-									continue
-								}
-								chatType := string(chat.Type.ChatTypeType())
-
-								if chatType != "chatTypeSupergroup" {
-									log.Info().Str("chat_type", chatType).Str("chat", o).Str("source_type", srcType).Msg("random-walk-channel: Not a valid chat type. Skipping")
-									lookupStats.record(srcType, false)
-									if lookupStats.total%100 == 0 {
-										lookupStats.log(owner.URL, "periodic")
-									}
-									if invalidErr := sm.MarkChannelInvalid(o, "not_supergroup"); invalidErr != nil {
-										log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
-									}
-									continue
-								}
-								lookupStats.record(srcType, true)
-								if lookupStats.total%100 == 0 {
-									lookupStats.log(owner.URL, "periodic")
-								}
-								log.Info().Str("channel", o).Str("source_channel", owner.URL).Str("source_type", srcType).Msg("random-walk-channel: Adding channel to discovered channels")
-								sm.AddDiscoveredChannel(o)
-								newChannels[o] = true
-								// Cache the chat ID so future runs can skip SearchPublicChat for this channel
-								if upsertErr := sm.UpsertSeedChannelChatID(o, chat.Id); upsertErr != nil {
-									log.Warn().Err(upsertErr).Str("channel", o).Msg("random-walk-channel: Failed to cache chat ID")
 								}
 							}
 						}
@@ -1010,102 +1062,148 @@ func processAllMessagesWithProcessor(
 
 	// handle choosing a page for the next layer
 	if cfg.SamplingMethod == "random-walk" {
-		page := &state.Page{
-			Status:   "unfetched",
-			ParentID: owner.ID,
-			ID:       uuid.New().String(),
-			Depth:    owner.Depth + 1,
-		}
-		linkToFollow := &state.EdgeRecord{
-			DiscoveryTime: time.Now(),
-			SourceChannel: owner.URL,
-			Skipped:       false,
-		}
-
-		walkback := false
-		rndNum := -1
-		newChannelCount := len(newChannels)
-		if newChannelCount == 0 {
-			walkback = true
-		} else {
-			rndNum = rand.IntN(100) + 1
-		}
-
-		log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
-			Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("random-walk-walkback: Walkback decision data")
-		if walkback || cfg.WalkbackRate >= rndNum {
-			linkToFollow.Walkback = true
-			// get walkback channel, skipping new channels discovered on this page
-			const maxWalkbackAttempts = 10
-			var walkbackURL string
-			for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
-				var randomErr error
-				walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
-				log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk-walkback: Random Walkback channel")
-				if randomErr != nil {
-					return nil, fmt.Errorf("random-walk-walkback: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
+		if cfg.TandemCrawl {
+			// Tandem mode: validator handles walkback and layer_buffer writes.
+			if tandemBatch != nil {
+				// Close the batch — signals validator that all edges are written.
+				if closeErr := sm.ClosePendingBatch(tandemBatch.BatchID); closeErr != nil {
+					log.Error().Err(closeErr).Msg("random-walk-tandem: Failed to close pending batch")
+					return nil, closeErr
 				}
-				if _, ok := newChannels[walkbackURL]; ok {
-					log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Part of new channels. Pulling another channel")
-				} else if walkbackURL == owner.URL {
-					log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Same as source channel. Pulling another channel")
-				} else {
-					break
+				log.Info().Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
+					Msg("random-walk-tandem: Batch closed, validator will handle walkback")
+				// Do NOT write edge_records, layer_buffer, or make walkback decision.
+			} else {
+				// No edges found — crawler handles forced walkback itself.
+				log.Info().Str("source_channel", owner.URL).Msg("random-walk-tandem: No edges found, performing forced walkback")
+				walkbackURL, walkErr := sm.GetRandomDiscoveredChannel()
+				if walkErr != nil {
+					return nil, fmt.Errorf("random-walk-tandem: forced walkback failed: %w", walkErr)
 				}
-				if attempt == maxWalkbackAttempts-1 {
-					log.Warn().Str("channel", walkbackURL).Msg("random-walk-walkback: Exhausted walkback attempts, using last candidate as fallback")
+				page := &state.Page{
+					ID:         uuid.New().String(),
+					ParentID:   owner.ID,
+					Depth:      owner.Depth + 1,
+					URL:        walkbackURL,
+					SequenceID: uuid.New().String(),
+					Status:     "unfetched",
 				}
-			}
-			page.URL = walkbackURL
-			// Walkback starts a new chain
-			page.SequenceID = uuid.New().String()
-		} else {
-			linkToFollow.Walkback = false
-
-			newChannelSlice := make([]string, 0, len(newChannels))
-			for channel := range newChannels {
-				newChannelSlice = append(newChannelSlice, channel)
-			}
-			page.URL = newChannelSlice[rand.IntN(len(newChannelSlice))]
-			delete(newChannels, page.URL) // remaining items in map will be used to create skipped edges
-			// Forward edge: propagate the current chain's sequence ID
-			page.SequenceID = owner.SequenceID
-		}
-		linkToFollow.SequenceID = page.SequenceID
-		linkToFollow.DestinationChannel = page.URL
-		log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
-			Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
-			Msg("random-walk-edge: Adding edge to follow in next layer")
-		discoveredEdges = append(discoveredEdges, linkToFollow)
-
-		err := sm.AddPageToLayerBuffer(page)
-		if err != nil {
-			log.Error().Err(err).Msg("random-walk-layer: failed to load page to layer buffer")
-		}
-		// discoveredChannels = append(discoveredChannels, page)
-
-		if len(newChannels) > 0 {
-			log.Info().Int("new_channels", len(newChannels)).Msg("random-walk-edge: New channels found that will be skipped. Adding edge records")
-			for channel := range newChannels {
-				skippedLink := &state.EdgeRecord{
-					DestinationChannel: channel,
-					DiscoveryTime:      time.Now(),
-					Skipped:            true,
+				edge := &state.EdgeRecord{
+					DestinationChannel: walkbackURL,
 					SourceChannel:      owner.URL,
-					Walkback:           false,
-					SequenceID:         owner.SequenceID,
+					Walkback:           true,
+					Skipped:            false,
+					DiscoveryTime:      time.Now(),
+					SequenceID:         page.SequenceID,
 				}
-				log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
-					Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).
-					Msg("random-walk-edge: Adding skipped edge")
-				discoveredEdges = append(discoveredEdges, skippedLink)
+				if bufErr := sm.AddPageToLayerBuffer(page); bufErr != nil {
+					log.Error().Err(bufErr).Msg("random-walk-tandem: failed to add walkback page to layer buffer")
+					return nil, fmt.Errorf("random-walk-tandem: forced walkback page lost: %w", bufErr)
+				}
+				if saveErr := sm.SaveEdgeRecords([]*state.EdgeRecord{edge}); saveErr != nil {
+					log.Err(saveErr).Str("source_channel", owner.URL).Msg("random-walk-tandem: Error saving forced walkback edge")
+					return nil, saveErr
+				}
 			}
-		}
-		log.Info().Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("random-walk-edge: Saving discovered edges")
-		err = sm.SaveEdgeRecords(discoveredEdges)
-		if err != nil {
-			log.Err(err).Str("source_channel", owner.URL).Msg("random-walk-edge: Error saving discovered edges")
-			return nil, err
+		} else {
+			// Standard random-walk mode: make walkback decision and write edges.
+			page := &state.Page{
+				Status:   "unfetched",
+				ParentID: owner.ID,
+				ID:       uuid.New().String(),
+				Depth:    owner.Depth + 1,
+			}
+			linkToFollow := &state.EdgeRecord{
+				DiscoveryTime: time.Now(),
+				SourceChannel: owner.URL,
+				Skipped:       false,
+			}
+
+			walkback := false
+			rndNum := -1
+			newChannelCount := len(newChannels)
+			if newChannelCount == 0 {
+				walkback = true
+			} else {
+				rndNum = rand.IntN(100) + 1
+			}
+
+			log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
+				Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("random-walk-walkback: Walkback decision data")
+			if walkback || cfg.WalkbackRate >= rndNum {
+				linkToFollow.Walkback = true
+				// get walkback channel, skipping new channels discovered on this page
+				const maxWalkbackAttempts = 10
+				var walkbackURL string
+				for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
+					var randomErr error
+					walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
+					log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk-walkback: Random Walkback channel")
+					if randomErr != nil {
+						return nil, fmt.Errorf("random-walk-walkback: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
+					}
+					if _, ok := newChannels[walkbackURL]; ok {
+						log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Part of new channels. Pulling another channel")
+					} else if walkbackURL == owner.URL {
+						log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Same as source channel. Pulling another channel")
+					} else {
+						break
+					}
+					if attempt == maxWalkbackAttempts-1 {
+						log.Warn().Str("channel", walkbackURL).Msg("random-walk-walkback: Exhausted walkback attempts, using last candidate as fallback")
+					}
+				}
+				page.URL = walkbackURL
+				// Walkback starts a new chain
+				page.SequenceID = uuid.New().String()
+			} else {
+				linkToFollow.Walkback = false
+
+				newChannelSlice := make([]string, 0, len(newChannels))
+				for channel := range newChannels {
+					newChannelSlice = append(newChannelSlice, channel)
+				}
+				page.URL = newChannelSlice[rand.IntN(len(newChannelSlice))]
+				delete(newChannels, page.URL) // remaining items in map will be used to create skipped edges
+				// Forward edge: propagate the current chain's sequence ID
+				page.SequenceID = owner.SequenceID
+			}
+			linkToFollow.SequenceID = page.SequenceID
+			linkToFollow.DestinationChannel = page.URL
+			log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
+				Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
+				Msg("random-walk-edge: Adding edge to follow in next layer")
+			discoveredEdges = append(discoveredEdges, linkToFollow)
+
+			err := sm.AddPageToLayerBuffer(page)
+			if err != nil {
+				log.Error().Err(err).Msg("random-walk-layer: failed to load page to layer buffer")
+			}
+			// discoveredChannels = append(discoveredChannels, page)
+
+			if len(newChannels) > 0 {
+				log.Info().Int("new_channels", len(newChannels)).Msg("random-walk-edge: New channels found that will be skipped. Adding edge records")
+				for channel := range newChannels {
+					skippedLink := &state.EdgeRecord{
+						DestinationChannel: channel,
+						DiscoveryTime:      time.Now(),
+						Skipped:            true,
+						SourceChannel:      owner.URL,
+						Walkback:           false,
+						SequenceID:         owner.SequenceID,
+					}
+					log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
+						Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).
+						Msg("random-walk-edge: Adding skipped edge")
+					discoveredEdges = append(discoveredEdges, skippedLink)
+				}
+			}
+			log.Info().Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("random-walk-edge: Saving discovered edges")
+			err = sm.SaveEdgeRecords(discoveredEdges)
+			if err != nil {
+				log.Err(err).Str("source_channel", owner.URL).Msg("random-walk-edge: Error saving discovered edges")
+				return nil, err
+			}
 		}
 	}
 

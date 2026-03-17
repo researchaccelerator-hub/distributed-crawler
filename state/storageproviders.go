@@ -165,6 +165,58 @@ func (lsm *LocalStateManager) AddPageToLayerBuffer(page *Page) error {
 	return fmt.Errorf(" not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) DeleteLayerBufferPages(_ []string) error {
+	return fmt.Errorf("DeleteLayerBufferPages not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CreatePendingBatch(batch *PendingEdgeBatch) error {
+	return fmt.Errorf("CreatePendingBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) InsertPendingEdge(edge *PendingEdge) error {
+	return fmt.Errorf("InsertPendingEdge not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClosePendingBatch(batchID string) error {
+	return fmt.Errorf("ClosePendingBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClaimPendingEdges(limit int) ([]*PendingEdge, error) {
+	return nil, fmt.Errorf("ClaimPendingEdges not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) UpdatePendingEdge(update PendingEdgeUpdate) error {
+	return fmt.Errorf("UpdatePendingEdge not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*PendingEdge, error) {
+	return nil, nil, fmt.Errorf("ClaimWalkbackBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CompletePendingBatch(batchID string) error {
+	return fmt.Errorf("CompletePendingBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error {
+	return fmt.Errorf("FlushBatchStats not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) GetRandomSeedChannel() (string, error) {
+	return "", fmt.Errorf("GetRandomSeedChannel not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
+	return false, fmt.Errorf("ClaimDiscoveredChannel not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) IsChannelDiscovered(username, crawlID string) (bool, error) {
+	return false, fmt.Errorf("IsChannelDiscovered not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CountIncompleteBatches(crawlID string) (int, error) {
+	return 0, fmt.Errorf("CountIncompleteBatches not implemented for local state manager")
+}
+
 // SaveState persists the state to the filesystem
 func (lsm *LocalStateManager) SaveState() error {
 	state := lsm.GetState()

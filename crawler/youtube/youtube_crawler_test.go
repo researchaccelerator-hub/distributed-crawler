@@ -108,6 +108,19 @@ func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, para
 	return nil
 }
 func (m *MockYouTubeStateManager) AddPageToLayerBuffer(page *state.Page) error { return nil }
+func (m *MockYouTubeStateManager) DeleteLayerBufferPages(_ []string) error     { return nil }
+func (m *MockYouTubeStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
+func (m *MockYouTubeStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
+func (m *MockYouTubeStateManager) ClosePendingBatch(_ string) error                                   { return nil }
+func (m *MockYouTubeStateManager) ClaimPendingEdges(_ int) ([]*state.PendingEdge, error)              { return nil, nil }
+func (m *MockYouTubeStateManager) UpdatePendingEdge(_ state.PendingEdgeUpdate) error                  { return nil }
+func (m *MockYouTubeStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*state.PendingEdge, error) { return nil, nil, nil }
+func (m *MockYouTubeStateManager) CompletePendingBatch(_ string) error                                { return nil }
+func (m *MockYouTubeStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
+func (m *MockYouTubeStateManager) GetRandomSeedChannel() (string, error)                              { return "", nil }
+func (m *MockYouTubeStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
+func (m *MockYouTubeStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
+func (m *MockYouTubeStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {

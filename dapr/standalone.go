@@ -269,6 +269,36 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
+	// Validator-only mode: run the validation loop and exit.
+	if crawlCfg.ValidateOnly {
+		log.Info().Msg("validator-mode: starting validation-only loop")
+		// Load shared caches used by the validator
+		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
+			log.Warn().Err(invalidErr).Msg("validator-mode: failed to load invalid channels (continuing)")
+		}
+		// Recover edges/batches stuck in intermediate states from prior crashes.
+		const staleThreshold = 10 * time.Minute
+		if dsm, ok := sm.(*state.DaprStateManager); ok {
+			if n, recErr := dsm.RecoverStaleEdgeClaims(staleThreshold); recErr != nil {
+				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale edge claims")
+			} else if n > 0 {
+				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale edge claims")
+			}
+			if n, recErr := dsm.RecoverStaleBatchClaims(staleThreshold); recErr != nil {
+				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale batch claims")
+			} else if n > 0 {
+				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale batch claims")
+			}
+		}
+		if err := crawl.RunValidationLoop(context.Background(), sm, crawlCfg); err != nil {
+			log.Error().Err(err).Msg("validator-mode: validation loop exited with error")
+		}
+		if closeErr := sm.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("validator-mode: failed to close state manager")
+		}
+		return
+	}
+
 	if crawlCfg.SamplingMethod == "random" && crawlCfg.Platform == "youtube" {
 		RunRandomYoutubeSample(context.Background(), sm, crawlCfg)
 	} else {
@@ -596,10 +626,56 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 		totalDiscovered := len(allDiscoveredChannels)
 		uniqueDiscovered := 0
 
+		// readPageIDs tracks which page IDs were read from the layer buffer so
+		// tandem mode can delete only those (avoiding a race with the validator
+		// writing new pages between the read and the cleanup).
+		var readPageIDs []string
+
 		if crawlCfg.SamplingMethod == "random-walk" {
-			layerBufferPages, err := sm.GetPagesFromLayerBuffer()
-			if err != nil {
-				log.Error().Err(err).Msg("random-walk-layer: Unable to get pages from layer buffer")
+			var layerBufferPages []state.Page
+			if crawlCfg.TandemCrawl {
+				// In tandem mode the validator writes to layer_buffer asynchronously.
+				// Poll until pages appear, no incomplete batches remain, or timeout.
+				const tandemPollInterval = 5 * time.Second
+				for {
+					// Respect MaxCrawlDuration to avoid blocking forever if
+					// the validator crashes with incomplete batches.
+					if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
+						log.Warn().Dur("max_crawl_duration", crawlCfg.MaxCrawlDuration).
+							Msg("tandem: max crawl duration exceeded while waiting for validator")
+						shouldStop.Store(true)
+						break
+					}
+					var lbErr error
+					layerBufferPages, lbErr = sm.GetPagesFromLayerBuffer()
+					if lbErr != nil {
+						log.Error().Err(lbErr).Msg("tandem: layer buffer read failed")
+						break
+					}
+					if len(layerBufferPages) > 0 {
+						break
+					}
+					pending, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
+					if countErr != nil {
+						log.Warn().Err(countErr).Msg("tandem: could not check incomplete batches; retrying")
+					} else if pending == 0 {
+						log.Info().Str("crawl_id", crawlCfg.CrawlID).
+							Msg("tandem: layer buffer empty and no pending batches; crawl complete")
+						break
+					}
+					log.Info().Int("incomplete_batches", pending).
+						Msg("tandem: layer buffer empty, waiting for validator")
+					time.Sleep(tandemPollInterval)
+				}
+			} else {
+				var lbErr error
+				layerBufferPages, lbErr = sm.GetPagesFromLayerBuffer()
+				if lbErr != nil {
+					log.Error().Err(lbErr).Msg("random-walk-layer: Unable to get pages from layer buffer")
+				}
+			}
+			for _, p := range layerBufferPages {
+				readPageIDs = append(readPageIDs, p.ID)
 			}
 			totalDiscovered = len(layerBufferPages)
 			uniqueDiscovered = len(layerBufferPages)
@@ -648,8 +724,16 @@ func processLayerInParallel(layer *state.Layer, maxWorkers int, sm state.StateMa
 				log.Error().Err(err).Msg("Failed to save state after adding new layer")
 			}
 			if crawlCfg.SamplingMethod == "random-walk" {
-				if err := sm.WipeLayerBuffer(); err != nil {
-					log.Error().Err(err).Msg("random-walk-layer: Failed to wipe layer buffer after adding new layer")
+				if crawlCfg.TandemCrawl {
+					// Tandem mode: delete only the pages we read, not the whole buffer.
+					// The validator may have written new pages since our read.
+					if err := sm.DeleteLayerBufferPages(readPageIDs); err != nil {
+						log.Error().Err(err).Msg("tandem: Failed to delete read pages from layer buffer")
+					}
+				} else {
+					if err := sm.WipeLayerBuffer(); err != nil {
+						log.Error().Err(err).Msg("random-walk-layer: Failed to wipe layer buffer after adding new layer")
+					}
 				}
 			}
 		}

@@ -373,14 +373,29 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 }
 
 // seed channels
-func (m *MockStateManager) LoadSeedChannels() error                                    { return nil }
-func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error           { return nil }
-func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)                    { return 0, false }
+func (m *MockStateManager) LoadSeedChannels() error { return nil }
+func (m *MockStateManager) UpsertSeedChannelChatID(username string, chatID int64) error {
+	args := m.Called(username, chatID)
+	return args.Error(0)
+}
+func (m *MockStateManager) GetCachedChatID(username string) (int64, bool) {
+	args := m.Called(username)
+	return args.Get(0).(int64), args.Bool(1)
+}
 func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)         { return time.Time{}, nil }
 func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error                { return nil }
-func (m *MockStateManager) LoadInvalidChannels() error                                { return nil }
-func (m *MockStateManager) IsInvalidChannel(_ string) bool                            { return false }
-func (m *MockStateManager) MarkChannelInvalid(_ string, _ string) error               { return nil }
+func (m *MockStateManager) LoadInvalidChannels() error {
+	args := m.Called()
+	return args.Error(0)
+}
+func (m *MockStateManager) IsInvalidChannel(username string) bool {
+	args := m.Called(username)
+	return args.Bool(0)
+}
+func (m *MockStateManager) MarkChannelInvalid(username string, reason string) error {
+	args := m.Called(username, reason)
+	return args.Error(0)
+}
 
 // random-walk database functions
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
@@ -408,10 +423,87 @@ func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) DeleteLayerBufferPages(pageIDs []string) error {
+	args := m.Called(pageIDs)
+	return args.Error(0)
+}
+
 // Combine Files
 func (m *MockStateManager) UploadCombinedFile(filename string) error {
 	args := m.Called(filename)
 	return args.Error(0)
+}
+
+// Validator / tandem-crawl methods
+func (m *MockStateManager) CreatePendingBatch(batch *state.PendingEdgeBatch) error {
+	args := m.Called(batch)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) InsertPendingEdge(edge *state.PendingEdge) error {
+	args := m.Called(edge)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) ClosePendingBatch(batchID string) error {
+	args := m.Called(batchID)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) ClaimPendingEdges(limit int) ([]*state.PendingEdge, error) {
+	args := m.Called(limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*state.PendingEdge), args.Error(1)
+}
+
+func (m *MockStateManager) UpdatePendingEdge(update state.PendingEdgeUpdate) error {
+	args := m.Called(update)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*state.PendingEdge, error) {
+	args := m.Called()
+	var batch *state.PendingEdgeBatch
+	var edges []*state.PendingEdge
+	if args.Get(0) != nil {
+		batch = args.Get(0).(*state.PendingEdgeBatch)
+	}
+	if args.Get(1) != nil {
+		edges = args.Get(1).([]*state.PendingEdge)
+	}
+	return batch, edges, args.Error(2)
+}
+
+func (m *MockStateManager) CompletePendingBatch(batchID string) error {
+	args := m.Called(batchID)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) FlushBatchStats(batchID, crawlID string, edges []*state.PendingEdge) error {
+	args := m.Called(batchID, crawlID, edges)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) GetRandomSeedChannel() (string, error) {
+	args := m.Called()
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
+	args := m.Called(username, crawlID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockStateManager) IsChannelDiscovered(username, crawlID string) (bool, error) {
+	args := m.Called(username, crawlID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockStateManager) CountIncompleteBatches(crawlID string) (int, error) {
+	args := m.Called(crawlID)
+	return args.Int(0), args.Error(1)
 }
 
 // Close closes the state manager

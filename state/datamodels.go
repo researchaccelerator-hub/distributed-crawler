@@ -75,6 +75,40 @@ type EdgeRecord struct {
 	SequenceID         string    `json:"sequenceId"` // UUID shared across all edges in one forward chain
 }
 
+// PendingEdgeBatch represents a batch of edges from a single source channel
+// in tandem crawl mode. Created when the first potential edge is found;
+// closed when the crawler finishes the channel.
+type PendingEdgeBatch struct {
+	BatchID       string `json:"batchId"`
+	CrawlID       string `json:"crawlId"`
+	SourceChannel string `json:"sourceChannel"`
+	SourcePageID  string `json:"sourcePageId"`
+	SourceDepth   int    `json:"sourceDepth"`
+	SequenceID    string `json:"sequenceId"`
+	Status        string `json:"status"` // "open" | "closed" | "processing" | "completed"
+}
+
+// PendingEdge represents a single extracted username awaiting HTTP validation.
+type PendingEdge struct {
+	PendingID          int       `json:"pendingId"`
+	BatchID            string    `json:"batchId"`
+	CrawlID            string    `json:"crawlId"`
+	DestinationChannel string    `json:"destinationChannel"`
+	SourceChannel      string    `json:"sourceChannel"`
+	SequenceID         string    `json:"sequenceId"`
+	DiscoveryTime      time.Time `json:"discoveryTime"`
+	SourceType         string    `json:"sourceType"`         // "mention" | "text_url" | "url" | "plaintext" | ""
+	ValidationStatus   string    `json:"validationStatus"`   // "pending" | "validating" | "valid" | "not_channel" | "invalid" | "already_discovered"
+	ValidationReason   string    `json:"validationReason"`   // "" | "not_supergroup" | "not_found"
+}
+
+// PendingEdgeUpdate carries the result of validating a single pending edge.
+type PendingEdgeUpdate struct {
+	PendingID        int    `json:"pendingId"`
+	ValidationStatus string `json:"validationStatus"`
+	ValidationReason string `json:"validationReason"`
+}
+
 type DiscoveredChannels struct {
 	items map[string]bool
 	keys  []string

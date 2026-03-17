@@ -783,6 +783,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.NullConfig, "null-config", "{}", "Config for handling of null values in post and channel data. See README for more information")
 	rootCmd.PersistentFlags().BoolVar(&exitOnComplete, "exit-on-complete", false, "Exit with code 0 after a successful crawl (useful for Kubernetes cron jobs)")
 
+	// Validator / tandem-crawl mode flags
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.TandemCrawl, "tandem-crawl", false, "Tandem mode: write edges to pending_edges for validator (no SearchPublicChat)")
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.ValidateOnly, "validate-only", false, "Run as validator pod: process pending edges via HTTP, no crawl loop")
+	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ValidatorRequestRate, "validator-request-rate", 120, "HTTP validation calls per minute (default: 120)")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorRequestJitterMs, "validator-request-jitter-ms", 200, "Max jitter in ms between validator HTTP requests (default: 200)")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorClaimBatchSize, "validator-claim-batch-size", 10, "Number of pending edges to claim per DB round-trip (default: 10)")
+
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.CombineWatchDir, "combine-watch-dir", "/tmp/watch-files", "Where single crawl data files are moved after a write to TempDir to be combined later")
