@@ -3,9 +3,21 @@ package telegramhelper
 import (
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 )
+
+// browserUserAgents is a pool of real browser UA strings rotated per request
+// to avoid the trivial bot-detection signal of a fixed UA.
+var browserUserAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+}
 
 // ValidationErrorKind classifies why ValidateChannelHTTP failed, allowing the
 // caller to distinguish transient network problems from access blocks.
@@ -53,7 +65,14 @@ func ValidateChannelHTTP(username string, httpClient *http.Client) (ChannelValid
 	if err != nil {
 		return ChannelValidationResult{}, fmt.Errorf("channelvalidator: failed to create request for %s: %w", username, err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; TelegramBot/1.0)")
+	req.Header.Set("User-Agent", browserUserAgents[rand.Intn(len(browserUserAgents))])
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
