@@ -365,7 +365,9 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			log.Info().Int("count", len(existingPages)).Msg("random-walk-init: resuming from existing page buffer")
 		}
 
-		RunRandomWalkLayerless(sm, crawlCfg)
+		if err := RunRandomWalkLayerless(sm, crawlCfg); err != nil {
+			log.Error().Err(err).Msg("random-walk-layerless: crawl aborted")
+		}
 	} else {
 		// All other modes (snowball, channel, youtube-channel, etc.)
 		err = sm.Initialize(stringList)
@@ -758,6 +760,10 @@ func DetermineCrawlID(tempSM state.StateManagementInterface, crawlCfg common.Cra
 	return crawlexecid, isResumingSameCrawlExecution
 }
 
+// layerlessPollInterval is the sleep between page-buffer polls in RunRandomWalkLayerless.
+// Exposed as a var so tests can set it to a short value without sleeping.
+var layerlessPollInterval = 5 * time.Second
+
 // RunRandomWalkLayerless runs a random-walk Telegram crawl without layer bookkeeping.
 //
 // Instead of accumulating discovered channels into depth layers, this function
@@ -776,7 +782,7 @@ func DetermineCrawlID(tempSM state.StateManagementInterface, crawlCfg common.Cra
 //   - No convoy effect: workers operate independently, not in lock-step batches
 //   - Tandem mode works naturally: the validator writes to page_buffer and this
 //     loop picks up the results without any special batching logic
-func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
+func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) error {
 	ctx := context.Background()
 	crawlStart := time.Now()
 	var shouldStop atomic.Bool
@@ -790,9 +796,10 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 	sem := make(chan struct{}, maxWorkers)
 
 	var (
-		wg            sync.WaitGroup
-		inFlight      sync.Map
-		inFlightCount atomic.Int32
+		wg                 sync.WaitGroup
+		inFlight           sync.Map
+		inFlightCount      atomic.Int32
+		validatorWaitSince time.Time // non-zero when crawler is fully blocked waiting for validator
 	)
 
 	for !shouldStop.Load() {
@@ -807,7 +814,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 		pages, err := sm.GetPagesFromPageBuffer(maxWorkers)
 		if err != nil {
 			log.Error().Err(err).Msg("random-walk-layerless: failed to get pages from page buffer")
-			time.Sleep(5 * time.Second)
+			time.Sleep(layerlessPollInterval)
 			continue
 		}
 
@@ -819,21 +826,38 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 					pending, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
 					if countErr != nil {
 						log.Warn().Err(countErr).Msg("random-walk-layerless: tandem: could not check incomplete batches")
+						validatorWaitSince = time.Time{} // reset on error — don't time out on DB errors
 					} else if pending == 0 {
 						log.Info().Str("crawl_id", crawlCfg.CrawlID).
 							Msg("random-walk-layerless: tandem: buffer empty and no pending batches, crawl complete")
 						break
 					} else {
+						// Crawler is fully blocked: no pages, no in-flight workers, validator has outstanding batches.
+						if validatorWaitSince.IsZero() {
+							validatorWaitSince = time.Now()
+						}
+						if crawlCfg.ValidatorTimeout > 0 {
+							if waited := time.Since(validatorWaitSince); waited >= crawlCfg.ValidatorTimeout {
+								return fmt.Errorf("random-walk-layerless: validator circuit breaker: no progress from validator after %s (%d incomplete batches) — validator pod may have crashed",
+									waited.Round(time.Second), pending)
+							}
+						}
 						log.Info().Int("incomplete_batches", pending).
+							Dur("waiting_for", time.Since(validatorWaitSince).Round(time.Second)).
 							Msg("random-walk-layerless: tandem: buffer empty, waiting for validator")
 					}
+				} else {
+					// Workers still in-flight — not fully blocked yet, reset the timer.
+					validatorWaitSince = time.Time{}
 				}
 			} else {
 				log.Debug().Msg("random-walk-layerless: buffer empty, waiting")
 			}
-			time.Sleep(5 * time.Second)
+			time.Sleep(layerlessPollInterval)
 			continue
 		}
+
+		validatorWaitSince = time.Time{} // pages found — no longer waiting
 
 		dispatched := 0
 		for _, page := range pages {
@@ -893,6 +917,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 
 	// Drain any workers still running before returning.
 	wg.Wait()
+	return nil
 }
 
 func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, isResumingSameCrawlExecution bool) {

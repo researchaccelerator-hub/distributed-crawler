@@ -95,6 +95,7 @@ type CrawlerConfig struct {
 	ValidatorRequestRate     float64 // HTTP calls per minute for validator (default: 120)
 	ValidatorRequestJitterMs int     // Max jitter in ms for validator requests (default: 200)
 	ValidatorClaimBatchSize  int     // Edges to claim per DB round-trip (default: 10)
+	ValidatorTimeout         time.Duration // Abort crawl if blocked waiting for validator for this long (0 = disabled)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.
