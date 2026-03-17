@@ -51,7 +51,7 @@ type validatorBlockedState struct {
 //
 // Both goroutines exit when the context is cancelled.
 func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, cfg common.CrawlerConfig) error {
-	httpClient := &http.Client{Timeout: 10 * time.Second}
+	httpClient := telegramhelper.NewValidatorHTTPClient(10 * time.Second)
 
 	requestRate := cfg.ValidatorRequestRate
 	if requestRate <= 0 {
