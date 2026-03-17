@@ -104,7 +104,7 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 func (m *MockStateManager) UploadCombinedFile(filename string) error { return nil }
 
 // random-walk database operations
-func (m *MockStateManager) GetPagesFromPageBuffer() ([]state.Page, error) {
+func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return []state.Page{}, nil
 }
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }

@@ -211,7 +211,7 @@ func (m *MockDaprStateManager) GetRandomDiscoveredChannel() (string, error)     
 func (m *MockDaprStateManager) IsDiscoveredChannel(channelID string) bool       { return true }
 func (m *MockDaprStateManager) AddDiscoveredChannel(channelID string) error     { return nil }
 func (m *MockDaprStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
-func (m *MockDaprStateManager) GetPagesFromPageBuffer() ([]state.Page, error) {
+func (m *MockDaprStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return []state.Page{}, nil
 }
 func (m *MockDaprStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
@@ -359,7 +359,7 @@ func (m *MockStateManager) IsDiscoveredChannel(_ string) bool                   
 func (m *MockStateManager) AddDiscoveredChannel(_ string) error                  { return nil }
 func (m *MockStateManager) StoreChannelData(_ string, _ *model.ChannelData) error { return nil }
 func (m *MockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error          { return nil }
-func (m *MockStateManager) GetPagesFromPageBuffer() ([]state.Page, error)       { return nil, nil }
+func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)       { return nil, nil }
 func (m *MockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error     { return nil }
 func (m *MockStateManager) AddPageToPageBuffer(_ *state.Page) error             { return nil }
 func (m *MockStateManager) DeletePageBufferPages(_ []string) error               { return nil }

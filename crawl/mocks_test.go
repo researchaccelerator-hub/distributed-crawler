@@ -403,7 +403,7 @@ func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
 	return args.Error(0)
 }
 
-func (m *MockStateManager) GetPagesFromPageBuffer() ([]state.Page, error) {
+func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	args := m.Called()
 	return args.Get(0).([]state.Page), args.Error(1)
 }

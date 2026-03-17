@@ -149,7 +149,7 @@ func (lsm *LocalStateManager) InitializeRandomWalkLayer() error {
 	return fmt.Errorf("InitializeRandomWalkLayer not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) GetPagesFromPageBuffer() ([]Page, error) {
+func (lsm *LocalStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 	return []Page{}, fmt.Errorf("GetPagesFromPageBuffer not implemented for local state manager")
 }
 

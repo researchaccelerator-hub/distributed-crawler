@@ -97,7 +97,7 @@ type StateManagementInterface interface {
 	StoreChannelData(channelID string, channelData *model.ChannelData) error
 	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
-	GetPagesFromPageBuffer() ([]Page, error)
+	GetPagesFromPageBuffer(limit int) ([]Page, error)
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
 	AddPageToPageBuffer(page *Page) error
 	// DeletePageBufferPages removes specific pages by ID from the page buffer.

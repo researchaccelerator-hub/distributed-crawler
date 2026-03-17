@@ -3582,11 +3582,11 @@ func (dsm *DaprStateManager) DeletePageBufferPages(pageIDs []string) error {
 	return nil
 }
 
-func (dsm *DaprStateManager) GetPagesFromPageBuffer() ([]Page, error) {
+func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 	log.Info().Str("log_tag", "rw_page_buffer").Msg("Getting pages from page buffer")
 	pages := make([]Page, 0)
 
-	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = '%s';", dsm.config.CrawlID)
+	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = '%s' LIMIT %d;", dsm.config.CrawlID, limit)
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",

@@ -60,7 +60,7 @@ func (m *mockStateManager) IsDiscoveredChannel(_ string) bool                   
 func (m *mockStateManager) AddDiscoveredChannel(_ string) error                                { return nil }
 func (m *mockStateManager) StoreChannelData(_ string, _ *model.ChannelData) error             { return nil }
 func (m *mockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error                        { return nil }
-func (m *mockStateManager) GetPagesFromPageBuffer() ([]state.Page, error)                    { return nil, nil }
+func (m *mockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)                    { return nil, nil }
 func (m *mockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error                   { return nil }
 func (m *mockStateManager) AddPageToPageBuffer(_ *state.Page) error                           { return nil }
 func (m *mockStateManager) DeletePageBufferPages(_ []string) error                             { return nil }

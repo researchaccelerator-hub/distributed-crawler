@@ -334,7 +334,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		}
 
 		// Seed the page_buffer only on a fresh start (empty buffer = not resuming).
-		existingPages, _ := sm.GetPagesFromPageBuffer()
+		existingPages, _ := sm.GetPagesFromPageBuffer(1)
 		if len(existingPages) == 0 {
 			if len(stringList) > 0 {
 				log.Info().Int("count", len(stringList)).Msg("random-walk-init: seeding page buffer from URL list")
@@ -758,14 +758,17 @@ func DetermineCrawlID(tempSM state.StateManagementInterface, crawlCfg common.Cra
 // Instead of accumulating discovered channels into depth layers, this function
 // continuously pops pages from the page_buffer table, dispatches them to
 // RunForChannelWithPool (which writes the next hop back into page_buffer), and
-// deletes the processed page IDs from the buffer.
+// deletes each page immediately after it is processed.
+//
+// Concurrency model: a semaphore of size maxWorkers limits concurrent goroutines.
+// The producer loop acquires a slot before spawning each worker and releases it
+// on completion, so a free worker picks up the next available page without
+// waiting for the slowest worker in a batch (no convoy effect).
 //
 // Benefits over ProcessLayersIteratively for random-walk:
 //   - No depth counter or layer-map state to maintain
-//   - Crash-restart is safe: the buffer persists; at most one in-flight hop per
-//     goroutine is lost if the process dies
-//   - No read/wipe race: pages are deleted individually after they are claimed,
-//     not after an entire layer batch is read
+//   - Crash-restart is safe: unprocessed pages remain in the buffer
+//   - No convoy effect: workers operate independently, not in lock-step batches
 //   - Tandem mode works naturally: the validator writes to page_buffer and this
 //     loop picks up the results without any special batching logic
 func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) {
@@ -778,6 +781,15 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 		maxWorkers = 1
 	}
 
+	// sem limits the number of concurrently running workers.
+	sem := make(chan struct{}, maxWorkers)
+
+	var (
+		wg            sync.WaitGroup
+		inFlight      sync.Map
+		inFlightCount atomic.Int32
+	)
+
 	for !shouldStop.Load() {
 		if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
 			log.Info().
@@ -787,7 +799,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			break
 		}
 
-		pages, err := sm.GetPagesFromPageBuffer()
+		pages, err := sm.GetPagesFromPageBuffer(maxWorkers)
 		if err != nil {
 			log.Error().Err(err).Msg("random-walk-layerless: failed to get pages from page buffer")
 			time.Sleep(5 * time.Second)
@@ -796,16 +808,20 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 
 		if len(pages) == 0 {
 			if crawlCfg.TandemCrawl {
-				pending, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
-				if countErr != nil {
-					log.Warn().Err(countErr).Msg("random-walk-layerless: tandem: could not check incomplete batches")
-				} else if pending == 0 {
-					log.Info().Str("crawl_id", crawlCfg.CrawlID).
-						Msg("random-walk-layerless: tandem: buffer empty and no pending batches, crawl complete")
-					break
-				} else {
-					log.Info().Int("incomplete_batches", pending).
-						Msg("random-walk-layerless: tandem: buffer empty, waiting for validator")
+				// Only declare completion when no workers are in-flight either —
+				// a running worker may be about to write the next page.
+				if inFlightCount.Load() == 0 {
+					pending, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
+					if countErr != nil {
+						log.Warn().Err(countErr).Msg("random-walk-layerless: tandem: could not check incomplete batches")
+					} else if pending == 0 {
+						log.Info().Str("crawl_id", crawlCfg.CrawlID).
+							Msg("random-walk-layerless: tandem: buffer empty and no pending batches, crawl complete")
+						break
+					} else {
+						log.Info().Int("incomplete_batches", pending).
+							Msg("random-walk-layerless: tandem: buffer empty, waiting for validator")
+					}
 				}
 			} else {
 				log.Debug().Msg("random-walk-layerless: buffer empty, waiting")
@@ -814,24 +830,30 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			continue
 		}
 
-		// Take up to maxWorkers pages from the batch.  Pages are NOT deleted from
-		// the buffer until after all goroutines in the batch complete.  This means
-		// if the process crashes mid-batch the pages will be re-processed on restart,
-		// which is safe for random-walk (no exact channel sequence required).
-		batch := pages
-		if len(batch) > maxWorkers {
-			batch = pages[:maxWorkers]
-		}
+		dispatched := 0
+		for _, page := range pages {
+			// Skip pages already being processed by another goroutine.
+			if _, loaded := inFlight.LoadOrStore(page.ID, true); loaded {
+				continue
+			}
 
-		var (
-			wg          sync.WaitGroup
-			deleteIDsMu sync.Mutex
-			deleteIDs   []string
-		)
-		for _, page := range batch {
+			// Acquire a worker slot.  Blocks until a running worker finishes
+			// and releases its slot, so the producer naturally back-pressures
+			// when all maxWorkers slots are taken.
+			sem <- struct{}{}
+
+			inFlightCount.Add(1)
 			wg.Add(1)
+			dispatched++
+
 			go func(p state.Page) {
 				defer wg.Done()
+				defer func() {
+					inFlight.Delete(p.ID)
+					inFlightCount.Add(-1)
+					<-sem
+				}()
+
 				_, procErr := crawl.RunForChannelWithPool(ctx, &p, crawlCfg.StorageRoot, sm, crawlCfg)
 				if errors.Is(procErr, crawl.ErrWalkbackExhausted) {
 					// Leave page in buffer — will be re-processed on restart.
@@ -840,23 +862,25 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 					if procErr != nil {
 						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")
 					}
-					deleteIDsMu.Lock()
-					deleteIDs = append(deleteIDs, p.ID)
-					deleteIDsMu.Unlock()
+					if delErr := sm.DeletePageBufferPages([]string{p.ID}); delErr != nil {
+						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete page from buffer")
+					}
 				}
+
 				if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
 					shouldStop.Store(true)
 				}
 			}(page)
 		}
-		wg.Wait()
 
-		// Remove all processed pages except those held for restart.
-		pageIDs := deleteIDs
-		if err := sm.DeletePageBufferPages(pageIDs); err != nil {
-			log.Error().Err(err).Msg("random-walk-layerless: failed to delete processed pages from page buffer")
+		if dispatched == 0 {
+			// All fetched pages are already in-flight; wait briefly before re-polling.
+			time.Sleep(500 * time.Millisecond)
 		}
 	}
+
+	// Drain any workers still running before returning.
+	wg.Wait()
 }
 
 func ProcessLayersIteratively(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, isResumingSameCrawlExecution bool) {

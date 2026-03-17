@@ -378,7 +378,7 @@ func TestGetPagesFromPageBuffer_EmptyResult(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	pages, err := dsm.GetPagesFromPageBuffer()
+	pages, err := dsm.GetPagesFromPageBuffer(10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestGetPagesFromPageBuffer_ParsesPages(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	pages, err := dsm.GetPagesFromPageBuffer()
+	pages, err := dsm.GetPagesFromPageBuffer(10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestGetPagesFromPageBuffer_QueryScopedToCrawlID(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	_, _ = dsm.GetPagesFromPageBuffer()
+	_, _ = dsm.GetPagesFromPageBuffer(10)
 
 	if !strings.Contains(capturedSQL, "crawl-rw-123") {
 		t.Fatalf("expected crawl_id in SQL for multi-pod isolation, got: %s", capturedSQL)
@@ -449,7 +449,7 @@ func TestGetPagesFromPageBuffer_BindingError(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	_, err := dsm.GetPagesFromPageBuffer()
+	_, err := dsm.GetPagesFromPageBuffer(10)
 	if err == nil {
 		t.Fatal("expected error from binding failure")
 	}

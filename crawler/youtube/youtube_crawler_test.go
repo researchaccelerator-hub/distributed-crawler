@@ -100,7 +100,7 @@ func (m *MockYouTubeStateManager) UploadCombinedFile(filename string) error { re
 
 // random-walk database
 func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
-func (m *MockYouTubeStateManager) GetPagesFromPageBuffer() ([]state.Page, error) {
+func (m *MockYouTubeStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return []state.Page{}, nil
 }
 func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
