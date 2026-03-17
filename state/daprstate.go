@@ -3901,11 +3901,32 @@ func (dsm *DaprStateManager) UpdatePendingEdge(update PendingEdgeUpdate) error {
 	return nil
 }
 
+// maxBatchAttempts is the maximum number of times a batch may be re-claimed
+// after stale recovery before it is treated as poison and left in place.
+const maxBatchAttempts = 3
+
 // ClaimWalkbackBatch finds the oldest batch where status='closed' and all
-// pending_edges are validated.  Atomically sets status='processing'.
+// pending_edges are validated.  Atomically sets status='processing',
+// records claimed_at=NOW(), and increments attempt_count.
+// Batches that have already reached maxBatchAttempts are skipped.
 func (dsm *DaprStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*PendingEdge, error) {
 	// Step 1: Find and claim a closed batch that has no remaining 'pending' or 'validating' edges.
-	claimSQL := `UPDATE pending_edge_batches SET status = 'processing' WHERE batch_id = ( SELECT b.batch_id FROM pending_edge_batches b WHERE b.status = 'closed' AND NOT EXISTS ( SELECT 1 FROM pending_edges e WHERE e.batch_id = b.batch_id AND e.validation_status IN ('pending', 'validating') ) ORDER BY b.created_at LIMIT 1 FOR UPDATE SKIP LOCKED ) RETURNING batch_id, crawl_id, source_channel, source_page_id, source_depth, sequence_id;`
+	claimSQL := fmt.Sprintf(`UPDATE pending_edge_batches
+		SET status = 'processing', claimed_at = NOW(), attempt_count = attempt_count + 1
+		WHERE batch_id = (
+			SELECT b.batch_id FROM pending_edge_batches b
+			WHERE b.status = 'closed'
+			  AND b.attempt_count < %d
+			  AND NOT EXISTS (
+				SELECT 1 FROM pending_edges e
+				WHERE e.batch_id = b.batch_id
+				  AND e.validation_status IN ('pending', 'validating')
+			  )
+			ORDER BY b.created_at
+			LIMIT 1
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING batch_id, crawl_id, source_channel, source_page_id, source_depth, sequence_id, attempt_count;`, maxBatchAttempts)
 
 	batchRows, err := dsm.queryDatabase(claimSQL)
 	if err != nil {
@@ -3916,7 +3937,7 @@ func (dsm *DaprStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*Pending
 	}
 
 	row := batchRows[0]
-	if len(row) < 6 {
+	if len(row) < 7 {
 		return nil, nil, fmt.Errorf("validator-db: unexpected row length %d for walkback batch", len(row))
 	}
 
@@ -3929,6 +3950,10 @@ func (dsm *DaprStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*Pending
 		srcDepth = int(v)
 	}
 	seqID, _ := row[5].(string)
+	attemptCount := 0
+	if v, ok := row[6].(float64); ok {
+		attemptCount = int(v)
+	}
 
 	batch := &PendingEdgeBatch{
 		BatchID:       batchID,
@@ -3938,6 +3963,7 @@ func (dsm *DaprStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*Pending
 		SourceDepth:   srcDepth,
 		SequenceID:    seqID,
 		Status:        "processing",
+		AttemptCount:  attemptCount,
 	}
 
 	// Step 2: Fetch all edges for this batch.
@@ -4171,20 +4197,41 @@ func (dsm *DaprStateManager) RecoverStaleEdgeClaims(staleThreshold time.Duration
 }
 
 // RecoverStaleBatchClaims resets pending_edge_batches stuck in 'processing' for
-// longer than the given threshold back to 'closed'.  Call once at validator startup.
+// longer than staleThreshold back to 'closed', incrementing attempt_count.
+// Batches that have already reached maxBatchAttempts are logged and skipped —
+// they are left in 'processing' so they don't block the claim query indefinitely.
 func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duration) (int, error) {
 	minutes := int(staleThreshold.Minutes())
 	if minutes < 1 {
 		minutes = 1
 	}
-	// Batches in 'processing' that were claimed more than threshold ago but never completed.
-	// We use closed_at as proxy: batch was closed by crawler, then claimed for processing.
-	// A simpler approach: any 'processing' batch older than threshold is stale.
-	sqlQuery := fmt.Sprintf(
-		`UPDATE pending_edge_batches SET status = 'closed' WHERE status = 'processing' AND closed_at < NOW() - INTERVAL '%d minutes';`, minutes)
 
+	// Log poison batches (attempt_count >= maxBatchAttempts) so operators are aware.
+	poisonSQL := fmt.Sprintf(
+		`SELECT batch_id, source_channel, attempt_count FROM pending_edge_batches WHERE status = 'processing' AND attempt_count >= %d AND claimed_at < NOW() - INTERVAL '%d minutes';`,
+		maxBatchAttempts, minutes)
+	poisonRows, err := dsm.queryDatabase(poisonSQL)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to query poison batches: %w", err)
+	}
+	for _, row := range poisonRows {
+		if len(row) < 3 {
+			continue
+		}
+		batchID, _ := row[0].(string)
+		srcChan, _ := row[1].(string)
+		attempts := 0
+		if v, ok := row[2].(float64); ok {
+			attempts = int(v)
+		}
+		log.Error().Str("batch_id", batchID).Str("source_channel", srcChan).Int("attempt_count", attempts).
+			Msg("validator-db: poison batch detected — stuck in processing after max attempts, manual intervention required")
+	}
+
+	// Recover stale batches that haven't yet reached the attempt limit.
 	countSQL := fmt.Sprintf(
-		`SELECT COUNT(*) FROM pending_edge_batches WHERE status = 'processing' AND closed_at < NOW() - INTERVAL '%d minutes';`, minutes)
+		`SELECT COUNT(*) FROM pending_edge_batches WHERE status = 'processing' AND attempt_count < %d AND claimed_at < NOW() - INTERVAL '%d minutes';`,
+		maxBatchAttempts, minutes)
 	rows, err := dsm.queryDatabase(countSQL)
 	if err != nil {
 		return 0, fmt.Errorf("validator-db: failed to count stale batch claims: %w", err)
@@ -4197,7 +4244,10 @@ func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duratio
 	}
 
 	if staleCount > 0 {
-		if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
+		recoverSQL := fmt.Sprintf(
+			`UPDATE pending_edge_batches SET status = 'closed' WHERE status = 'processing' AND attempt_count < %d AND claimed_at < NOW() - INTERVAL '%d minutes';`,
+			maxBatchAttempts, minutes)
+		if err := dsm.ExecuteDatabaseOperation(recoverSQL, nil); err != nil {
 			return 0, fmt.Errorf("validator-db: failed to recover stale batch claims: %w", err)
 		}
 		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).

@@ -89,7 +89,8 @@ type PendingEdgeBatch struct {
 	SourcePageID  string `json:"sourcePageId"`
 	SourceDepth   int    `json:"sourceDepth"`
 	SequenceID    string `json:"sequenceId"`
-	Status        string `json:"status"` // "open" | "closed" | "processing" | "completed"
+	Status        string `json:"status"`       // "open" | "closed" | "processing" | "completed"
+	AttemptCount  int    `json:"attemptCount"` // incremented on each claim; poison detection
 }
 
 // PendingEdge represents a single extracted username awaiting HTTP validation.

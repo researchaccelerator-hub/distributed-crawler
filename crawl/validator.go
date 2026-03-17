@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	edgePollInterval     = 2 * time.Second
-	walkbackPollInterval = 3 * time.Second
+	edgePollInterval            = 2 * time.Second
+	walkbackPollInterval        = 3 * time.Second
+	staleBatchRecoveryInterval  = 5 * time.Minute
+	staleBatchRecoveryThreshold = 10 * time.Minute
 )
 
 // RunValidationLoop runs two goroutines:
@@ -228,10 +230,19 @@ func runWalkbackProcessor(
 	sm state.StateManagementInterface,
 	cfg common.CrawlerConfig,
 ) error {
+	staleTicker := time.NewTicker(staleBatchRecoveryInterval)
+	defer staleTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-staleTicker.C:
+			if n, recErr := sm.RecoverStaleBatchClaims(staleBatchRecoveryThreshold); recErr != nil {
+				log.Warn().Err(recErr).Msg("validator-walkback: failed to recover stale batch claims")
+			} else if n > 0 {
+				log.Info().Int("recovered", n).Msg("validator-walkback: recovered stale batch claims")
+			}
 		default:
 		}
 

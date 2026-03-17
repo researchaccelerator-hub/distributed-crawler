@@ -28,9 +28,11 @@ CREATE TABLE pending_edge_batches (
     -- 'closed'     = crawler finished channel; all edges written
     -- 'processing' = validator claimed for walkback decision
     -- 'completed'  = walkback done, edge_records + page_buffer written
+    attempt_count  INTEGER      NOT NULL DEFAULT 0,   -- incremented each time batch is claimed; poison detection
     created_at     TIMESTAMP    NOT NULL DEFAULT NOW(),
-    closed_at      TIMESTAMP,                     -- set when crawler finishes channel
-    completed_at   TIMESTAMP                      -- set when validator finishes walkback
+    closed_at      TIMESTAMP,                         -- set when crawler finishes channel
+    claimed_at     TIMESTAMPTZ,                       -- set/reset each time validator claims batch
+    completed_at   TIMESTAMP                          -- set when validator finishes walkback
 );
 
 -- Validator polls for closed batches ready for walkback (FIFO)

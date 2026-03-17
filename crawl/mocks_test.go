@@ -477,6 +477,11 @@ func (m *MockStateManager) CompletePendingBatch(batchID string) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) RecoverStaleBatchClaims(staleThreshold time.Duration) (int, error) {
+	args := m.Called(staleThreshold)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *MockStateManager) FlushBatchStats(batchID, crawlID string, edges []*state.PendingEdge) error {
 	args := m.Called(batchID, crawlID, edges)
 	return args.Error(0)

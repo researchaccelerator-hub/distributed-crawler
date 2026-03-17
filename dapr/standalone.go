@@ -286,7 +286,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			} else if n > 0 {
 				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale edge claims")
 			}
-			if n, recErr := dsm.RecoverStaleBatchClaims(staleThreshold); recErr != nil {
+			if n, recErr := sm.RecoverStaleBatchClaims(staleThreshold); recErr != nil {
 				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale batch claims")
 			} else if n > 0 {
 				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale batch claims")

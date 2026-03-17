@@ -156,6 +156,11 @@ type StateManagementInterface interface {
 	// CompletePendingBatch sets status='completed' and completed_at=NOW().
 	CompletePendingBatch(batchID string) error
 
+	// RecoverStaleBatchClaims resets pending_edge_batches stuck in 'processing'
+	// for longer than staleThreshold back to 'closed', incrementing attempt_count.
+	// Batches that have reached maxBatchAttempts are logged and left in place.
+	RecoverStaleBatchClaims(staleThreshold time.Duration) (int, error)
+
 	// FlushBatchStats upserts source_type_stats for the batch, then DELETEs
 	// all pending_edges rows for that batch.
 	FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error

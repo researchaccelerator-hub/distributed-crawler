@@ -194,6 +194,10 @@ func (lsm *LocalStateManager) CompletePendingBatch(batchID string) error {
 	return fmt.Errorf("CompletePendingBatch not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, error) {
+	return 0, nil
+}
+
 func (lsm *LocalStateManager) FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error {
 	return fmt.Errorf("FlushBatchStats not implemented for local state manager")
 }

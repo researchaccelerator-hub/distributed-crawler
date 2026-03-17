@@ -213,7 +213,7 @@ func TestClaimWalkbackBatch_FullFlow(t *testing.T) {
 			callCount++
 			if callCount == 1 {
 				rows := [][]any{
-					{"batch-1", "crawl-1", "src_chan", "page-1", float64(0), "seq-1"},
+					{"batch-1", "crawl-1", "src_chan", "page-1", float64(0), "seq-1", float64(1)},
 				}
 				return &daprc.BindingEvent{Data: jsonRows(rows)}, nil
 			}
@@ -235,6 +235,7 @@ func TestClaimWalkbackBatch_FullFlow(t *testing.T) {
 	assert.Equal(t, "src_chan", batch.SourceChannel)
 	assert.Equal(t, 0, batch.SourceDepth)
 	assert.Equal(t, "processing", batch.Status)
+	assert.Equal(t, 1, batch.AttemptCount)
 
 	assert.Equal(t, "valid", edges[0].ValidationStatus)
 	assert.Equal(t, "invalid", edges[1].ValidationStatus)
@@ -267,7 +268,7 @@ func TestClaimWalkbackBatch_DBErrorOnEdgeFetch(t *testing.T) {
 			callCount++
 			if callCount == 1 {
 				return &daprc.BindingEvent{Data: jsonRows([][]any{
-					{"batch-1", "crawl-1", "src", "page-1", float64(0), "seq-1"},
+					{"batch-1", "crawl-1", "src", "page-1", float64(0), "seq-1", float64(1)},
 				})}, nil
 			}
 			return nil, fmt.Errorf("disk full")
