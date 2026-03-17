@@ -47,7 +47,7 @@ func TestValidateSingleEdge_Valid(t *testing.T) {
 	ctx := context.Background()
 	vfn := mockValidateFn(telegramhelper.ChannelValidationResult{Status: "valid"}, nil)
 
-	update := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
+	update, _ := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
 
 	assert.Equal(t, 1, update.PendingID)
 	assert.Equal(t, "valid", update.ValidationStatus)
@@ -55,7 +55,7 @@ func TestValidateSingleEdge_Valid(t *testing.T) {
 	sm.AssertCalled(t, "UpsertSeedChannelChatID", "testchan", int64(0))
 }
 
-func TestValidateSingleEdge_HTTPError(t *testing.T) {
+func TestValidateSingleEdge_TransientError(t *testing.T) {
 	sm := new(MockStateManager)
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
@@ -73,15 +73,47 @@ func TestValidateSingleEdge_HTTPError(t *testing.T) {
 
 	rl := telegramhelper.NewValidatorRateLimiter(0, 0)
 	ctx := context.Background()
-	vfn := mockValidateFn(telegramhelper.ChannelValidationResult{}, fmt.Errorf("connection refused"))
+	vfn := mockValidateFn(telegramhelper.ChannelValidationResult{}, &telegramhelper.ValidationHTTPError{
+		Kind:    telegramhelper.ErrTransient,
+		Wrapped: fmt.Errorf("connection refused"),
+	})
 
-	update := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
+	update, kind := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
 
 	assert.Equal(t, 1, update.PendingID)
-	assert.Equal(t, "invalid", update.ValidationStatus)
-	assert.Equal(t, "http_error", update.ValidationReason)
-	// HTTP error path returns immediately without calling MarkChannelInvalid —
-	// that only happens for successful HTTP responses that parse as invalid.
+	assert.Equal(t, "pending", update.ValidationStatus)
+	assert.Equal(t, outcomeTransient, kind)
+	sm.AssertNotCalled(t, "MarkChannelInvalid", mock.Anything, mock.Anything)
+}
+
+func TestValidateSingleEdge_BlockedError(t *testing.T) {
+	sm := new(MockStateManager)
+	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
+
+	sm.On("IsInvalidChannel", "testchan").Return(false)
+	sm.On("IsChannelDiscovered", "testchan", "crawl-1").Return(false, nil)
+
+	edge := &state.PendingEdge{
+		PendingID:          1,
+		BatchID:            "batch-1",
+		CrawlID:            "crawl-1",
+		DestinationChannel: "testchan",
+		SourceType:         "mention",
+		ValidationStatus:   "validating",
+	}
+
+	rl := telegramhelper.NewValidatorRateLimiter(0, 0)
+	ctx := context.Background()
+	vfn := mockValidateFn(telegramhelper.ChannelValidationResult{}, &telegramhelper.ValidationHTTPError{
+		Kind:    telegramhelper.ErrBlocked,
+		Wrapped: fmt.Errorf("unexpected status 403"),
+	})
+
+	update, kind := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
+
+	assert.Equal(t, 1, update.PendingID)
+	assert.Equal(t, "pending", update.ValidationStatus)
+	assert.Equal(t, outcomeBlocked, kind)
 	sm.AssertNotCalled(t, "MarkChannelInvalid", mock.Anything, mock.Anything)
 }
 
@@ -103,7 +135,7 @@ func TestValidateSingleEdge_NotChannel(t *testing.T) {
 	ctx := context.Background()
 	vfn := mockValidateFn(telegramhelper.ChannelValidationResult{Status: "not_channel", Reason: "not_supergroup"}, nil)
 
-	update := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
+	update, _ := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
 
 	assert.Equal(t, "not_channel", update.ValidationStatus)
 	assert.Equal(t, "not_supergroup", update.ValidationReason)
@@ -125,7 +157,7 @@ func TestValidateSingleEdge_AlreadyInvalid(t *testing.T) {
 	rl := telegramhelper.NewValidatorRateLimiter(0, 0)
 	ctx := context.Background()
 	// validateFn should never be called — pass nil to catch accidental calls
-	update := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, nil)
+	update, _ := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, nil)
 
 	assert.Equal(t, "invalid", update.ValidationStatus)
 	assert.Equal(t, "cached_invalid", update.ValidationReason)
@@ -147,7 +179,7 @@ func TestValidateSingleEdge_AlreadyDiscovered(t *testing.T) {
 
 	rl := telegramhelper.NewValidatorRateLimiter(0, 0)
 	ctx := context.Background()
-	update := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, nil)
+	update, _ := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, nil)
 
 	assert.Equal(t, "already_discovered", update.ValidationStatus)
 }
@@ -170,7 +202,7 @@ func TestValidateSingleEdge_ValidButRaceLost(t *testing.T) {
 	ctx := context.Background()
 	vfn := mockValidateFn(telegramhelper.ChannelValidationResult{Status: "valid"}, nil)
 
-	update := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
+	update, _ := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
 
 	assert.Equal(t, "already_discovered", update.ValidationStatus)
 }

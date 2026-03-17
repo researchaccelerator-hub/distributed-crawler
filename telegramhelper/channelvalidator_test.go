@@ -1,7 +1,9 @@
 package telegramhelper
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -215,7 +217,7 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 // TC-6: ValidateChannelHTTP — redirect and 429 handling
 // ---------------------------------------------------------------------------
 
-func TestValidateChannelHTTP_429ReturnsError(t *testing.T) {
+func TestValidateChannelHTTP_429ReturnsBlocked(t *testing.T) {
 	client := &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			return &http.Response{
@@ -230,8 +232,106 @@ func TestValidateChannelHTTP_429ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for 429 response, got nil")
 	}
-	if !strings.Contains(err.Error(), "429") {
-		t.Errorf("expected error to mention status 429, got: %v", err)
+	var validErr *ValidationHTTPError
+	if !errors.As(err, &validErr) {
+		t.Fatalf("expected *ValidationHTTPError, got %T: %v", err, err)
+	}
+	if validErr.Kind != ErrBlocked {
+		t.Errorf("expected ErrBlocked for 429, got kind %d", validErr.Kind)
+	}
+}
+
+func TestValidateChannelHTTP_403ReturnsBlocked(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusForbidden,
+				Body:       http.NoBody,
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	_, err := ValidateChannelHTTP("testchan", client)
+	if err == nil {
+		t.Fatal("expected error for 403 response, got nil")
+	}
+	var validErr *ValidationHTTPError
+	if !errors.As(err, &validErr) {
+		t.Fatalf("expected *ValidationHTTPError, got %T: %v", err, err)
+	}
+	if validErr.Kind != ErrBlocked {
+		t.Errorf("expected ErrBlocked for 403, got kind %d", validErr.Kind)
+	}
+}
+
+func TestValidateChannelHTTP_5xxReturnsTransient(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       http.NoBody,
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	_, err := ValidateChannelHTTP("testchan", client)
+	if err == nil {
+		t.Fatal("expected error for 503 response, got nil")
+	}
+	var validErr *ValidationHTTPError
+	if !errors.As(err, &validErr) {
+		t.Fatalf("expected *ValidationHTTPError, got %T: %v", err, err)
+	}
+	if validErr.Kind != ErrTransient {
+		t.Errorf("expected ErrTransient for 503, got kind %d", validErr.Kind)
+	}
+}
+
+func TestValidateChannelHTTP_NetworkErrorReturnsTransient(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("connection refused")
+		}),
+	}
+
+	_, err := ValidateChannelHTTP("testchan", client)
+	if err == nil {
+		t.Fatal("expected error for network failure, got nil")
+	}
+	var validErr *ValidationHTTPError
+	if !errors.As(err, &validErr) {
+		t.Fatalf("expected *ValidationHTTPError, got %T: %v", err, err)
+	}
+	if validErr.Kind != ErrTransient {
+		t.Errorf("expected ErrTransient for network error, got kind %d", validErr.Kind)
+	}
+}
+
+func TestValidateChannelHTTP_SoftBlockReturnsBlocked(t *testing.T) {
+	// 200 OK with unrecognised title — soft-block response from Telegram.
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			body := strings.NewReader(`<html><head><title>Something Unexpected</title></head></html>`)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(body),
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	_, err := ValidateChannelHTTP("testchan", client)
+	if err == nil {
+		t.Fatal("expected error for soft-block response, got nil")
+	}
+	var validErr *ValidationHTTPError
+	if !errors.As(err, &validErr) {
+		t.Fatalf("expected *ValidationHTTPError, got %T: %v", err, err)
+	}
+	if validErr.Kind != ErrBlocked {
+		t.Errorf("expected ErrBlocked for unrecognised title, got kind %d", validErr.Kind)
 	}
 }
 

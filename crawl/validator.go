@@ -2,6 +2,7 @@ package crawl
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"net/http"
 	"time"
@@ -12,6 +13,16 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
+)
+
+// edgeOutcomeKind classifies the result of validateSingleEdge so the caller
+// can track consecutive blocked responses without inspecting the update status.
+type edgeOutcomeKind int
+
+const (
+	outcomeDefinitive edgeOutcomeKind = iota // valid/invalid/not_channel — act on it
+	outcomeTransient                         // network error — retry later
+	outcomeBlocked                           // IP block or soft-block — pause validation
 )
 
 const (
@@ -98,7 +109,10 @@ func runEdgeValidation(
 			default:
 			}
 
-			update := validateSingleEdge(ctx, sm, cfg, httpClient, rateLimiter, edge, telegramhelper.ValidateChannelHTTP)
+			update, kind := validateSingleEdge(ctx, sm, cfg, httpClient, rateLimiter, edge, telegramhelper.ValidateChannelHTTP)
+			if kind == outcomeBlocked {
+				log.Warn().Str("channel", edge.DestinationChannel).Msg("validator-edge: access blocked, edge left pending")
+			}
 			if updateErr := sm.UpdatePendingEdge(update); updateErr != nil {
 				log.Warn().Err(updateErr).Int("pending_id", edge.PendingID).
 					Msg("validator-edge: failed to update edge status")
@@ -111,7 +125,10 @@ func runEdgeValidation(
 // telegramhelper.ValidateChannelHTTP; tests can inject a mock.
 type ValidateFunc func(username string, httpClient *http.Client) (telegramhelper.ChannelValidationResult, error)
 
-// validateSingleEdge validates one edge and returns the update to apply.
+// validateSingleEdge validates one edge and returns the update to apply along
+// with the outcome kind. On ErrTransient or ErrBlocked the update status is
+// "pending" so the edge is left for re-claim; no edge is permanently
+// invalidated due to an access problem.
 func validateSingleEdge(
 	ctx context.Context,
 	sm state.StateManagementInterface,
@@ -120,7 +137,7 @@ func validateSingleEdge(
 	rateLimiter *telegramhelper.ValidatorRateLimiter,
 	edge *state.PendingEdge,
 	validateFn ValidateFunc,
-) state.PendingEdgeUpdate {
+) (state.PendingEdgeUpdate, edgeOutcomeKind) {
 	channel := edge.DestinationChannel
 
 	// Check invalid channel cache (in-memory, fast)
@@ -130,7 +147,7 @@ func validateSingleEdge(
 			PendingID:        edge.PendingID,
 			ValidationStatus: "invalid",
 			ValidationReason: "cached_invalid",
-		}
+		}, outcomeDefinitive
 	}
 
 	// Check if already discovered for this crawl (DB check, no INSERT)
@@ -143,7 +160,7 @@ func validateSingleEdge(
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
 			ValidationStatus: "already_discovered",
-		}
+		}, outcomeDefinitive
 	}
 
 	// Rate limit wait
@@ -152,18 +169,25 @@ func validateSingleEdge(
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
 			ValidationStatus: "pending",
-		}
+		}, outcomeTransient
 	}
 
 	// HTTP validate
 	result, httpErr := validateFn(channel, httpClient)
 	if httpErr != nil {
-		log.Warn().Err(httpErr).Str("channel", channel).Msg("validator-edge: HTTP validation failed")
+		var validErr *telegramhelper.ValidationHTTPError
+		if errors.As(httpErr, &validErr) && validErr.Kind == telegramhelper.ErrBlocked {
+			log.Warn().Err(httpErr).Str("channel", channel).Msg("validator-edge: access blocked, edge left pending")
+			return state.PendingEdgeUpdate{
+				PendingID:        edge.PendingID,
+				ValidationStatus: "pending",
+			}, outcomeBlocked
+		}
+		log.Warn().Err(httpErr).Str("channel", channel).Msg("validator-edge: transient HTTP error, edge left pending")
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
-			ValidationStatus: "invalid",
-			ValidationReason: "http_error",
-		}
+			ValidationStatus: "pending",
+		}, outcomeTransient
 	}
 
 	log.Info().Str("channel", channel).Str("status", result.Status).Str("reason", result.Reason).
@@ -182,7 +206,7 @@ func validateSingleEdge(
 			return state.PendingEdgeUpdate{
 				PendingID:        edge.PendingID,
 				ValidationStatus: "already_discovered",
-			}
+			}, outcomeDefinitive
 		}
 		// Cache the channel so future lookups can skip SearchPublicChat
 		if upsertErr := sm.UpsertSeedChannelChatID(channel, 0); upsertErr != nil {
@@ -191,7 +215,7 @@ func validateSingleEdge(
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
 			ValidationStatus: "valid",
-		}
+		}, outcomeDefinitive
 
 	case "not_channel":
 		if invalidErr := sm.MarkChannelInvalid(channel, result.Reason); invalidErr != nil {
@@ -201,7 +225,7 @@ func validateSingleEdge(
 			PendingID:        edge.PendingID,
 			ValidationStatus: "not_channel",
 			ValidationReason: result.Reason,
-		}
+		}, outcomeDefinitive
 
 	case "invalid":
 		if invalidErr := sm.MarkChannelInvalid(channel, result.Reason); invalidErr != nil {
@@ -211,7 +235,7 @@ func validateSingleEdge(
 			PendingID:        edge.PendingID,
 			ValidationStatus: "invalid",
 			ValidationReason: result.Reason,
-		}
+		}, outcomeDefinitive
 	}
 
 	// Should not reach here
@@ -219,7 +243,7 @@ func validateSingleEdge(
 		PendingID:        edge.PendingID,
 		ValidationStatus: "invalid",
 		ValidationReason: "unknown_status",
-	}
+	}, outcomeDefinitive
 }
 
 // runWalkbackProcessor continuously checks for closed batches where all edges

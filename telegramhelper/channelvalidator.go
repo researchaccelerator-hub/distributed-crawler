@@ -7,6 +7,30 @@ import (
 	"strings"
 )
 
+// ValidationErrorKind classifies why ValidateChannelHTTP failed, allowing the
+// caller to distinguish transient network problems from access blocks.
+type ValidationErrorKind int
+
+const (
+	// ErrTransient indicates a temporary failure (connection error, timeout,
+	// 5xx). The caller should retry the edge later.
+	ErrTransient ValidationErrorKind = iota
+	// ErrBlocked indicates an IP-level block or soft-block from Telegram
+	// (403, 429, other 4xx, connection reset, or 200 with unrecognised/empty
+	// content). The caller should pause HTTP validation.
+	ErrBlocked
+)
+
+// ValidationHTTPError is returned by ValidateChannelHTTP when the request
+// could not produce a definitive channel validation result.
+type ValidationHTTPError struct {
+	Kind    ValidationErrorKind
+	Wrapped error
+}
+
+func (e *ValidationHTTPError) Error() string { return e.Wrapped.Error() }
+func (e *ValidationHTTPError) Unwrap() error { return e.Wrapped }
+
 // ChannelValidationResult holds the outcome of an HTTP-based channel validation.
 type ChannelValidationResult struct {
 	Status string // "valid" | "not_channel" | "invalid"
@@ -33,12 +57,22 @@ func ValidateChannelHTTP(username string, httpClient *http.Client) (ChannelValid
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return ChannelValidationResult{}, fmt.Errorf("channelvalidator: HTTP request failed for %s: %w", username, err)
+		return ChannelValidationResult{}, &ValidationHTTPError{
+			Kind:    ErrTransient,
+			Wrapped: fmt.Errorf("channelvalidator: HTTP request failed for %s: %w", username, err),
+		}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return ChannelValidationResult{}, fmt.Errorf("channelvalidator: unexpected status %d for %s", resp.StatusCode, username)
+		kind := ErrBlocked
+		if resp.StatusCode >= 500 {
+			kind = ErrTransient
+		}
+		return ChannelValidationResult{}, &ValidationHTTPError{
+			Kind:    kind,
+			Wrapped: fmt.Errorf("channelvalidator: unexpected status %d for %s", resp.StatusCode, username),
+		}
 	}
 
 	// Read up to 64KB — the signals we need are in the <head> section.
@@ -46,10 +80,22 @@ func ValidateChannelHTTP(username string, httpClient *http.Client) (ChannelValid
 	limited := io.LimitReader(resp.Body, maxReadBytes)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		return ChannelValidationResult{}, fmt.Errorf("channelvalidator: failed to read response body for %s: %w", username, err)
+		return ChannelValidationResult{}, &ValidationHTTPError{
+			Kind:    ErrTransient,
+			Wrapped: fmt.Errorf("channelvalidator: failed to read response body for %s: %w", username, err),
+		}
 	}
 
-	return ParseChannelHTML(string(body))
+	result, parseErr := ParseChannelHTML(string(body))
+	if parseErr != nil {
+		// Unrecognised or empty title on a 200 response — treat as soft-block
+		// rather than a definitive invalid result.
+		return ChannelValidationResult{}, &ValidationHTTPError{
+			Kind:    ErrBlocked,
+			Wrapped: fmt.Errorf("channelvalidator: failed to parse response for %s: %w", username, parseErr),
+		}
+	}
+	return result, nil
 }
 
 // ParseChannelHTML extracts the validation result from raw HTML content.
