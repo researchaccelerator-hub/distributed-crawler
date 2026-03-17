@@ -15,9 +15,8 @@ import (
 )
 
 const (
-	edgePollInterval    = 2 * time.Second
+	edgePollInterval     = 2 * time.Second
 	walkbackPollInterval = 3 * time.Second
-	maxWalkbackAttempts  = 10
 )
 
 // RunValidationLoop runs two goroutines:
@@ -298,27 +297,15 @@ func processWalkbackBatch(
 		Msg("random-walk-walkback: Walkback decision data (validator)")
 
 	if walkback {
-		// Walkback: pick random from discovered channels (matches non-tandem behavior)
+		// Walkback: pick random from discovered channels, avoiding source and newly validated channels.
+		exclude := make(map[string]bool, len(validFirstClaimed))
+		for _, ch := range validFirstClaimed {
+			exclude[ch] = true
+		}
 		var walkErr error
-		for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
-			nextURL, walkErr = sm.GetRandomDiscoveredChannel()
-			if walkErr != nil {
-				return walkErr
-			}
-			// Avoid picking the source channel or a newly discovered channel
-			isNewChannel := false
-			for _, ch := range validFirstClaimed {
-				if ch == nextURL {
-					isNewChannel = true
-					break
-				}
-			}
-			if !isNewChannel && nextURL != batch.SourceChannel {
-				break
-			}
-			if attempt == maxWalkbackAttempts-1 {
-				log.Warn().Str("channel", nextURL).Msg("random-walk-walkback: Exhausted walkback attempts, using last candidate")
-			}
+		nextURL, walkErr = pickWalkbackChannel(sm, batch.SourceChannel, exclude)
+		if walkErr != nil {
+			return walkErr
 		}
 		sequenceID = uuid.New().String()
 	} else {

@@ -30,6 +30,32 @@ import (
 // page buffer so the crawl can resume from the same channel on restart.
 var ErrWalkbackExhausted = fmt.Errorf("walkback attempts exhausted")
 
+// pickWalkbackChannel selects a random discovered channel to walk back to,
+// skipping sourceURL and any channel present in the exclude map.
+// Returns ErrWalkbackExhausted if no suitable channel is found within maxWalkbackAttempts.
+const maxWalkbackAttempts = 10
+
+func pickWalkbackChannel(sm state.StateManagementInterface, sourceURL string, exclude map[string]bool) (string, error) {
+	for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
+		url, err := sm.GetRandomDiscoveredChannel()
+		if err != nil {
+			return "", fmt.Errorf("random-walk-walkback: unable to get walkback channel from %s: %w", sourceURL, err)
+		}
+		if url == sourceURL || exclude[url] {
+			log.Info().Str("channel", url).Str("source_channel", sourceURL).
+				Msg("random-walk-walkback: candidate skipped, retrying")
+			if attempt == maxWalkbackAttempts-1 {
+				return "", fmt.Errorf("random-walk-walkback: channel %s: %w", sourceURL, ErrWalkbackExhausted)
+			}
+			continue
+		}
+		log.Info().Str("walkback_url", url).Str("source_channel", sourceURL).
+			Msg("random-walk-walkback: selected walkback channel")
+		return url, nil
+	}
+	return "", fmt.Errorf("random-walk-walkback: channel %s: %w", sourceURL, ErrWalkbackExhausted)
+}
+
 // Global connection pool
 var connectionPool *telegramhelper.ConnectionPool
 var poolMu sync.Mutex
@@ -1081,9 +1107,9 @@ func processAllMessagesWithProcessor(
 			} else {
 				// No edges found — crawler handles forced walkback itself.
 				log.Info().Str("source_channel", owner.URL).Msg("random-walk-tandem: No edges found, performing forced walkback")
-				walkbackURL, walkErr := sm.GetRandomDiscoveredChannel()
+				walkbackURL, walkErr := pickWalkbackChannel(sm, owner.URL, nil)
 				if walkErr != nil {
-					return nil, fmt.Errorf("random-walk-tandem: forced walkback failed: %w", walkErr)
+					return nil, walkErr
 				}
 				page := &state.Page{
 					ID:         uuid.New().String(),
@@ -1137,26 +1163,9 @@ func processAllMessagesWithProcessor(
 				Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("random-walk-walkback: Walkback decision data")
 			if walkback || cfg.WalkbackRate >= rndNum {
 				linkToFollow.Walkback = true
-				// get walkback channel, skipping new channels discovered on this page
-				const maxWalkbackAttempts = 10
-				var walkbackURL string
-				for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
-					var randomErr error
-					walkbackURL, randomErr = sm.GetRandomDiscoveredChannel()
-					log.Info().Str("walkback_url", walkbackURL).Str("source_channel", owner.URL).Msg("random-walk-walkback: Random Walkback channel")
-					if randomErr != nil {
-						return nil, fmt.Errorf("random-walk-walkback: Unable to get url for walkback while processing channel %s. Skipping fetch", owner.URL)
-					}
-					if _, ok := newChannels[walkbackURL]; ok {
-						log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Part of new channels. Pulling another channel")
-					} else if walkbackURL == owner.URL {
-						log.Info().Str("channel", walkbackURL).Msg("random-walk-walkback: Invalid walkback. Same as source channel. Pulling another channel")
-					} else {
-						break
-					}
-					if attempt == maxWalkbackAttempts-1 {
-						return nil, fmt.Errorf("random-walk-walkback: channel %s: %w", owner.URL, ErrWalkbackExhausted)
-					}
+				walkbackURL, walkErr := pickWalkbackChannel(sm, owner.URL, newChannels)
+				if walkErr != nil {
+					return nil, walkErr
 				}
 				page.URL = walkbackURL
 				// Walkback starts a new chain
