@@ -131,7 +131,7 @@ func TestTandemMode_NoEdges(t *testing.T) {
 	sm.On("UpdateMessage", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	sm.On("UpdatePage", mock.Anything).Return(nil)
 	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
-	sm.On("AddPageToLayerBuffer", mock.MatchedBy(func(p *state.Page) bool {
+	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "walkback_target" && p.Depth == 1
 	})).Return(nil)
 	sm.On("SaveEdgeRecords", mock.MatchedBy(func(edges []*state.EdgeRecord) bool {
@@ -195,7 +195,7 @@ func TestTandemMode_InvalidChannelSkipped(t *testing.T) {
 	sm.On("IsInvalidChannel", "invalid_chan").Return(true)
 	// Forced walkback since no edges
 	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
-	sm.On("AddPageToLayerBuffer", mock.Anything).Return(nil)
+	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
 	processor := &MockMessageProcessor{}
@@ -261,7 +261,7 @@ func TestNonTandemMode_Unchanged(t *testing.T) {
 	sm.On("UpsertSeedChannelChatID", "valid_channel", int64(-100123)).Return(nil)
 
 	// Walkback decision with WalkbackRate=0 means forward
-	sm.On("AddPageToLayerBuffer", mock.Anything).Return(nil)
+	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
 	processor := &MockMessageProcessor{}

@@ -403,27 +403,23 @@ func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {
 	return args.Error(0)
 }
 
-func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+func (m *MockStateManager) GetPagesFromPageBuffer() ([]state.Page, error) {
 	args := m.Called()
 	return args.Get(0).([]state.Page), args.Error(1)
 }
 
-func (m *MockStateManager) WipeLayerBuffer() error {
-	args := m.Called()
-	return args.Error(0)
-}
 
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	args := m.Called(sqlQuery, params)
 	return args.Error(0)
 }
 
-func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error {
+func (m *MockStateManager) AddPageToPageBuffer(page *state.Page) error {
 	args := m.Called(page)
 	return args.Error(0)
 }
 
-func (m *MockStateManager) DeleteLayerBufferPages(pageIDs []string) error {
+func (m *MockStateManager) DeletePageBufferPages(pageIDs []string) error {
 	args := m.Called(pageIDs)
 	return args.Error(0)
 }

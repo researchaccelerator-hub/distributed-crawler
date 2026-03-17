@@ -97,13 +97,12 @@ type StateManagementInterface interface {
 	StoreChannelData(channelID string, channelData *model.ChannelData) error
 	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
-	GetPagesFromLayerBuffer() ([]Page, error)
-	WipeLayerBuffer() error
+	GetPagesFromPageBuffer() ([]Page, error)
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
-	AddPageToLayerBuffer(page *Page) error
-	// DeleteLayerBufferPages removes specific pages by ID from the layer buffer.
+	AddPageToPageBuffer(page *Page) error
+	// DeletePageBufferPages removes specific pages by ID from the page buffer.
 	// Used in tandem mode to avoid wiping pages the validator wrote after the read.
-	DeleteLayerBufferPages(pageIDs []string) error
+	DeletePageBufferPages(pageIDs []string) error
 
 	// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
 	// for the given username. Returns zero time if the channel has never been crawled.

@@ -104,13 +104,12 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 func (m *MockStateManager) UploadCombinedFile(filename string) error { return nil }
 
 // random-walk database operations
-func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+func (m *MockStateManager) GetPagesFromPageBuffer() ([]state.Page, error) {
 	return []state.Page{}, nil
 }
-func (m *MockStateManager) WipeLayerBuffer() error                                       { return nil }
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
-func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error                  { return nil }
-func (m *MockStateManager) DeleteLayerBufferPages(_ []string) error                      { return nil }
+func (m *MockStateManager) AddPageToPageBuffer(page *state.Page) error                  { return nil }
+func (m *MockStateManager) DeletePageBufferPages(_ []string) error                      { return nil }
 func (m *MockStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
 func (m *MockStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
 func (m *MockStateManager) ClosePendingBatch(_ string) error                                   { return nil }

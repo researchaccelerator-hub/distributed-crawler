@@ -223,7 +223,7 @@ func validateSingleEdge(
 
 // runWalkbackProcessor continuously checks for closed batches where all edges
 // have been validated, then makes the walkback decision and writes to
-// edge_records + layer_buffer.
+// edge_records + page_buffer.
 func runWalkbackProcessor(
 	ctx context.Context,
 	sm state.StateManagementInterface,
@@ -259,7 +259,7 @@ func runWalkbackProcessor(
 	}
 }
 
-// processWalkbackBatch handles the walkback decision, edge_records, layer_buffer,
+// processWalkbackBatch handles the walkback decision, edge_records, page_buffer,
 // stats flush, and batch completion for a single batch.
 func processWalkbackBatch(
 	ctx context.Context,
@@ -330,7 +330,7 @@ func processWalkbackBatch(
 		sequenceID = batch.SequenceID
 	}
 
-	// Build next page for layer_buffer
+	// Build next page for page_buffer
 	page := &state.Page{
 		ID:         uuid.New().String(),
 		ParentID:   batch.SourcePageID,
@@ -340,8 +340,8 @@ func processWalkbackBatch(
 		Status:     "unfetched",
 	}
 
-	// Write to layer_buffer — unblocks the crawler
-	if err := sm.AddPageToLayerBuffer(page); err != nil {
+	// Write to page_buffer — unblocks the crawler
+	if err := sm.AddPageToPageBuffer(page); err != nil {
 		return err
 	}
 

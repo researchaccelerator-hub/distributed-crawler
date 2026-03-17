@@ -743,13 +743,6 @@ func executeGenericJob(ctx context.Context, jobData JobData) error {
 // launchCrawl initializes and runs the scraping process for a given list of strings using the specified crawler configuration.
 // Returns an error if any critical process fails.
 func launchCrawl(stringList []string, crawlCfg common2.CrawlerConfig) error {
-	seenURLs := make(map[string]bool)
-
-	// Initialize seenURLs with the seed URLs
-	for _, url := range stringList {
-		seenURLs[url] = true
-	}
-
 	crawlexecid := common2.GenerateCrawlID()
 	log.Info().Msgf("Starting scraper for crawl: %s", crawlCfg.CrawlID)
 

@@ -199,7 +199,7 @@ func TestProcessWalkbackBatch_ForcedWalkback(t *testing.T) {
 	}
 
 	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
-	sm.On("AddPageToLayerBuffer", mock.MatchedBy(func(p *state.Page) bool {
+	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "walkback_target" && p.Depth == 1
 	})).Return(nil)
 	sm.On("SaveEdgeRecords", mock.MatchedBy(func(edges []*state.EdgeRecord) bool {
@@ -235,7 +235,7 @@ func TestProcessWalkbackBatch_Forward(t *testing.T) {
 	}
 
 	// Forward mode: should pick one of chan_a/chan_b, skip the other
-	sm.On("AddPageToLayerBuffer", mock.MatchedBy(func(p *state.Page) bool {
+	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return (p.URL == "chan_a" || p.URL == "chan_b") && p.Depth == 1
 	})).Return(nil)
 	sm.On("SaveEdgeRecords", mock.MatchedBy(func(edges []*state.EdgeRecord) bool {
@@ -267,7 +267,7 @@ func TestProcessWalkbackBatch_Forward(t *testing.T) {
 }
 
 func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
-	// Verify: AddPageToLayerBuffer → SaveEdgeRecords → FlushBatchStats → CompletePendingBatch
+	// Verify: AddPageToPageBuffer → SaveEdgeRecords → FlushBatchStats → CompletePendingBatch
 	sm := new(MockStateManager)
 	cfg := common.CrawlerConfig{WalkbackRate: 100} // always walkback
 
@@ -288,8 +288,8 @@ func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
 	sm.On("GetRandomDiscoveredChannel").Return("walkback_url", nil).Run(func(args mock.Arguments) {
 		callOrder = append(callOrder, "GetRandomDiscoveredChannel")
 	})
-	sm.On("AddPageToLayerBuffer", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-		callOrder = append(callOrder, "AddPageToLayerBuffer")
+	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+		callOrder = append(callOrder, "AddPageToPageBuffer")
 	})
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		callOrder = append(callOrder, "SaveEdgeRecords")
@@ -307,7 +307,7 @@ func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, []string{
 		"GetRandomDiscoveredChannel",
-		"AddPageToLayerBuffer",
+		"AddPageToPageBuffer",
 		"SaveEdgeRecords",
 		"FlushBatchStats",
 		"CompletePendingBatch",

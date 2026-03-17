@@ -1063,7 +1063,7 @@ func processAllMessagesWithProcessor(
 	// handle choosing a page for the next layer
 	if cfg.SamplingMethod == "random-walk" {
 		if cfg.TandemCrawl {
-			// Tandem mode: validator handles walkback and layer_buffer writes.
+			// Tandem mode: validator handles walkback and page_buffer writes.
 			if tandemBatch != nil {
 				// Close the batch — signals validator that all edges are written.
 				if closeErr := sm.ClosePendingBatch(tandemBatch.BatchID); closeErr != nil {
@@ -1072,7 +1072,7 @@ func processAllMessagesWithProcessor(
 				}
 				log.Info().Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
 					Msg("random-walk-tandem: Batch closed, validator will handle walkback")
-				// Do NOT write edge_records, layer_buffer, or make walkback decision.
+				// Do NOT write edge_records, page_buffer, or make walkback decision.
 			} else {
 				// No edges found — crawler handles forced walkback itself.
 				log.Info().Str("source_channel", owner.URL).Msg("random-walk-tandem: No edges found, performing forced walkback")
@@ -1096,8 +1096,8 @@ func processAllMessagesWithProcessor(
 					DiscoveryTime:      time.Now(),
 					SequenceID:         page.SequenceID,
 				}
-				if bufErr := sm.AddPageToLayerBuffer(page); bufErr != nil {
-					log.Error().Err(bufErr).Msg("random-walk-tandem: failed to add walkback page to layer buffer")
+				if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
+					log.Error().Err(bufErr).Msg("random-walk-tandem: failed to add walkback page to page buffer")
 					return nil, fmt.Errorf("random-walk-tandem: forced walkback page lost: %w", bufErr)
 				}
 				if saveErr := sm.SaveEdgeRecords([]*state.EdgeRecord{edge}); saveErr != nil {
@@ -1175,9 +1175,9 @@ func processAllMessagesWithProcessor(
 				Msg("random-walk-edge: Adding edge to follow in next layer")
 			discoveredEdges = append(discoveredEdges, linkToFollow)
 
-			err := sm.AddPageToLayerBuffer(page)
+			err := sm.AddPageToPageBuffer(page)
 			if err != nil {
-				log.Error().Err(err).Msg("random-walk-layer: failed to load page to layer buffer")
+				log.Error().Err(err).Msg("random-walk-layer: failed to load page to page buffer")
 			}
 			// discoveredChannels = append(discoveredChannels, page)
 

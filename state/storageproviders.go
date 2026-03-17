@@ -149,24 +149,21 @@ func (lsm *LocalStateManager) InitializeRandomWalkLayer() error {
 	return fmt.Errorf("InitializeRandomWalkLayer not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
-	return []Page{}, fmt.Errorf("GetPagesFromLayerBuffer not implemented for local state manager")
+func (lsm *LocalStateManager) GetPagesFromPageBuffer() ([]Page, error) {
+	return []Page{}, fmt.Errorf("GetPagesFromPageBuffer not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) WipeLayerBuffer() error {
-	return fmt.Errorf("WipeLayerBuffer not implemented for local state manager")
-}
 
 func (lsm *LocalStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return fmt.Errorf("ExecuteDatabaseOperation not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) AddPageToLayerBuffer(page *Page) error {
+func (lsm *LocalStateManager) AddPageToPageBuffer(page *Page) error {
 	return fmt.Errorf(" not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) DeleteLayerBufferPages(_ []string) error {
-	return fmt.Errorf("DeleteLayerBufferPages not implemented for local state manager")
+func (lsm *LocalStateManager) DeletePageBufferPages(_ []string) error {
+	return fmt.Errorf("DeletePageBufferPages not implemented for local state manager")
 }
 
 func (lsm *LocalStateManager) CreatePendingBatch(batch *PendingEdgeBatch) error {

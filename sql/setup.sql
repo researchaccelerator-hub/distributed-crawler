@@ -130,13 +130,13 @@ GRANT SELECT ON TABLE edge_records                              TO crawler_reado
 
 
 -- =============================================================================
--- TABLE: layer_buffer
+-- TABLE: page_buffer
 -- Transient queue of pages to process in the next BFS/random-walk layer.
 -- Scoped per pod via crawl_id — each pod only reads/writes its own rows.
 -- Rows are deleted after a layer completes; this table should stay small.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS layer_buffer (
+CREATE TABLE IF NOT EXISTS page_buffer (
     page_id     VARCHAR(36)  PRIMARY KEY,     -- UUID
     parent_id   VARCHAR(36)  NOT NULL,        -- UUID of parent page
     depth       INTEGER      NOT NULL,
@@ -146,11 +146,11 @@ CREATE TABLE IF NOT EXISTS layer_buffer (
 );
 
 -- All runtime queries filter on crawl_id (pod isolation)
-CREATE INDEX IF NOT EXISTS idx_layer_buffer_crawl_id
-    ON layer_buffer (crawl_id);
+CREATE INDEX IF NOT EXISTS idx_page_buffer_crawl_id
+    ON page_buffer (crawl_id);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE layer_buffer      TO crawler_app;
-GRANT SELECT ON TABLE layer_buffer                              TO crawler_readonly;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE page_buffer      TO crawler_app;
+GRANT SELECT ON TABLE page_buffer                              TO crawler_readonly;
 
 
 -- =============================================================================

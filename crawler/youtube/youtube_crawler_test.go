@@ -100,15 +100,14 @@ func (m *MockYouTubeStateManager) UploadCombinedFile(filename string) error { re
 
 // random-walk database
 func (m *MockYouTubeStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error { return nil }
-func (m *MockYouTubeStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+func (m *MockYouTubeStateManager) GetPagesFromPageBuffer() ([]state.Page, error) {
 	return []state.Page{}, nil
 }
-func (m *MockYouTubeStateManager) WipeLayerBuffer() error                          { return nil }
 func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil
 }
-func (m *MockYouTubeStateManager) AddPageToLayerBuffer(page *state.Page) error { return nil }
-func (m *MockYouTubeStateManager) DeleteLayerBufferPages(_ []string) error     { return nil }
+func (m *MockYouTubeStateManager) AddPageToPageBuffer(page *state.Page) error { return nil }
+func (m *MockYouTubeStateManager) DeletePageBufferPages(_ []string) error     { return nil }
 func (m *MockYouTubeStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
 func (m *MockYouTubeStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
 func (m *MockYouTubeStateManager) ClosePendingBatch(_ string) error                                   { return nil }

@@ -3474,43 +3474,40 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 		return fmt.Errorf("random-walk-init: seed-size exceeds number of discovered channels")
 	}
 
-	pages := make([]Page, 0, dsm.BaseStateManager.config.SeedSize)
-
 	seedChannels := make(map[string]bool)
 	for {
 		url, err := dsm.BaseStateManager.GetRandomDiscoveredChannel()
 		if err != nil {
-			return fmt.Errorf("random-walk-init: unable to get random discovered channel during ")
+			return fmt.Errorf("random-walk-init: unable to get random discovered channel during seeding")
 		}
 		if _, ok := seedChannels[url]; ok {
 			log.Info().Str("seed_url", url).Str("log_tag", "rw_init").Msg("URL previously selected, skipping")
 			continue
 		}
 		seedChannels[url] = true
-		pages = append(pages, Page{
+		page := &Page{
 			ID:         uuid.New().String(),
 			URL:        url,
 			Depth:      0,
 			Status:     "unfetched",
 			Timestamp:  time.Now(),
 			SequenceID: uuid.New().String(),
-		})
+		}
+		if err := dsm.AddPageToPageBuffer(page); err != nil {
+			return fmt.Errorf("random-walk-init: failed to add page to page buffer: %w", err)
+		}
 		if len(seedChannels) >= dsm.BaseStateManager.config.SeedSize {
 			log.Info().Int("seed_size", dsm.BaseStateManager.config.SeedSize).Int("seed_channel_size", len(seedChannels)).Str("log_tag", "rw_init").Msg("Finished selecting seed channels")
 			break
 		}
 	}
 
-	if err := dsm.AddLayer(pages); err != nil {
-		return fmt.Errorf("random-walk-init: failed to add seed pages: %w", err)
-	}
-
 	return nil
 }
 
 // TODO: generalize the process of inserting records to function that takes in query and params
-func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
-	sqlQuery := `INSERT INTO layer_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6);`
+func (dsm *DaprStateManager) AddPageToPageBuffer(page *Page) error {
+	sqlQuery := `INSERT INTO page_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6);`
 
 	values := []any{
 		page.ID,
@@ -3522,7 +3519,7 @@ func (dsm *DaprStateManager) AddPageToLayerBuffer(page *Page) error {
 	}
 
 	if err := dsm.ExecuteDatabaseOperation(sqlQuery, values); err != nil {
-		return fmt.Errorf("random-walk-layer: failed to add page to layer buffer: %w", err)
+		return fmt.Errorf("random-walk-layer: failed to add page to page buffer: %w", err)
 	}
 
 	return nil
@@ -3564,27 +3561,8 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 
 }
 
-func (dsm *DaprStateManager) WipeLayerBuffer() error {
-	log.Info().Str("crawl_id", dsm.config.CrawlID).Str("log_tag", "rw_layer").Msg("Wiping layer buffer")
-	values := []any{
-		dsm.config.CrawlID,
-	}
-	sqlQuery := `DELETE FROM layer_buffer WHERE crawl_id = $1;`
-
-	err := dsm.ExecuteDatabaseOperation(sqlQuery, values)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-
-}
-
-// DeleteLayerBufferPages removes specific pages by ID in a single query.
-// Used in tandem mode to avoid a race where WipeLayerBuffer deletes pages
-// the validator wrote between the read and the wipe.
-func (dsm *DaprStateManager) DeleteLayerBufferPages(pageIDs []string) error {
+// DeletePageBufferPages removes specific pages by ID in a single query.
+func (dsm *DaprStateManager) DeletePageBufferPages(pageIDs []string) error {
 	if len(pageIDs) == 0 {
 		return nil
 	}
@@ -3593,22 +3571,22 @@ func (dsm *DaprStateManager) DeleteLayerBufferPages(pageIDs []string) error {
 	for i, pid := range pageIDs {
 		escaped[i] = "'" + strings.ReplaceAll(pid, "'", "''") + "'"
 	}
-	sqlQuery := fmt.Sprintf("DELETE FROM layer_buffer WHERE crawl_id = '%s' AND page_id IN (%s);",
+	sqlQuery := fmt.Sprintf("DELETE FROM page_buffer WHERE crawl_id = '%s' AND page_id IN (%s);",
 		strings.ReplaceAll(dsm.config.CrawlID, "'", "''"),
 		strings.Join(escaped, ","))
 
 	if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
-		return fmt.Errorf("random-walk-layer: failed to delete %d pages from layer buffer: %w", len(pageIDs), err)
+		return fmt.Errorf("random-walk-layer: failed to delete %d pages from page buffer: %w", len(pageIDs), err)
 	}
-	log.Info().Int("count", len(pageIDs)).Str("log_tag", "rw_layer").Msg("Deleted specific pages from layer buffer")
+	log.Info().Int("count", len(pageIDs)).Str("log_tag", "rw_page_buffer").Msg("Deleted specific pages from page buffer")
 	return nil
 }
 
-func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
-	log.Info().Str("log_tag", "rw_layer").Msg("Getting pages from layer buffer")
+func (dsm *DaprStateManager) GetPagesFromPageBuffer() ([]Page, error) {
+	log.Info().Str("log_tag", "rw_page_buffer").Msg("Getting pages from page buffer")
 	pages := make([]Page, 0)
 
-	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM layer_buffer WHERE crawl_id = '%s';", dsm.config.CrawlID)
+	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = '%s';", dsm.config.CrawlID)
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
@@ -3619,18 +3597,18 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 	}
 	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
 	if err != nil {
-		return pages, fmt.Errorf("random-walk-layer: failed to pull layer pages: %w", err)
+		return pages, fmt.Errorf("random-walk-layer: failed to pull page buffer pages: %w", err)
 	}
 
 	var pageResults [][]any
 
 	if err := json.Unmarshal(res.Data, &pageResults); err != nil {
-		log.Error().Str("result_data", string(res.Data)).Str("log_tag", "rw_layer").Msg("Failed to unmarshal layer buffer response")
-		return pages, fmt.Errorf("random-walk-layer: Failed to unmarshal response for layer buffer: %v", err)
+		log.Error().Str("result_data", string(res.Data)).Str("log_tag", "rw_page_buffer").Msg("Failed to unmarshal page buffer response")
+		return pages, fmt.Errorf("random-walk-layer: Failed to unmarshal response for page buffer: %v", err)
 	}
 
 	if len(pageResults) > 0 {
-		log.Info().Int("count", len(pageResults)).Str("log_tag", "rw_layer").Msg("Found pages in layer buffer")
+		log.Info().Int("count", len(pageResults)).Str("log_tag", "rw_page_buffer").Msg("Found pages in page buffer")
 		for _, page := range pageResults {
 			seqID := ""
 			if len(page) > 5 && page[5] != nil {
@@ -3648,7 +3626,7 @@ func (dsm *DaprStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
 		}
 		return pages, nil
 	} else {
-		log.Error().Str("log_tag", "rw_layer").Msg("No pages found in layer buffer")
+		log.Error().Str("log_tag", "rw_page_buffer").Msg("No pages found in page buffer")
 		return pages, nil
 	}
 }
