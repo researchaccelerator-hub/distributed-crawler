@@ -25,6 +25,11 @@ import (
 	"github.com/zelenin/go-tdlib/client"
 )
 
+// ErrWalkbackExhausted is returned when all walkback attempts are exhausted.
+// The caller should treat the current page as retryable and leave it in the
+// page buffer so the crawl can resume from the same channel on restart.
+var ErrWalkbackExhausted = fmt.Errorf("walkback attempts exhausted")
+
 // Global connection pool
 var connectionPool *telegramhelper.ConnectionPool
 var poolMu sync.Mutex
@@ -1150,7 +1155,7 @@ func processAllMessagesWithProcessor(
 						break
 					}
 					if attempt == maxWalkbackAttempts-1 {
-						log.Warn().Str("channel", walkbackURL).Msg("random-walk-walkback: Exhausted walkback attempts, using last candidate as fallback")
+						return nil, fmt.Errorf("random-walk-walkback: channel %s: %w", owner.URL, ErrWalkbackExhausted)
 					}
 				}
 				page.URL = walkbackURL

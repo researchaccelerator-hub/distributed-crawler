@@ -3,6 +3,7 @@ package dapr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -822,13 +823,26 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			batch = pages[:maxWorkers]
 		}
 
-		var wg sync.WaitGroup
+		var (
+			wg          sync.WaitGroup
+			deleteIDsMu sync.Mutex
+			deleteIDs   []string
+		)
 		for _, page := range batch {
 			wg.Add(1)
 			go func(p state.Page) {
 				defer wg.Done()
-				if _, procErr := crawl.RunForChannelWithPool(ctx, &p, crawlCfg.StorageRoot, sm, crawlCfg); procErr != nil {
-					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")
+				_, procErr := crawl.RunForChannelWithPool(ctx, &p, crawlCfg.StorageRoot, sm, crawlCfg)
+				if errors.Is(procErr, crawl.ErrWalkbackExhausted) {
+					// Leave page in buffer — will be re-processed on restart.
+					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: walkback exhausted, page left in buffer for restart")
+				} else {
+					if procErr != nil {
+						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")
+					}
+					deleteIDsMu.Lock()
+					deleteIDs = append(deleteIDs, p.ID)
+					deleteIDsMu.Unlock()
 				}
 				if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
 					shouldStop.Store(true)
@@ -837,12 +851,8 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 		}
 		wg.Wait()
 
-		// Remove the processed pages from the buffer only after all goroutines
-		// have completed (and each has written its next hop back into the buffer).
-		pageIDs := make([]string, len(batch))
-		for i, p := range batch {
-			pageIDs[i] = p.ID
-		}
+		// Remove all processed pages except those held for restart.
+		pageIDs := deleteIDs
 		if err := sm.DeletePageBufferPages(pageIDs); err != nil {
 			log.Error().Err(err).Msg("random-walk-layerless: failed to delete processed pages from page buffer")
 		}
