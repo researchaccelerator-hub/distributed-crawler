@@ -318,6 +318,52 @@ func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
 // RunValidationLoop context cancellation test
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TC-4: RunValidationLoop processes edges when available
+// ---------------------------------------------------------------------------
+
+func TestRunValidationLoop_ProcessesAvailableEdge(t *testing.T) {
+	// An edge whose channel is cached as invalid is processed without any HTTP
+	// call — allowing the test to verify end-to-end edge processing without a
+	// live HTTP server.
+	sm := new(MockStateManager)
+	cfg := common.CrawlerConfig{
+		ValidatorRequestRate:     6000, // fast for test
+		ValidatorRequestJitterMs: 0,
+		ValidatorClaimBatchSize:  5,
+	}
+
+	edge := &state.PendingEdge{
+		PendingID:          99,
+		CrawlID:            "crawl-1",
+		DestinationChannel: "known_bad",
+	}
+
+	// Return the edge on the first claim, then nothing on subsequent polls.
+	sm.On("ClaimPendingEdges", 5).Return([]*state.PendingEdge{edge}, nil).Once()
+	sm.On("ClaimPendingEdges", 5).Return(([]*state.PendingEdge)(nil), nil)
+
+	sm.On("IsInvalidChannel", "known_bad").Return(true)
+	sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
+		PendingID:        99,
+		ValidationStatus: "invalid",
+		ValidationReason: "cached_invalid",
+	}).Return(nil)
+
+	sm.On("ClaimWalkbackBatch").Return((*state.PendingEdgeBatch)(nil), ([]*state.PendingEdge)(nil), nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	RunValidationLoop(ctx, sm, cfg) //nolint:errcheck — exits with context error
+
+	sm.AssertCalled(t, "UpdatePendingEdge", state.PendingEdgeUpdate{
+		PendingID:        99,
+		ValidationStatus: "invalid",
+		ValidationReason: "cached_invalid",
+	})
+}
+
 func TestRunValidationLoop_ContextCancellation(t *testing.T) {
 	sm := new(MockStateManager)
 	cfg := common.CrawlerConfig{

@@ -1,10 +1,12 @@
 package telegramhelper
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -200,6 +202,82 @@ func TestValidateChannelHTTP_Integration(t *testing.T) {
 				t.Errorf("expected reason %q, got %q", tc.expectedReason, result.Reason)
 			}
 		})
+	}
+}
+
+// roundTripFunc implements http.RoundTripper via a plain function, allowing
+// tests to intercept and control HTTP responses without a real network.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// ---------------------------------------------------------------------------
+// TC-6: ValidateChannelHTTP — redirect and 429 handling
+// ---------------------------------------------------------------------------
+
+func TestValidateChannelHTTP_429ReturnsError(t *testing.T) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Body:       http.NoBody,
+				Request:    r,
+			}, nil
+		}),
+	}
+
+	_, err := ValidateChannelHTTP("testchan", client)
+	if err == nil {
+		t.Fatal("expected error for 429 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "429") {
+		t.Errorf("expected error to mention status 429, got: %v", err)
+	}
+}
+
+func TestValidateChannelHTTP_RedirectToValidPage(t *testing.T) {
+	validHTML := `<html><head><title>Telegram: View @testchan</title></head></html>`
+
+	// The server redirects requests for /testchan (the path ValidateChannelHTTP
+	// derives from the username) to /final, then serves valid HTML for everything
+	// else (including /final).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/testchan" {
+			http.Redirect(w, r, "/final", http.StatusMovedPermanently)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, validHTML)
+	}))
+	defer server.Close()
+
+	serverAddr := strings.TrimPrefix(server.URL, "http://")
+
+	// Transport rewrites every t.me request to the test server, preserving the
+	// path. The http.Client resolves the 301 Location against the original t.me
+	// URL (e.g. https://t.me/final), which the transport then rewrites to
+	// http://serverAddr/final — served as valid HTML, breaking the loop.
+	client := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Host == "t.me" {
+				newURL := *r.URL
+				newURL.Scheme = "http"
+				newURL.Host = serverAddr
+				r2 := r.Clone(r.Context())
+				r2.URL = &newURL
+				r2.RequestURI = ""
+				return http.DefaultTransport.RoundTrip(r2)
+			}
+			return http.DefaultTransport.RoundTrip(r)
+		}),
+	}
+
+	result, err := ValidateChannelHTTP("testchan", client)
+	if err != nil {
+		t.Fatalf("unexpected error after redirect: %v", err)
+	}
+	if result.Status != "valid" {
+		t.Errorf("expected status 'valid' after redirect, got %q", result.Status)
 	}
 }
 

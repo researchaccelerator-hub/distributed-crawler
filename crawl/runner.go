@@ -51,23 +51,43 @@ func parseFloodWaitSecs(err error) (int, bool) {
 		return 0, false
 	}
 	s := err.Error()
-	idx := strings.Index(s, "FLOOD_WAIT_")
-	if idx == -1 {
-		return 0, false
+
+	// Pattern 1: FLOOD_WAIT_N  (standard TDLib format, e.g. "[429] FLOOD_WAIT_72560")
+	if idx := strings.Index(s, "FLOOD_WAIT_"); idx != -1 {
+		rest := s[idx+len("FLOOD_WAIT_"):]
+		end := 0
+		for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+			end++
+		}
+		if end == 0 {
+			return 0, true
+		}
+		secs, convErr := strconv.Atoi(rest[:end])
+		if convErr != nil {
+			return 0, true
+		}
+		return secs, true
 	}
-	rest := s[idx+len("FLOOD_WAIT_"):]
-	end := 0
-	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
-		end++
+
+	// Pattern 2: "retry after N"  (HTTP 429 format, e.g. "429 Too Many Requests: retry after 72560")
+	const retryAfterPrefix = "retry after "
+	if idx := strings.Index(s, retryAfterPrefix); idx != -1 {
+		rest := s[idx+len(retryAfterPrefix):]
+		end := 0
+		for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+			end++
+		}
+		if end == 0 {
+			return 0, true
+		}
+		secs, convErr := strconv.Atoi(rest[:end])
+		if convErr != nil {
+			return 0, true
+		}
+		return secs, true
 	}
-	if end == 0 {
-		return 0, true
-	}
-	secs, convErr := strconv.Atoi(rest[:end])
-	if convErr != nil {
-		return 0, true
-	}
-	return secs, true
+
+	return 0, false
 }
 
 // pickWalkbackChannel selects a random discovered channel to walk back to,

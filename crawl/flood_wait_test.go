@@ -95,6 +95,18 @@ func TestParseFloodWaitSecs(t *testing.T) {
 			wantSecs:    1800,
 			wantIsFlood: true,
 		},
+		{
+			name:        "HTTP 429 retry-after format",
+			err:         fmt.Errorf("429 Too Many Requests: retry after 72560"),
+			wantSecs:    72560,
+			wantIsFlood: true,
+		},
+		{
+			name:        "retry after with no digits",
+			err:         fmt.Errorf("429 Too Many Requests: retry after soon"),
+			wantSecs:    0,
+			wantIsFlood: true,
+		},
 	}
 
 	for _, tc := range tests {

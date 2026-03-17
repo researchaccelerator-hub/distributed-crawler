@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	daprc "github.com/dapr/go-sdk/client"
 	"github.com/stretchr/testify/assert"
@@ -579,4 +581,226 @@ func TestClaimPendingEdges_DBError(t *testing.T) {
 	edges, err := dsm.ClaimPendingEdges(5)
 	assert.Error(t, err)
 	assert.Nil(t, edges)
+}
+
+// ---------------------------------------------------------------------------
+// TC-2: FlushBatchStats partial failure
+// ---------------------------------------------------------------------------
+
+func TestFlushBatchStats_DeleteFailsReturnsError(t *testing.T) {
+	// Upsert succeeds but DELETE fails → error returned.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			if strings.Contains(in.Metadata["sql"], "DELETE FROM pending_edges") {
+				return nil, fmt.Errorf("disk full")
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	edges := []*PendingEdge{{SourceType: "mention", ValidationStatus: "valid"}}
+	err := dsm.FlushBatchStats("batch-1", "crawl-1", edges)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "disk full")
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	// 1 upsert + 1 failed DELETE = 2 calls
+	require.Len(t, mc.bindingCalls, 2)
+	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "ON CONFLICT")
+	assert.Contains(t, mc.bindingCalls[1].Metadata["sql"], "DELETE FROM pending_edges")
+}
+
+func TestFlushBatchStats_UpsertFailsStillDeletesEdges(t *testing.T) {
+	// Upsert is best-effort: even if it fails, DELETE proceeds and succeeds.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			if strings.Contains(in.Metadata["sql"], "ON CONFLICT") {
+				return nil, fmt.Errorf("constraint violation")
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	edges := []*PendingEdge{{SourceType: "mention", ValidationStatus: "valid"}}
+	err := dsm.FlushBatchStats("batch-1", "crawl-1", edges)
+
+	// Overall error must be nil — upsert failure is best-effort.
+	assert.NoError(t, err)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	// 1 upsert attempt + 1 successful DELETE = 2 calls
+	require.Len(t, mc.bindingCalls, 2)
+	assert.Contains(t, mc.bindingCalls[1].Metadata["sql"], "DELETE FROM pending_edges")
+}
+
+// ---------------------------------------------------------------------------
+// TC-7: ClaimWalkbackBatch — FIFO ordering & single-claim guarantee
+// ---------------------------------------------------------------------------
+
+func TestClaimWalkbackBatch_FIFOOrderingSQL(t *testing.T) {
+	// The claim SQL must use ORDER BY b.created_at so the globally oldest
+	// batch is always claimed first, regardless of which crawl it belongs to.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			return &daprc.BindingEvent{Data: jsonRows([][]any{})}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	_, _, err := dsm.ClaimWalkbackBatch()
+	require.NoError(t, err)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	require.Len(t, mc.bindingCalls, 1)
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	assert.Contains(t, sql, "ORDER BY b.created_at")
+	assert.Contains(t, sql, "FOR UPDATE SKIP LOCKED")
+	assert.Contains(t, sql, "LIMIT 1")
+}
+
+func TestClaimWalkbackBatch_SingleBatchClaimedFromMultipleCrawls(t *testing.T) {
+	// Simulate DB returning the single oldest batch (from crawl-a) even though
+	// batches from multiple crawls exist. Only 2 DB round-trips should occur:
+	// one for the atomic claim, one for the edge fetch.
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			if callCount == 1 {
+				// Claim returns the oldest batch (crawl-a)
+				return &daprc.BindingEvent{Data: jsonRows([][]any{
+					{"batch-crawl-a", "crawl-a", "src_chan", "page-1", float64(0), "seq-1", float64(1)},
+				})}, nil
+			}
+			// Edge fetch for the claimed batch
+			return &daprc.BindingEvent{Data: jsonRows([][]any{})}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	batch, _, err := dsm.ClaimWalkbackBatch()
+	require.NoError(t, err)
+	require.NotNil(t, batch)
+
+	assert.Equal(t, "batch-crawl-a", batch.BatchID)
+	assert.Equal(t, "crawl-a", batch.CrawlID)
+	// Exactly 2 calls: claim + edge fetch (not one per crawl in the DB)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestClaimWalkbackBatch_AttemptCountGuardInSQL(t *testing.T) {
+	// The claim SQL must guard attempt_count < maxBatchAttempts so poison
+	// batches are never re-claimed.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			return &daprc.BindingEvent{Data: jsonRows([][]any{})}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	_, _, err := dsm.ClaimWalkbackBatch()
+	require.NoError(t, err)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "attempt_count < 3")
+}
+
+// ---------------------------------------------------------------------------
+// TC-8: RecoverStaleBatchClaims
+// ---------------------------------------------------------------------------
+
+func TestRecoverStaleBatchClaims_StaleReturnsCount(t *testing.T) {
+	// Stale batch (processing, claimed_at old, attempt_count < max) → reset to 'closed'.
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			sql := in.Metadata["sql"]
+			switch {
+			case strings.Contains(sql, "attempt_count >="):
+				// Poison query — no poison batches
+				return &daprc.BindingEvent{Data: jsonRows([][]any{})}, nil
+			case strings.Contains(sql, "SELECT COUNT(*)"):
+				// Stale count — 2 stale batches
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(2)}})}, nil
+			default:
+				// UPDATE
+				return &daprc.BindingEvent{}, nil
+			}
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleBatchClaims(10 * time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
+	// 3 calls: poison query + count query + UPDATE
+	assert.Equal(t, 3, callCount)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	lastSQL := mc.bindingCalls[callCount-1].Metadata["sql"]
+	assert.Contains(t, lastSQL, "SET status = 'closed'")
+}
+
+func TestRecoverStaleBatchClaims_PoisonBatchNotReset(t *testing.T) {
+	// Poison batch (attempt_count >= max) is logged but NOT reset to 'closed'.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			sql := in.Metadata["sql"]
+			switch {
+			case strings.Contains(sql, "attempt_count >="):
+				// 1 poison batch
+				return &daprc.BindingEvent{Data: jsonRows([][]any{
+					{"poison-batch-1", "src_chan", float64(3)},
+				})}, nil
+			case strings.Contains(sql, "SELECT COUNT(*)"):
+				// No recoverable stale batches
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(0)}})}, nil
+			default:
+				return &daprc.BindingEvent{}, nil
+			}
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleBatchClaims(10 * time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "SET status = 'closed'")
+	}
+}
+
+func TestRecoverStaleBatchClaims_FreshBatchNotTouched(t *testing.T) {
+	// No stale batches → count = 0, no UPDATE issued.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			if strings.Contains(in.Metadata["sql"], "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(0)}})}, nil
+			}
+			return &daprc.BindingEvent{Data: jsonRows([][]any{})}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleBatchClaims(10 * time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "SET status = 'closed'")
+	}
 }
