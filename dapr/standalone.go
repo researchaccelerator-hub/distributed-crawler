@@ -858,6 +858,13 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 				if errors.Is(procErr, crawl.ErrWalkbackExhausted) {
 					// Leave page in buffer — will be re-processed on restart.
 					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: walkback exhausted, page left in buffer for restart")
+				} else if errors.Is(procErr, crawl.ErrFloodWaitRetire) {
+					// Connection was retired; leave page in buffer for retry by a remaining connection.
+					log.Warn().Str("url", p.URL).Msg("random-walk-layerless: connection retired due to FLOOD_WAIT, page left in buffer")
+					if crawl.ConnectionPoolTotalSize() == 0 {
+						log.Error().Msg("random-walk-layerless: all connections retired due to FLOOD_WAIT, aborting crawl")
+						shouldStop.Store(true)
+					}
 				} else {
 					if procErr != nil {
 						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")

@@ -5,6 +5,7 @@ package crawl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -29,6 +30,45 @@ import (
 // The caller should treat the current page as retryable and leave it in the
 // page buffer so the crawl can resume from the same channel on restart.
 var ErrWalkbackExhausted = fmt.Errorf("walkback attempts exhausted")
+
+// ErrFloodWaitRetire is returned when SearchPublicChat hits a FLOOD_WAIT whose
+// retry-after duration exceeds floodWaitRetireThresholdSecs. The affected TDLib
+// client is permanently retired from the connection pool. If the pool is now
+// empty, the caller should abort the crawl.
+var ErrFloodWaitRetire = fmt.Errorf("FLOOD_WAIT threshold exceeded: client retired")
+
+// floodWaitRetireThresholdSecs is the minimum FLOOD_WAIT retry-after duration (in
+// seconds) that causes the client to be retired. Shorter bans are transient: the
+// channel is skipped but the client continues processing.
+const floodWaitRetireThresholdSecs = 300 // 5 minutes
+
+// parseFloodWaitSecs detects a Telegram FLOOD_WAIT error and returns the
+// retry-after duration in seconds. Returns (0, false) if the error is not a
+// FLOOD_WAIT. Returns (0, true) if it is a FLOOD_WAIT but the seconds cannot
+// be parsed (treated as a short ban — caller should skip but not retire).
+func parseFloodWaitSecs(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	s := err.Error()
+	idx := strings.Index(s, "FLOOD_WAIT_")
+	if idx == -1 {
+		return 0, false
+	}
+	rest := s[idx+len("FLOOD_WAIT_"):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, true
+	}
+	secs, convErr := strconv.Atoi(rest[:end])
+	if convErr != nil {
+		return 0, true
+	}
+	return secs, true
+}
 
 // pickWalkbackChannel selects a random discovered channel to walk back to,
 // skipping sourceURL and any channel present in the exclude map.
@@ -162,6 +202,31 @@ func ReleaseConnectionToPool(connID string) {
 	}
 }
 
+// RetireConnectionFromPool permanently removes a connection from the pool without
+// replacement. Should be called when a connection has been flood-waited with a ban
+// duration exceeding the retire threshold.
+func RetireConnectionFromPool(connID string) {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+
+	if connectionPool != nil {
+		connectionPool.RetireConnection(connID)
+	}
+}
+
+// ConnectionPoolTotalSize returns the total number of connections (available + in-use)
+// currently tracked by the pool. Returns 0 if the pool is uninitialized.
+func ConnectionPoolTotalSize() int {
+	poolMu.Lock()
+	defer poolMu.Unlock()
+
+	if connectionPool == nil {
+		return 0
+	}
+	stats := connectionPool.Stats()
+	return stats["available"] + stats["inUse"]
+}
+
 // CloseConnectionPool gracefully shuts down all connections in the pool and
 // releases associated resources. This should be called during application
 // shutdown or when the pool is no longer needed.
@@ -247,23 +312,41 @@ func GetConnectionPoolStats() map[string]int {
 // fallback connections are closed.
 func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix string, sm state.StateManagementInterface, cfg common.CrawlerConfig) ([]*state.Page, error) {
 	// Get a client from the connection pool
-	tdlibClient, connID, err := GetConnectionFromPool(ctx)
-	if err != nil {
-		log.Error().Err(err).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Failed to get client from pool")
+	tdlibClient, connID, poolErr := GetConnectionFromPool(ctx)
+	pooled := poolErr == nil
+	if !pooled {
+		log.Error().Err(poolErr).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Failed to get client from pool")
 		// Fall back to creating a new connection if pool is exhausted or not initialized
+		var err error
 		tdlibClient, err = Connect(storagePrefix, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get client connection: %w", err)
 		}
-		// Make sure to close this non-pooled connection when done
 		defer closeClient(tdlibClient)
-	} else {
-		// Ensure we return the pooled connection when done
-		defer ReleaseConnectionToPool(connID)
 	}
+
+	// For pooled connections, retire on flood-wait; otherwise release normally.
+	if pooled {
+		var retire bool
+		defer func() {
+			if retire {
+				RetireConnectionFromPool(connID)
+			} else {
+				ReleaseConnectionToPool(connID)
+			}
+		}()
+
+		p.ConnectionID = connID
+		log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Started connection")
+		pages, procErr := RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
+		if errors.Is(procErr, ErrFloodWaitRetire) {
+			retire = true
+		}
+		return pages, procErr
+	}
+
 	p.ConnectionID = connID
 	log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Started connection")
-	// Continue with the regular channel processing
 	return RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
 }
 
@@ -1036,6 +1119,14 @@ func processAllMessagesWithProcessor(
 										lookupStats.record(srcType, false)
 										if lookupStats.total%100 == 0 {
 											lookupStats.log(owner.URL, "periodic")
+										}
+										if secs, isFlood := parseFloodWaitSecs(err); isFlood {
+											log.Warn().Int("retry_after_secs", secs).Str("channel", o).
+												Msg("random-walk-channel: FLOOD_WAIT on SearchPublicChat, not blacklisting channel")
+											if secs >= floodWaitRetireThresholdSecs {
+												return nil, fmt.Errorf("random-walk-channel: FLOOD_WAIT %ds exceeds retire threshold: %w", secs, ErrFloodWaitRetire)
+											}
+											continue
 										}
 										if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
 											log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")

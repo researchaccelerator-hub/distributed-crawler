@@ -149,6 +149,119 @@ func TestConnectionPoolReuseWithoutDisconnect(t *testing.T) {
 	}
 }
 
+func TestRetireConnection_RemovesAndClosesClient(t *testing.T) {
+	mockService := &MockPoolTelegramService{}
+
+	pool := &ConnectionPool{
+		availableConns: make(map[string]crawler.TDLibClient),
+		inUseConns:     make(map[string]crawler.TDLibClient),
+		maxSize:        3,
+		service:        mockService,
+		storagePrefix:  "test",
+		defaultConfig:  common.CrawlerConfig{},
+		connDirMap:     make(map[string]string),
+	}
+
+	ctx := context.Background()
+
+	// Acquire two connections.
+	_, connID1, err := pool.GetConnection(ctx)
+	if err != nil {
+		t.Fatalf("GetConnection 1: %v", err)
+	}
+	_, connID2, err := pool.GetConnection(ctx)
+	if err != nil {
+		t.Fatalf("GetConnection 2: %v", err)
+	}
+
+	// Retire the first connection.
+	pool.RetireConnection(connID1)
+
+	// The retired client must be closed.
+	retired := mockService.CreatedClients[0]
+	if !retired.Closed {
+		t.Error("retired client should be closed")
+	}
+
+	// Pool total size should now be 1 (connID2 still in use).
+	stats := pool.Stats()
+	total := stats["available"] + stats["inUse"]
+	if total != 1 {
+		t.Errorf("expected total pool size 1 after retirement, got %d", total)
+	}
+
+	// The retired connID must no longer be findable.
+	pool.mu.Lock()
+	_, inUse := pool.inUseConns[connID1]
+	_, avail := pool.availableConns[connID1]
+	pool.mu.Unlock()
+	if inUse || avail {
+		t.Error("retired connection should not appear in either pool map")
+	}
+
+	// The surviving connection is unaffected.
+	pool.ReleaseConnection(connID2)
+	stats = pool.Stats()
+	if stats["available"] != 1 {
+		t.Errorf("surviving connection should be available after release, got available=%d", stats["available"])
+	}
+}
+
+func TestRetireConnection_UnknownID_NoOp(t *testing.T) {
+	pool := &ConnectionPool{
+		availableConns: make(map[string]crawler.TDLibClient),
+		inUseConns:     make(map[string]crawler.TDLibClient),
+		maxSize:        2,
+		service:        &MockPoolTelegramService{},
+		storagePrefix:  "test",
+		defaultConfig:  common.CrawlerConfig{},
+		connDirMap:     make(map[string]string),
+	}
+
+	// Should not panic for an unknown ID.
+	pool.RetireConnection("does-not-exist")
+
+	stats := pool.Stats()
+	if stats["available"] != 0 || stats["inUse"] != 0 {
+		t.Error("pool should remain empty after no-op retirement")
+	}
+}
+
+func TestRetireConnection_PoolDrainedToZero(t *testing.T) {
+	mockService := &MockPoolTelegramService{}
+
+	pool := &ConnectionPool{
+		availableConns: make(map[string]crawler.TDLibClient),
+		inUseConns:     make(map[string]crawler.TDLibClient),
+		maxSize:        2,
+		service:        mockService,
+		storagePrefix:  "test",
+		defaultConfig:  common.CrawlerConfig{},
+		connDirMap:     make(map[string]string),
+	}
+
+	ctx := context.Background()
+
+	_, id1, _ := pool.GetConnection(ctx)
+	_, id2, _ := pool.GetConnection(ctx)
+
+	pool.RetireConnection(id1)
+	pool.RetireConnection(id2)
+
+	stats := pool.Stats()
+	total := stats["available"] + stats["inUse"]
+	if total != 0 {
+		t.Errorf("pool should be empty after retiring all connections, got total=%d", total)
+	}
+
+	// All created clients should be closed.
+	for i, c := range mockService.CreatedClients {
+		if !c.Closed {
+			t.Errorf("client[%d] should be closed after retirement", i)
+		}
+	}
+}
+
 func TestConnectionPoolErrorHandling(t *testing.T) {
 	// Create a pool with mock service
 	mockService := &MockPoolTelegramService{}

@@ -412,6 +412,32 @@ func (p *ConnectionPool) HandleConnectionError(ctx context.Context, connID strin
 	return wrapped, connID, nil
 }
 
+// RetireConnection permanently removes a connection from the pool without replacement.
+// Unlike ReleaseConnection (which returns the client to the available pool) or
+// HandleConnectionError (which recreates it), this closes the connection and deletes
+// it from the pool entirely. Use this when a connection has been flood-waited by
+// Telegram with a ban duration that exceeds the retire threshold.
+// Callers should check pool size after retirement to decide whether to abort.
+func (p *ConnectionPool) RetireConnection(connID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	client, exists := p.inUseConns[connID]
+	if !exists {
+		log.Warn().Str("connectionID", connID).Msg("RetireConnection: connection not found in in-use pool")
+		return
+	}
+
+	delete(p.inUseConns, connID)
+	closeClientSafe(client)
+
+	remaining := len(p.availableConns) + len(p.inUseConns)
+	log.Warn().
+		Str("connectionID", connID).
+		Int("remaining_connections", remaining).
+		Msg("Connection permanently retired from pool due to FLOOD_WAIT")
+}
+
 // Stats returns statistics about the current state of the connection pool,
 // including the number of available connections, in-use connections, and
 // the maximum pool size. This is useful for monitoring and debugging.
