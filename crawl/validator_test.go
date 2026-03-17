@@ -309,8 +309,8 @@ func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
 		"GetRandomDiscoveredChannel",
 		"AddPageToPageBuffer",
 		"SaveEdgeRecords",
-		"FlushBatchStats",
 		"CompletePendingBatch",
+		"FlushBatchStats",
 	}, callOrder)
 }
 

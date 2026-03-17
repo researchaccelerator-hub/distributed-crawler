@@ -363,15 +363,16 @@ func processWalkbackBatch(
 		return err
 	}
 
-	// Flush stats and delete pending_edges
-	if err := sm.FlushBatchStats(batch.BatchID, batch.CrawlID, allEdges); err != nil {
-		log.Warn().Err(err).Str("batch_id", batch.BatchID).Msg("validator-walkback: FlushBatchStats failed")
-		// Non-fatal — continue to complete the batch
-	}
-
-	// Mark batch completed
+	// Mark batch completed first so a crash after this point leaves orphan
+	// pending_edges (harmless, swept up by RecoverOrphanEdges at next startup)
+	// rather than a re-claimable empty batch that would stall the crawl.
 	if err := sm.CompletePendingBatch(batch.BatchID); err != nil {
 		return err
+	}
+
+	// Flush stats and delete pending_edges (best-effort; orphans cleaned at startup)
+	if err := sm.FlushBatchStats(batch.BatchID, batch.CrawlID, allEdges); err != nil {
+		log.Warn().Err(err).Str("batch_id", batch.BatchID).Msg("validator-walkback: FlushBatchStats failed; orphan edges will be cleaned at next startup")
 	}
 
 	log.Info().Str("batch_id", batch.BatchID).Str("next_url", nextURL).

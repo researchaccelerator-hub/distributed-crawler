@@ -4200,3 +4200,29 @@ func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duratio
 	}
 	return staleCount, nil
 }
+
+// RecoverOrphanEdges deletes pending_edges that belong to completed batches.
+// These arise when a validator crashes after CompletePendingBatch but before
+// FlushBatchStats finishes deleting the edges.  Safe to run at any time since
+// edges on completed batches will never be reprocessed.  Call once at startup.
+func (dsm *DaprStateManager) RecoverOrphanEdges() (int, error) {
+	countSQL := `SELECT COUNT(*) FROM pending_edges WHERE batch_id IN (SELECT batch_id FROM pending_edge_batches WHERE status = 'completed');`
+	rows, err := dsm.queryDatabase(countSQL)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count orphan edges: %w", err)
+	}
+	orphanCount := 0
+	if len(rows) > 0 && len(rows[0]) > 0 {
+		if v, ok := rows[0][0].(float64); ok {
+			orphanCount = int(v)
+		}
+	}
+	if orphanCount > 0 {
+		deleteSQL := `DELETE FROM pending_edges WHERE batch_id IN (SELECT batch_id FROM pending_edge_batches WHERE status = 'completed');`
+		if err := dsm.ExecuteDatabaseOperation(deleteSQL, nil); err != nil {
+			return 0, fmt.Errorf("validator-db: failed to delete orphan edges: %w", err)
+		}
+		log.Info().Int("deleted", orphanCount).Msg("validator-db: deleted orphan edges from completed batches")
+	}
+	return orphanCount, nil
+}
