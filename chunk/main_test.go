@@ -77,6 +77,7 @@ func (m *mockStateManager) GetRandomSeedChannel() (string, error)               
 func (m *mockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
 func (m *mockStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *mockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
+func (m *mockStateManager) InsertAccessEvent(_ string) error                                    { return nil }
 func (m *mockStateManager) Close() error                                                        { return nil }
 
 // newTestChunker creates a Chunker wired to temp directories for use in tests.

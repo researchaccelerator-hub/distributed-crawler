@@ -218,6 +218,10 @@ func (lsm *LocalStateManager) CountIncompleteBatches(crawlID string) (int, error
 	return 0, fmt.Errorf("CountIncompleteBatches not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) InsertAccessEvent(reason string) error {
+	return fmt.Errorf("InsertAccessEvent not implemented for local state manager")
+}
+
 // SaveState persists the state to the filesystem
 func (lsm *LocalStateManager) SaveState() error {
 	state := lsm.GetState()

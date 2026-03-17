@@ -111,6 +111,20 @@ CREATE TABLE discovered_channels (
 );
 
 
+-- ---------------------------------------------------------------------------
+-- access_events
+-- Append-only log written by the validator when it detects that t.me has
+-- blocked its IP (5+ consecutive ErrBlocked responses).  An external process
+-- (e.g. a Terraform dispatch watcher) polls this table to trigger IP
+-- rotation; the validator itself has no knowledge of the rotation mechanism.
+-- ---------------------------------------------------------------------------
+CREATE TABLE access_events (
+    id          SERIAL       PRIMARY KEY,
+    reason      VARCHAR(64)  NOT NULL,
+    occurred_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+
 -- =============================================================================
 -- GRANTS
 -- =============================================================================
@@ -120,14 +134,17 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pending_edge_batches TO crawler_ap
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pending_edges         TO crawler_app;
 GRANT SELECT, INSERT, UPDATE        ON TABLE source_type_stats     TO crawler_app;
 GRANT SELECT, INSERT                ON TABLE discovered_channels   TO crawler_app;
+GRANT SELECT, INSERT                ON TABLE access_events         TO crawler_app;
 
 GRANT USAGE, SELECT ON SEQUENCE pending_edges_pending_id_seq TO crawler_app;
+GRANT USAGE, SELECT ON SEQUENCE access_events_id_seq         TO crawler_app;
 
 -- crawler_readonly (analytics / monitoring)
 GRANT SELECT ON TABLE pending_edge_batches TO crawler_readonly;
 GRANT SELECT ON TABLE pending_edges        TO crawler_readonly;
 GRANT SELECT ON TABLE source_type_stats    TO crawler_readonly;
 GRANT SELECT ON TABLE discovered_channels  TO crawler_readonly;
+GRANT SELECT ON TABLE access_events        TO crawler_readonly;
 
 
 -- =============================================================================
@@ -193,3 +210,12 @@ GRANT SELECT ON TABLE discovered_channels  TO crawler_readonly;
 -- GRANT SELECT ON TABLE pending_edges        TO crawler_readonly;
 -- GRANT SELECT ON TABLE source_type_stats    TO crawler_readonly;
 -- GRANT SELECT ON TABLE discovered_channels  TO crawler_readonly;
+
+-- CREATE TABLE IF NOT EXISTS access_events (
+--     id          SERIAL       PRIMARY KEY,
+--     reason      VARCHAR(64)  NOT NULL,
+--     occurred_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+-- );
+-- GRANT SELECT, INSERT ON TABLE access_events TO crawler_app;
+-- GRANT USAGE, SELECT ON SEQUENCE access_events_id_seq TO crawler_app;
+-- GRANT SELECT ON TABLE access_events TO crawler_readonly;

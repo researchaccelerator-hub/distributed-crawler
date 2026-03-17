@@ -121,6 +121,7 @@ func (m *MockYouTubeStateManager) GetRandomSeedChannel() (string, error)        
 func (m *MockYouTubeStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
 func (m *MockYouTubeStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *MockYouTubeStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
+func (m *MockYouTubeStateManager) InsertAccessEvent(_ string) error                                   { return nil }
 
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {

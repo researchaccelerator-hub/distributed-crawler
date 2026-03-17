@@ -236,6 +236,7 @@ func (m *MockDaprStateManager) GetRandomSeedChannel() (string, error)           
 func (m *MockDaprStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
 func (m *MockDaprStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *MockDaprStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
+func (m *MockDaprStateManager) InsertAccessEvent(_ string) error                                   { return nil }
 
 // Combine Files
 func (m *MockDaprStateManager) UploadCombinedFile(filename string) error { return nil }
@@ -380,6 +381,7 @@ func (m *MockStateManager) GetRandomSeedChannel() (string, error)               
 func (m *MockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
 func (m *MockStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *MockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
+func (m *MockStateManager) InsertAccessEvent(_ string) error                                   { return nil }
 
 // MockStateManagerFactory mocks the state.StateManagerFactory interface
 type MockStateManagerFactory struct {

@@ -507,6 +507,11 @@ func (m *MockStateManager) CountIncompleteBatches(crawlID string) (int, error) {
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockStateManager) InsertAccessEvent(reason string) error {
+	args := m.Called(reason)
+	return args.Error(0)
+}
+
 // Close closes the state manager
 func (m *MockStateManager) Close() error {
 	args := m.Called()

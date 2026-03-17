@@ -181,6 +181,12 @@ type StateManagementInterface interface {
 	// status != 'completed' for the given crawl_id.
 	CountIncompleteBatches(crawlID string) (int, error)
 
+	// InsertAccessEvent appends a row to access_events recording that the
+	// validator detected an IP-level block.  An external process polls this
+	// table to trigger IP rotation; the validator has no knowledge of the
+	// rotation mechanism.
+	InsertAccessEvent(reason string) error
+
 	// Cleanup
 	// Close performs cleanup operations when shutting down
 	Close() error

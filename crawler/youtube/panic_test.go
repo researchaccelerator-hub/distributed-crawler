@@ -123,6 +123,7 @@ func (m *MockStateManager) GetRandomSeedChannel() (string, error)               
 func (m *MockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
 func (m *MockStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *MockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
+func (m *MockStateManager) InsertAccessEvent(_ string) error                                   { return nil }
 
 func TestPanicRecovery(t *testing.T) {
 	// Create a YouTube crawler with a mock client that will panic

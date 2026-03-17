@@ -396,6 +396,155 @@ func TestRunValidationLoop_ProcessesAvailableEdge(t *testing.T) {
 	})
 }
 
+// ---------------------------------------------------------------------------
+// Blocked-state tests
+// ---------------------------------------------------------------------------
+
+// TestRunEdgeValidation_EntersBlockedState verifies that after blockedThreshold
+// consecutive ErrBlocked outcomes the loop calls InsertAccessEvent and leaves
+// subsequent edges as "pending".
+func TestRunEdgeValidation_EntersBlockedState(t *testing.T) {
+	sm := new(MockStateManager)
+	cfg := common.CrawlerConfig{
+		CrawlID:                  "crawl-1",
+		ValidatorRequestRate:     6000,
+		ValidatorRequestJitterMs: 0,
+		ValidatorClaimBatchSize:  blockedThreshold + 1, // claim enough to trip the threshold
+	}
+
+	// Build blockedThreshold+1 edges that all return ErrBlocked.
+	edges := make([]*state.PendingEdge, blockedThreshold+1)
+	for i := range edges {
+		edges[i] = &state.PendingEdge{
+			PendingID:          i + 1,
+			CrawlID:            "crawl-1",
+			DestinationChannel: fmt.Sprintf("chan%d", i),
+			ValidationStatus:   "validating",
+		}
+		sm.On("IsInvalidChannel", edges[i].DestinationChannel).Return(false)
+		sm.On("IsChannelDiscovered", edges[i].DestinationChannel, "crawl-1").Return(false, nil)
+		sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
+			PendingID:        i + 1,
+			ValidationStatus: "pending",
+		}).Return(nil)
+	}
+
+	// First claim returns all edges; subsequent claims return nothing.
+	sm.On("ClaimPendingEdges", blockedThreshold+1).Return(edges, nil).Once()
+	sm.On("ClaimPendingEdges", blockedThreshold+1).Return(([]*state.PendingEdge)(nil), nil)
+
+	sm.On("InsertAccessEvent", "ip_blocked").Return(nil)
+	sm.On("ClaimWalkbackBatch").Return((*state.PendingEdgeBatch)(nil), ([]*state.PendingEdge)(nil), nil)
+
+	blockedFn := func(_ string, _ *http.Client) (telegramhelper.ChannelValidationResult, error) {
+		return telegramhelper.ChannelValidationResult{}, &telegramhelper.ValidationHTTPError{
+			Kind:    telegramhelper.ErrBlocked,
+			Wrapped: fmt.Errorf("403 Forbidden"),
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	err := runEdgeValidation(ctx, sm, cfg, &http.Client{},
+		telegramhelper.NewValidatorRateLimiter(0, 0), blockedThreshold+1, blockedFn)
+	assert.Error(t, err) // exits via context cancellation
+
+	sm.AssertCalled(t, "InsertAccessEvent", "ip_blocked")
+	// All edges must be left pending, not marked invalid.
+	for i := range edges {
+		sm.AssertCalled(t, "UpdatePendingEdge", state.PendingEdgeUpdate{
+			PendingID:        i + 1,
+			ValidationStatus: "pending",
+		})
+	}
+}
+
+// TestRunEdgeValidation_ProbeResumesValidation verifies that after entering
+// blocked state a successful probe clears the state and edges are processed again.
+func TestRunEdgeValidation_ProbeResumesValidation(t *testing.T) {
+	sm := new(MockStateManager)
+	cfg := common.CrawlerConfig{
+		CrawlID:                  "crawl-1",
+		ValidatorRequestRate:     6000,
+		ValidatorRequestJitterMs: 0,
+		ValidatorClaimBatchSize:  blockedThreshold,
+	}
+
+	// Phase 1 edges — all blocked, tips us into blocked state.
+	phase1 := make([]*state.PendingEdge, blockedThreshold)
+	for i := range phase1 {
+		phase1[i] = &state.PendingEdge{
+			PendingID:          i + 1,
+			CrawlID:            "crawl-1",
+			DestinationChannel: fmt.Sprintf("blocked%d", i),
+		}
+		sm.On("IsInvalidChannel", phase1[i].DestinationChannel).Return(false)
+		sm.On("IsChannelDiscovered", phase1[i].DestinationChannel, "crawl-1").Return(false, nil)
+		sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
+			PendingID:        i + 1,
+			ValidationStatus: "pending",
+		}).Return(nil)
+	}
+
+	// Phase 2 edge — valid, processed after probe unblocks.
+	phase2Edge := &state.PendingEdge{
+		PendingID:          100,
+		CrawlID:            "crawl-1",
+		DestinationChannel: "goodchan",
+	}
+	sm.On("IsInvalidChannel", "goodchan").Return(false)
+	sm.On("IsChannelDiscovered", "goodchan", "crawl-1").Return(false, nil)
+	sm.On("ClaimDiscoveredChannel", "goodchan", "crawl-1").Return(true, nil)
+	sm.On("UpsertSeedChannelChatID", "goodchan", int64(0)).Return(nil)
+	sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
+		PendingID:        100,
+		ValidationStatus: "valid",
+	}).Return(nil)
+
+	sm.On("ClaimPendingEdges", blockedThreshold).Return(phase1, nil).Once()
+	sm.On("ClaimPendingEdges", blockedThreshold).Return([]*state.PendingEdge{phase2Edge}, nil).Once()
+	sm.On("ClaimPendingEdges", blockedThreshold).Return(([]*state.PendingEdge)(nil), nil)
+
+	sm.On("InsertAccessEvent", "ip_blocked").Return(nil)
+	sm.On("ClaimWalkbackBatch").Return((*state.PendingEdgeBatch)(nil), ([]*state.PendingEdge)(nil), nil)
+
+	callCount := 0
+	validateFn := func(username string, _ *http.Client) (telegramhelper.ChannelValidationResult, error) {
+		callCount++
+		// The first blockedThreshold calls are for phase1 edges (blocked).
+		// The next call is the probe (probeChannel = "telegram") — succeeds.
+		// Calls after that are for phase2 edge — valid.
+		if username == probeChannel {
+			return telegramhelper.ChannelValidationResult{Status: "valid"}, nil
+		}
+		if username == "goodchan" {
+			return telegramhelper.ChannelValidationResult{Status: "valid"}, nil
+		}
+		return telegramhelper.ChannelValidationResult{}, &telegramhelper.ValidationHTTPError{
+			Kind:    telegramhelper.ErrBlocked,
+			Wrapped: fmt.Errorf("403 Forbidden"),
+		}
+	}
+
+	// Use a very short probe interval so the test doesn't wait 5 minutes.
+	// We do this by manipulating time via a short context timeout: the test
+	// sets lastProbeAt to zero implicitly (zero value), so the probe fires
+	// immediately on the first blocked-state iteration.
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+
+	err := runEdgeValidation(ctx, sm, cfg, &http.Client{},
+		telegramhelper.NewValidatorRateLimiter(0, 0), blockedThreshold, validateFn)
+	assert.Error(t, err) // exits via context cancellation
+
+	sm.AssertCalled(t, "InsertAccessEvent", "ip_blocked")
+	sm.AssertCalled(t, "UpdatePendingEdge", state.PendingEdgeUpdate{
+		PendingID:        100,
+		ValidationStatus: "valid",
+	})
+}
+
 func TestRunValidationLoop_ContextCancellation(t *testing.T) {
 	sm := new(MockStateManager)
 	cfg := common.CrawlerConfig{

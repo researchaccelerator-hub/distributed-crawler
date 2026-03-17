@@ -4265,3 +4265,14 @@ func (dsm *DaprStateManager) RecoverOrphanEdges() (int, error) {
 	}
 	return orphanCount, nil
 }
+
+// InsertAccessEvent appends a row to access_events. Called by the validator
+// when it enters blocked state so that an external process can trigger IP
+// rotation.
+func (dsm *DaprStateManager) InsertAccessEvent(reason string) error {
+	sqlQuery := `INSERT INTO access_events (reason, occurred_at) VALUES ($1, NOW());`
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, []any{reason}); err != nil {
+		return fmt.Errorf("validator-db: failed to insert access event: %w", err)
+	}
+	return nil
+}

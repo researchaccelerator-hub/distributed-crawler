@@ -68,6 +68,7 @@ func (n *noopStateManager) GetRandomSeedChannel() (string, error)               
 func (n *noopStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)       { return false, nil }
 func (n *noopStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)          { return false, nil }
 func (n *noopStateManager) CountIncompleteBatches(_ string) (int, error)                  { return 0, nil }
+func (n *noopStateManager) InsertAccessEvent(_ string) error                              { return nil }
 func (n *noopStateManager) Close() error                                                  { return nil }
 
 // blockedValidatorSM always returns an empty page buffer with N incomplete batches,

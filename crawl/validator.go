@@ -30,7 +30,20 @@ const (
 	walkbackPollInterval        = 3 * time.Second
 	staleBatchRecoveryInterval  = 5 * time.Minute
 	staleBatchRecoveryThreshold = 10 * time.Minute
+
+	// Blocked-state thresholds.
+	blockedThreshold = 5              // consecutive ErrBlocked results before entering blocked state
+	probeInterval    = 5 * time.Minute
+	probeChannel     = "telegram"     // well-known canary channel for probe requests
 )
+
+// validatorBlockedState tracks consecutive access-blocked outcomes so the
+// edge-validation loop can pause HTTP requests and probe periodically.
+type validatorBlockedState struct {
+	active           bool
+	consecutiveCount int
+	lastProbeAt      time.Time
+}
 
 // RunValidationLoop runs two goroutines:
 //   - Edge validator: claims and HTTP-validates pending edges
@@ -64,7 +77,7 @@ func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, c
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		return runEdgeValidation(ctx, sm, cfg, httpClient, rateLimiter, claimSize)
+		return runEdgeValidation(ctx, sm, cfg, httpClient, rateLimiter, claimSize, telegramhelper.ValidateChannelHTTP)
 	})
 
 	g.Go(func() error {
@@ -75,6 +88,9 @@ func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, c
 }
 
 // runEdgeValidation continuously claims and validates pending edges via HTTP.
+// When consecutive ErrBlocked responses reach blockedThreshold the loop enters
+// a blocked state: it stops claiming edges and instead probes t.me every
+// probeInterval. Validation resumes once the probe succeeds.
 func runEdgeValidation(
 	ctx context.Context,
 	sm state.StateManagementInterface,
@@ -82,7 +98,10 @@ func runEdgeValidation(
 	httpClient *http.Client,
 	rateLimiter *telegramhelper.ValidatorRateLimiter,
 	claimSize int,
+	validateFn ValidateFunc,
 ) error {
+	var blocked validatorBlockedState
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,6 +109,26 @@ func runEdgeValidation(
 		default:
 		}
 
+		// --- Blocked state: probe instead of claiming ---
+		if blocked.active {
+			if time.Since(blocked.lastProbeAt) < probeInterval {
+				sleepCtx(ctx, edgePollInterval)
+				continue
+			}
+			blocked.lastProbeAt = time.Now()
+			_, probeErr := validateFn(probeChannel, httpClient)
+			if probeErr == nil {
+				log.Info().Msg("validator-edge: probe succeeded, resuming validation")
+				blocked.active = false
+				blocked.consecutiveCount = 0
+				continue // immediately resume claiming — no sleep needed
+			}
+			log.Warn().Err(probeErr).Msg("validator-edge: probe failed, still blocked")
+			sleepCtx(ctx, edgePollInterval)
+			continue
+		}
+
+		// --- Normal: claim and validate edges ---
 		edges, err := sm.ClaimPendingEdges(claimSize)
 		if err != nil {
 			log.Warn().Err(err).Msg("validator-edge: failed to claim pending edges")
@@ -109,10 +148,33 @@ func runEdgeValidation(
 			default:
 			}
 
-			update, kind := validateSingleEdge(ctx, sm, cfg, httpClient, rateLimiter, edge, telegramhelper.ValidateChannelHTTP)
-			if kind == outcomeBlocked {
-				log.Warn().Str("channel", edge.DestinationChannel).Msg("validator-edge: access blocked, edge left pending")
+			update, kind := validateSingleEdge(ctx, sm, cfg, httpClient, rateLimiter, edge, validateFn)
+
+			switch kind {
+			case outcomeBlocked:
+				blocked.consecutiveCount++
+				log.Warn().Str("channel", edge.DestinationChannel).
+					Int("consecutive_blocked", blocked.consecutiveCount).
+					Msg("validator-edge: access blocked, edge left pending")
+				if !blocked.active && blocked.consecutiveCount >= blockedThreshold {
+					blocked.active = true
+					// Leave lastProbeAt at zero so the first probe fires
+					// immediately — confirm the block rather than waiting
+					// a full probeInterval before checking.
+					log.Warn().Int("threshold", blockedThreshold).
+						Msg("validator-edge: entering blocked state")
+					if eventErr := sm.InsertAccessEvent("ip_blocked"); eventErr != nil {
+						log.Warn().Err(eventErr).Msg("validator-edge: failed to insert access event")
+					}
+				}
+			case outcomeTransient:
+				if blocked.consecutiveCount > 0 {
+					blocked.consecutiveCount--
+				}
+			default: // outcomeDefinitive
+				blocked.consecutiveCount = 0
 			}
+
 			if updateErr := sm.UpdatePendingEdge(update); updateErr != nil {
 				log.Warn().Err(updateErr).Int("pending_id", edge.PendingID).
 					Msg("validator-edge: failed to update edge status")
