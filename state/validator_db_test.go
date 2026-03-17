@@ -449,7 +449,9 @@ func TestClaimDiscoveredChannel_SQLInjectionSafe(t *testing.T) {
 
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "it''s_a_test")
+	// Value must appear in params, not interpolated into the SQL string.
+	assert.Contains(t, mc.bindingCalls[0].Metadata["params"], "it's_a_test")
+	assert.NotContains(t, mc.bindingCalls[0].Metadata["sql"], "it's_a_test")
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +482,24 @@ func TestIsChannelDiscovered_NotFound(t *testing.T) {
 	found, err := dsm.IsChannelDiscovered("unknown_chan", "crawl-1")
 	require.NoError(t, err)
 	assert.False(t, found)
+}
+
+func TestIsChannelDiscovered_SQLInjectionSafe(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			return &daprc.BindingEvent{Data: jsonRows([][]any{})}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	_, err := dsm.IsChannelDiscovered("it's_a_test", "crawl-1")
+	require.NoError(t, err)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	// Value must appear in params, not interpolated into the SQL string.
+	assert.Contains(t, mc.bindingCalls[0].Metadata["params"], "it's_a_test")
+	assert.NotContains(t, mc.bindingCalls[0].Metadata["sql"], "it's_a_test")
 }
 
 // ---------------------------------------------------------------------------
@@ -520,12 +540,15 @@ func TestCountIncompleteBatches_SQLInjectionSafe(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	_, err := dsm.CountIncompleteBatches("'; DROP TABLE pending_edge_batches; --")
+	malicious := "'; DROP TABLE pending_edge_batches; --"
+	_, err := dsm.CountIncompleteBatches(malicious)
 	require.NoError(t, err)
 
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "''")
+	// Value must appear in params, not interpolated into the SQL string.
+	assert.Contains(t, mc.bindingCalls[0].Metadata["params"], "pending_edge_batches")
+	assert.NotContains(t, mc.bindingCalls[0].Metadata["sql"], "DROP")
 }
 
 // ---------------------------------------------------------------------------

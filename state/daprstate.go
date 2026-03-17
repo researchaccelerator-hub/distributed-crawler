@@ -3591,25 +3591,10 @@ func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 	log.Info().Str("log_tag", "rw_page_buffer").Msg("Getting pages from page buffer")
 	pages := make([]Page, 0)
 
-	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = '%s' LIMIT %d;", dsm.config.CrawlID, limit)
-	req := &daprc.InvokeBindingRequest{
-		Name:      dsm.databaseBinding,
-		Operation: "query",
-		Data:      nil,
-		Metadata: map[string]string{
-			"sql": query,
-		},
-	}
-	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
+	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = $1 LIMIT %d;", limit)
+	pageResults, err := dsm.queryDatabase(query, dsm.config.CrawlID)
 	if err != nil {
 		return pages, fmt.Errorf("random-walk-layer: failed to pull page buffer pages: %w", err)
-	}
-
-	var pageResults [][]any
-
-	if err := json.Unmarshal(res.Data, &pageResults); err != nil {
-		log.Error().Str("result_data", string(res.Data)).Str("log_tag", "rw_page_buffer").Msg("Failed to unmarshal page buffer response")
-		return pages, fmt.Errorf("random-walk-layer: Failed to unmarshal response for page buffer: %v", err)
 	}
 
 	if len(pageResults) > 0 {
@@ -3629,11 +3614,10 @@ func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 				SequenceID: seqID,
 			})
 		}
-		return pages, nil
 	} else {
 		log.Error().Str("log_tag", "rw_page_buffer").Msg("No pages found in page buffer")
-		return pages, nil
 	}
+	return pages, nil
 }
 
 // TODO: alot of shared code between StorePost. Generalize a solution that both functions can use
@@ -3765,16 +3749,23 @@ func (dsm *DaprStateManager) fetchAllPages(crawlID string, pageIDs []string) ([]
 // queryDatabase is a helper for SELECT queries that return rows.  It invokes
 // the DAPR postgres binding in "query" mode and unmarshals the JSON response
 // into a [][]any (one sub-slice per row).
-func (dsm *DaprStateManager) queryDatabase(sqlQuery string) ([][]any, error) {
+func (dsm *DaprStateManager) queryDatabase(sqlQuery string, params ...any) ([][]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+
+	metadata := map[string]string{"sql": sqlQuery}
+	if len(params) > 0 {
+		jsonData, err := json.Marshal(params)
+		if err != nil {
+			return nil, fmt.Errorf("queryDatabase: failed to marshal params: %w", err)
+		}
+		metadata["params"] = string(jsonData)
+	}
 
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
-		Metadata: map[string]string{
-			"sql": sqlQuery,
-		},
+		Metadata:  metadata,
 	}
 	res, err := (*dsm.client).InvokeBinding(ctx, req)
 	if err != nil {
@@ -3967,10 +3958,9 @@ func (dsm *DaprStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*Pending
 	}
 
 	// Step 2: Fetch all edges for this batch.
-	edgeSQL := fmt.Sprintf(`SELECT pending_id, batch_id, crawl_id, destination_channel, source_channel, sequence_id, discovery_time, source_type, validation_status, validation_reason FROM pending_edges WHERE batch_id = '%s';`,
-		strings.ReplaceAll(batchID, "'", "''"))
+	edgeSQL := `SELECT pending_id, batch_id, crawl_id, destination_channel, source_channel, sequence_id, discovery_time, source_type, validation_status, validation_reason FROM pending_edges WHERE batch_id = $1;`
 
-	edgeRows, err := dsm.queryDatabase(edgeSQL)
+	edgeRows, err := dsm.queryDatabase(edgeSQL, batchID)
 	if err != nil {
 		return batch, nil, fmt.Errorf("validator-db: failed to fetch edges for batch %s: %w", batchID, err)
 	}
@@ -4103,12 +4093,9 @@ func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
 //
 // COUNT = 1 → we inserted (first claim).  COUNT = 0 → conflict (already claimed).
 func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
-	sqlQuery := fmt.Sprintf(
-		`WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id) VALUES ('%s', '%s') ON CONFLICT (channel_username, crawl_id) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`,
-		strings.ReplaceAll(username, "'", "''"),
-		strings.ReplaceAll(crawlID, "'", "''"))
+	sqlQuery := `WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id) VALUES ($1, $2) ON CONFLICT (channel_username, crawl_id) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`
 
-	rows, err := dsm.queryDatabase(sqlQuery)
+	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID)
 	if err != nil {
 		return false, fmt.Errorf("validator-db: failed to claim discovered channel: %w", err)
 	}
@@ -4127,10 +4114,8 @@ func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (b
 // IsChannelDiscovered checks whether a channel has already been claimed for a
 // crawl without inserting.
 func (dsm *DaprStateManager) IsChannelDiscovered(username, crawlID string) (bool, error) {
-	sqlQuery := fmt.Sprintf(`SELECT 1 FROM discovered_channels WHERE channel_username = '%s' AND crawl_id = '%s' LIMIT 1;`,
-		strings.ReplaceAll(username, "'", "''"),
-		strings.ReplaceAll(crawlID, "'", "''"))
-	rows, err := dsm.queryDatabase(sqlQuery)
+	sqlQuery := `SELECT 1 FROM discovered_channels WHERE channel_username = $1 AND crawl_id = $2 LIMIT 1;`
+	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID)
 	if err != nil {
 		return false, fmt.Errorf("validator-db: failed to check discovered channel: %w", err)
 	}
@@ -4140,9 +4125,8 @@ func (dsm *DaprStateManager) IsChannelDiscovered(username, crawlID string) (bool
 // CountIncompleteBatches returns the count of pending_edge_batches with
 // status != 'completed' for the given crawl_id.
 func (dsm *DaprStateManager) CountIncompleteBatches(crawlID string) (int, error) {
-	sqlQuery := fmt.Sprintf(`SELECT COUNT(*) FROM pending_edge_batches WHERE crawl_id = '%s' AND status <> 'completed';`,
-		strings.ReplaceAll(crawlID, "'", "''"))
-	rows, err := dsm.queryDatabase(sqlQuery)
+	sqlQuery := `SELECT COUNT(*) FROM pending_edge_batches WHERE crawl_id = $1 AND status <> 'completed';`
+	rows, err := dsm.queryDatabase(sqlQuery, crawlID)
 	if err != nil {
 		return 0, fmt.Errorf("validator-db: failed to count incomplete batches: %w", err)
 	}

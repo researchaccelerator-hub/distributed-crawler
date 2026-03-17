@@ -426,10 +426,10 @@ func TestGetPagesFromPageBuffer_ParsesPages(t *testing.T) {
 }
 
 func TestGetPagesFromPageBuffer_QueryScopedToCrawlID(t *testing.T) {
-	capturedSQL := ""
+	var capturedParams string
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
-			capturedSQL = in.Metadata["sql"]
+			capturedParams = in.Metadata["params"]
 			data, _ := json.Marshal([][]interface{}{})
 			return &daprc.BindingEvent{Data: data}, nil
 		},
@@ -437,8 +437,9 @@ func TestGetPagesFromPageBuffer_QueryScopedToCrawlID(t *testing.T) {
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 	_, _ = dsm.GetPagesFromPageBuffer(10)
 
-	if !strings.Contains(capturedSQL, "crawl-rw-123") {
-		t.Fatalf("expected crawl_id in SQL for multi-pod isolation, got: %s", capturedSQL)
+	// crawl_id must be passed as a parameter, not interpolated into the SQL.
+	if !strings.Contains(capturedParams, "crawl-rw-123") {
+		t.Fatalf("expected crawl_id in params for multi-pod isolation, got: %s", capturedParams)
 	}
 }
 
