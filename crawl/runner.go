@@ -100,6 +100,12 @@ func pickWalkbackChannel(sm state.StateManagementInterface, sourceURL string, ex
 var connectionPool *telegramhelper.ConnectionPool
 var poolMu sync.Mutex
 
+// runForChannelFn is the function used to process a channel in RunForChannelWithPool.
+// Tests may override this variable to inject failures without executing the full
+// TDLib pipeline, allowing the pool retire/release control flow to be exercised
+// in isolation.
+var runForChannelFn = RunForChannel
+
 // InitConnectionPool initializes the global connection pool for TDLib clients.
 // This pool is used to manage and reuse Telegram client connections efficiently,
 // minimizing the overhead of creating new connections for each channel.
@@ -338,7 +344,7 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 
 		p.ConnectionID = connID
 		log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Started connection")
-		pages, procErr := RunForChannel(tdlibClient, p, storagePrefix, sm, cfg)
+		pages, procErr := runForChannelFn(tdlibClient, p, storagePrefix, sm, cfg)
 		if errors.Is(procErr, ErrFloodWaitRetire) {
 			retire = true
 		}
@@ -1110,29 +1116,42 @@ func processAllMessagesWithProcessor(
 										srcType = "unknown"
 									}
 
-									chat, err := tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
-										Username: o,
-									})
-
-									if err != nil {
-										log.Info().Err(err).Str("channel", o).Str("source_type", srcType).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
+									// Retry loop: sleep-and-retry on short FLOOD_WAIT; retire on long FLOOD_WAIT.
+									var chat *client.Chat
+									for {
+										var searchErr error
+										chat, searchErr = tdlibClient.SearchPublicChat(&client.SearchPublicChatRequest{
+											Username: o,
+										})
+										if searchErr == nil {
+											break
+										}
+										if secs, isFlood := parseFloodWaitSecs(searchErr); isFlood {
+											if secs >= floodWaitRetireThresholdSecs {
+												log.Warn().Int("retry_after_secs", secs).Str("channel", o).
+													Msg("random-walk-channel: FLOOD_WAIT exceeds retire threshold, retiring client")
+												return nil, fmt.Errorf("random-walk-channel: FLOOD_WAIT %ds exceeds retire threshold: %w", secs, ErrFloodWaitRetire)
+											}
+											log.Warn().Int("retry_after_secs", secs).Str("channel", o).
+												Msg("random-walk-channel: FLOOD_WAIT on SearchPublicChat, sleeping and retrying")
+											time.Sleep(time.Duration(secs) * time.Second)
+											continue
+										}
+										log.Info().Err(searchErr).Str("channel", o).Str("source_type", srcType).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
 										lookupStats.record(srcType, false)
 										if lookupStats.total%100 == 0 {
 											lookupStats.log(owner.URL, "periodic")
 										}
-										if secs, isFlood := parseFloodWaitSecs(err); isFlood {
-											log.Warn().Int("retry_after_secs", secs).Str("channel", o).
-												Msg("random-walk-channel: FLOOD_WAIT on SearchPublicChat, not blacklisting channel")
-											if secs >= floodWaitRetireThresholdSecs {
-												return nil, fmt.Errorf("random-walk-channel: FLOOD_WAIT %ds exceeds retire threshold: %w", secs, ErrFloodWaitRetire)
-											}
-											continue
-										}
 										if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
 											log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
 										}
+										chat = nil
+										break
+									}
+									if chat == nil {
 										continue
 									}
+
 									chatType := string(chat.Type.ChatTypeType())
 
 									if chatType != "chatTypeSupergroup" {

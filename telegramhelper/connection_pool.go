@@ -438,6 +438,23 @@ func (p *ConnectionPool) RetireConnection(connID string) {
 		Msg("Connection permanently retired from pool due to FLOOD_WAIT")
 }
 
+// NewConnectionPoolForTesting creates a ConnectionPool with an injectable
+// TelegramService and no pre-loaded connections. Intended for use in tests
+// that need to control the pool's TDLib clients without real Telegram
+// authentication. Callers seed the pool by calling GetConnection followed by
+// ReleaseConnection before exercising the code under test.
+func NewConnectionPoolForTesting(service TelegramService, maxSize int) *ConnectionPool {
+	return &ConnectionPool{
+		availableConns: make(map[string]crawler.TDLibClient),
+		inUseConns:     make(map[string]crawler.TDLibClient),
+		maxSize:        maxSize,
+		service:        service,
+		storagePrefix:  "test",
+		defaultConfig:  common.CrawlerConfig{},
+		connDirMap:     make(map[string]string),
+	}
+}
+
 // Stats returns statistics about the current state of the connection pool,
 // including the number of available connections, in-use connections, and
 // the maximum pool size. This is useful for monitoring and debugging.

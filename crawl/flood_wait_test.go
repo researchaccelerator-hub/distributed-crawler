@@ -8,6 +8,26 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestErrFloodWaitRetire_IsDetectable verifies that errors.Is correctly unwraps
+// ErrFloodWaitRetire through the wrapping formats used in processAllMessagesWithProcessor.
+// This is the critical property relied upon by RunForChannelWithPool's retire decision.
+func TestErrFloodWaitRetire_IsDetectable(t *testing.T) {
+	// Single wrap — as returned by processAllMessagesWithProcessor.
+	wrapped := fmt.Errorf("random-walk-channel: FLOOD_WAIT 72560s exceeds retire threshold: %w", ErrFloodWaitRetire)
+	assert.True(t, errors.Is(wrapped, ErrFloodWaitRetire), "single-wrapped error must be detectable")
+
+	// Double wrap — if a future caller adds another layer.
+	doubleWrapped := fmt.Errorf("RunForChannel failed: %w", wrapped)
+	assert.True(t, errors.Is(doubleWrapped, ErrFloodWaitRetire), "double-wrapped error must be detectable")
+
+	// Bare sentinel itself.
+	assert.True(t, errors.Is(ErrFloodWaitRetire, ErrFloodWaitRetire), "sentinel must equal itself")
+
+	// Unrelated error must not match.
+	other := fmt.Errorf("connection timeout")
+	assert.False(t, errors.Is(other, ErrFloodWaitRetire), "unrelated error must not match ErrFloodWaitRetire")
+}
+
 func TestParseFloodWaitSecs(t *testing.T) {
 	tests := []struct {
 		name        string
