@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+
+	"github.com/rs/zerolog/log"
 )
 
 // browserUserAgents is a pool of Chromium-based browser UA strings rotated per
@@ -69,7 +71,9 @@ func ValidateChannelHTTP(username string, httpClient *http.Client) (ChannelValid
 	req.Header.Set("User-Agent", browserUserAgents[rand.Intn(len(browserUserAgents))])
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Accept-Encoding", "gzip")
+	// Do NOT set Accept-Encoding manually — Go's transport adds it automatically
+	// and decompresses the response. Setting it here would disable that and leave
+	// the body as raw gzip bytes, breaking HTML parsing.
 	req.Header.Set("Upgrade-Insecure-Requests", "1")
 	req.Header.Set("Sec-Fetch-Dest", "document")
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
@@ -110,6 +114,11 @@ func ValidateChannelHTTP(username string, httpClient *http.Client) (ChannelValid
 	if parseErr != nil {
 		// Unrecognised or empty title on a 200 response — treat as soft-block
 		// rather than a definitive invalid result.
+		log.Warn().
+			Str("channel", username).
+			Str("response_body", string(body)).
+			Err(parseErr).
+			Msg("channelvalidator: unrecognised HTML response")
 		return ChannelValidationResult{}, &ValidationHTTPError{
 			Kind:    ErrBlocked,
 			Wrapped: fmt.Errorf("channelvalidator: failed to parse response for %s: %w", username, parseErr),
