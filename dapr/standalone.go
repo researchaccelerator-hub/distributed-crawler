@@ -145,8 +145,9 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		urls = append(urls, fileURLs...)
 	}
 
-	// For random sampling, URLs are not required since we discover content randomly
-	noURLsRequired := (crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") ||
+	// For random sampling or validate-only, URLs are not required
+	noURLsRequired := crawlerCfg.ValidateOnly ||
+		(crawlerCfg.Platform == "youtube" && crawlerCfg.SamplingMethod == "random") ||
 		crawlerCfg.SamplingMethod == "random-walk"
 	if len(urls) == 0 && !noURLsRequired {
 		log.Fatal().Msg("No URLs provided. Use --urls or --url-file to specify URLs to crawl")
