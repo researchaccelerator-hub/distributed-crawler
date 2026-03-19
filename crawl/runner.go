@@ -1255,7 +1255,7 @@ func processAllMessagesWithProcessor(
 					Walkback:           true,
 					Skipped:            false,
 					DiscoveryTime:      time.Now(),
-					SequenceID:         page.SequenceID,
+					SequenceID:         owner.SequenceID,
 				}
 				if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
 					log.Error().Err(bufErr).Msg("random-walk-tandem: failed to add walkback page to page buffer")
@@ -1298,7 +1298,8 @@ func processAllMessagesWithProcessor(
 					return nil, walkErr
 				}
 				page.URL = walkbackURL
-				// Walkback starts a new chain
+				// The walkback edge belongs to the current chain; the next crawl starts a new chain.
+				linkToFollow.SequenceID = owner.SequenceID
 				page.SequenceID = uuid.New().String()
 			} else {
 				linkToFollow.Walkback = false
@@ -1310,9 +1311,9 @@ func processAllMessagesWithProcessor(
 				page.URL = newChannelSlice[rand.IntN(len(newChannelSlice))]
 				delete(newChannels, page.URL) // remaining items in map will be used to create skipped edges
 				// Forward edge: propagate the current chain's sequence ID
+				linkToFollow.SequenceID = owner.SequenceID
 				page.SequenceID = owner.SequenceID
 			}
-			linkToFollow.SequenceID = page.SequenceID
 			linkToFollow.DestinationChannel = page.URL
 			log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
 				Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).

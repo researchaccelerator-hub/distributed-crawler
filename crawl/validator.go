@@ -393,6 +393,7 @@ func processWalkbackBatch(
 		Str("source_channel", batch.SourceChannel).Str("batch_id", batch.BatchID).
 		Msg("random-walk-walkback: Walkback decision data (validator)")
 
+	var pageSequenceID string
 	if walkback {
 		// Walkback: pick random from discovered channels, avoiding source and newly validated channels.
 		exclude := make(map[string]bool, len(validFirstClaimed))
@@ -404,7 +405,9 @@ func processWalkbackBatch(
 		if walkErr != nil {
 			return walkErr
 		}
-		sequenceID = uuid.New().String()
+		// The walkback edge belongs to the current chain; the next crawl starts a new chain.
+		sequenceID = batch.SequenceID
+		pageSequenceID = uuid.New().String()
 	} else {
 		// Forward: pick random from valid first-claimed channels
 		idx := rand.IntN(newChannelCount)
@@ -412,6 +415,7 @@ func processWalkbackBatch(
 		// Remove chosen from slice for skipped edge creation
 		validFirstClaimed = append(validFirstClaimed[:idx], validFirstClaimed[idx+1:]...)
 		sequenceID = batch.SequenceID
+		pageSequenceID = batch.SequenceID
 	}
 
 	// Build next page for page_buffer.
@@ -422,7 +426,7 @@ func processWalkbackBatch(
 		ParentID:   batch.SourcePageID,
 		Depth:      batch.SourceDepth + 1,
 		URL:        nextURL,
-		SequenceID: sequenceID,
+		SequenceID: pageSequenceID,
 		Status:     "unfetched",
 		CrawlID:    batch.CrawlID,
 	}
