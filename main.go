@@ -788,7 +788,7 @@ func init() {
 	// Validator / tandem-crawl mode flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.TandemCrawl, "tandem-crawl", false, "Tandem mode: write edges to pending_edges for validator (no SearchPublicChat)")
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.ValidateOnly, "validate-only", false, "Run as validator pod: process pending edges via HTTP, no crawl loop")
-	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ValidatorRequestRate, "validator-request-rate", 120, "HTTP validation calls per minute (default: 120)")
+	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ValidatorRequestRate, "validator-request-rate", 6, "HTTP validation calls per minute (default: 6)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorRequestJitterMs, "validator-request-jitter-ms", 200, "Max jitter in ms between validator HTTP requests (default: 200)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorClaimBatchSize, "validator-claim-batch-size", 10, "Number of pending edges to claim per DB round-trip (default: 10)")
 
