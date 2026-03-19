@@ -4046,13 +4046,13 @@ func (dsm *DaprStateManager) FlushBatchStats(batchID, crawlID string, edges []*P
 			c.notChannel++
 		case "invalid":
 			c.invalid++
-		case "already_discovered":
+		case "duplicate":
 			c.alreadyDiscovered++
 		}
 	}
 
 	// Upsert each source_type
-	upsertSQL := `INSERT INTO source_type_stats (crawl_id, source_type, total, valid, not_channel, invalid, already_discovered) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (crawl_id, source_type) DO UPDATE SET total = source_type_stats.total + EXCLUDED.total, valid = source_type_stats.valid + EXCLUDED.valid, not_channel = source_type_stats.not_channel + EXCLUDED.not_channel, invalid = source_type_stats.invalid + EXCLUDED.invalid, already_discovered = source_type_stats.already_discovered + EXCLUDED.already_discovered;`
+	upsertSQL := `INSERT INTO source_type_stats (crawl_id, source_type, total, valid, not_channel, invalid, duplicate) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (crawl_id, source_type) DO UPDATE SET total = source_type_stats.total + EXCLUDED.total, valid = source_type_stats.valid + EXCLUDED.valid, not_channel = source_type_stats.not_channel + EXCLUDED.not_channel, invalid = source_type_stats.invalid + EXCLUDED.invalid, duplicate = source_type_stats.duplicate + EXCLUDED.duplicate;`
 
 	for st, c := range agg {
 		if err := dsm.ExecuteDatabaseOperation(upsertSQL, []any{crawlID, st, c.total, c.valid, c.notChannel, c.invalid, c.alreadyDiscovered}); err != nil {

@@ -314,7 +314,7 @@ func TestFlushBatchStats_AggregatesAndDeletes(t *testing.T) {
 		{SourceType: "mention", ValidationStatus: "invalid"},
 		{SourceType: "mention", ValidationStatus: "valid"},
 		{SourceType: "url", ValidationStatus: "not_channel"},
-		{SourceType: "", ValidationStatus: "already_discovered"},
+		{SourceType: "", ValidationStatus: "duplicate"},
 	}
 
 	err := dsm.FlushBatchStats("batch-1", "crawl-1", edges)
@@ -341,7 +341,7 @@ func TestFlushBatchStats_AggregatesAndDeletes(t *testing.T) {
 			assert.Equal(t, float64(2), params[3]) // valid
 			assert.Equal(t, float64(0), params[4]) // not_channel
 			assert.Equal(t, float64(1), params[5]) // invalid
-			assert.Equal(t, float64(0), params[6]) // already_discovered
+			assert.Equal(t, float64(0), params[6]) // duplicate
 		}
 	}
 }

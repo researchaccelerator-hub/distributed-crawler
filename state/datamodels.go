@@ -103,7 +103,7 @@ type PendingEdge struct {
 	SequenceID         string    `json:"sequenceId"`
 	DiscoveryTime      time.Time `json:"discoveryTime"`
 	SourceType         string    `json:"sourceType"`         // "mention" | "text_url" | "url" | "plaintext" | ""
-	ValidationStatus   string    `json:"validationStatus"`   // "pending" | "validating" | "valid" | "not_channel" | "invalid" | "already_discovered"
+	ValidationStatus   string    `json:"validationStatus"`   // "pending" | "validating" | "valid" | "not_channel" | "invalid" | "duplicate"
 	ValidationReason   string    `json:"validationReason"`   // "" | "not_supergroup" | "not_found"
 }
 

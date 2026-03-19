@@ -181,7 +181,7 @@ func TestValidateSingleEdge_AlreadyDiscovered(t *testing.T) {
 	ctx := context.Background()
 	update, _ := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, nil)
 
-	assert.Equal(t, "already_discovered", update.ValidationStatus)
+	assert.Equal(t, "duplicate", update.ValidationStatus)
 }
 
 func TestValidateSingleEdge_ValidButRaceLost(t *testing.T) {
@@ -204,7 +204,7 @@ func TestValidateSingleEdge_ValidButRaceLost(t *testing.T) {
 
 	update, _ := validateSingleEdge(ctx, sm, cfg, &http.Client{}, rl, edge, vfn)
 
-	assert.Equal(t, "already_discovered", update.ValidationStatus)
+	assert.Equal(t, "duplicate", update.ValidationStatus)
 }
 
 // ---------------------------------------------------------------------------

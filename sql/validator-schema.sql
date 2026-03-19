@@ -62,7 +62,7 @@ CREATE TABLE pending_edges (
     source_type         VARCHAR(16)  NOT NULL DEFAULT '',
     -- 'mention' | 'text_url' | 'url' | 'plaintext' | ''
     validation_status   VARCHAR(16)  NOT NULL DEFAULT 'pending',
-    -- 'pending' | 'validating' | 'valid' | 'not_channel' | 'invalid' | 'already_discovered'
+    -- 'pending' | 'validating' | 'valid' | 'not_channel' | 'invalid' | 'duplicate'
     validation_reason   VARCHAR(64)  NOT NULL DEFAULT '',
     -- '' | 'not_supergroup' | 'not_found'
     validated_at        TIMESTAMP
@@ -91,7 +91,7 @@ CREATE TABLE source_type_stats (
     valid              INTEGER     NOT NULL DEFAULT 0,
     not_channel        INTEGER     NOT NULL DEFAULT 0,
     invalid            INTEGER     NOT NULL DEFAULT 0,
-    already_discovered INTEGER     NOT NULL DEFAULT 0,
+    duplicate INTEGER     NOT NULL DEFAULT 0,
     PRIMARY KEY (crawl_id, source_type)
 );
 
@@ -185,7 +185,7 @@ GRANT SELECT ON TABLE access_events        TO crawler_readonly;
 --     valid              INTEGER     NOT NULL DEFAULT 0,
 --     not_channel        INTEGER     NOT NULL DEFAULT 0,
 --     invalid            INTEGER     NOT NULL DEFAULT 0,
---     already_discovered INTEGER     NOT NULL DEFAULT 0,
+--     duplicate INTEGER     NOT NULL DEFAULT 0,
 --     PRIMARY KEY (crawl_id, source_type)
 -- );
 

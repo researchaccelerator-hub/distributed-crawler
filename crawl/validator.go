@@ -221,7 +221,7 @@ func validateSingleEdge(
 		log.Debug().Str("channel", channel).Msg("validator-edge: already discovered, skipping HTTP")
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
-			ValidationStatus: "already_discovered",
+			ValidationStatus: "duplicate",
 		}, outcomeDefinitive
 	}
 
@@ -267,7 +267,7 @@ func validateSingleEdge(
 			// Another validator already claimed this channel
 			return state.PendingEdgeUpdate{
 				PendingID:        edge.PendingID,
-				ValidationStatus: "already_discovered",
+				ValidationStatus: "duplicate",
 			}, outcomeDefinitive
 		}
 		// Cache the channel so future lookups can skip SearchPublicChat
@@ -364,7 +364,7 @@ func processWalkbackBatch(
 	batch *state.PendingEdgeBatch,
 	allEdges []*state.PendingEdge,
 ) error {
-	// Collect valid first-claimed channels (not already_discovered)
+	// Collect valid first-claimed channels (not duplicate)
 	var validFirstClaimed []string
 	for _, e := range allEdges {
 		if e.ValidationStatus == "valid" {
