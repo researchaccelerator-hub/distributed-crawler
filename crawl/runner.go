@@ -950,6 +950,7 @@ func processAllMessagesWithProcessor(
 
 	// tandem-mode: batch created lazily on first valid edge
 	var tandemBatch *state.PendingEdgeBatch
+	seenInBatch := make(map[string]struct{})
 
 	// Process messages
 	for _, message := range messages {
@@ -1086,6 +1087,13 @@ func processAllMessagesWithProcessor(
 										Msg("random-walk-tandem: Username failed pre-filter, skipping")
 									continue
 								}
+
+								// Dedup: skip if already queued in this batch
+								if _, seen := seenInBatch[o]; seen {
+									log.Debug().Str("channel", o).Msg("random-walk-tandem: Duplicate outlink in batch, skipping")
+									continue
+								}
+								seenInBatch[o] = struct{}{}
 
 								// Create batch on first edge (lazy init)
 								if tandemBatch == nil {
