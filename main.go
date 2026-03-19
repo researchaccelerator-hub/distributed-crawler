@@ -212,8 +212,10 @@ Examples:
 			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
 		}
 
-		// Validate sampling method combinations (skip URL validation for dapr-job mode)
-		if err := validateSamplingMethod(common.SamplingValidationInput{
+		// Validate sampling method combinations (skip for validate-only and dapr-job mode)
+		if crawlerCfg.ValidateOnly {
+			log.Debug().Msg("validate-only mode: skipping sampling method validation")
+		} else if err := validateSamplingMethod(common.SamplingValidationInput{
 			Platform:       crawlerCfg.Platform,
 			SamplingMethod: crawlerCfg.SamplingMethod,
 			URLList:        urlList,

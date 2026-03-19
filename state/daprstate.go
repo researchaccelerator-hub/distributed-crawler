@@ -3588,7 +3588,7 @@ func (dsm *DaprStateManager) DeletePageBufferPages(pageIDs []string) error {
 }
 
 func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
-	log.Info().Str("log_tag", "rw_page_buffer").Msg("Getting pages from page buffer")
+	log.Debug().Str("log_tag", "rw_page_buffer").Msg("Getting pages from page buffer")
 	pages := make([]Page, 0)
 
 	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = $1 LIMIT %d;", limit)
@@ -3598,7 +3598,7 @@ func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 	}
 
 	if len(pageResults) > 0 {
-		log.Info().Int("count", len(pageResults)).Str("log_tag", "rw_page_buffer").Msg("Found pages in page buffer")
+		log.Debug().Int("count", len(pageResults)).Str("log_tag", "rw_page_buffer").Msg("Found pages in page buffer")
 		for _, page := range pageResults {
 			seqID := ""
 			if len(page) > 5 && page[5] != nil {

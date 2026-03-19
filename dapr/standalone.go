@@ -811,6 +811,14 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			break
 		}
 
+		// Don't poll the DB when all worker slots are occupied — any pages
+		// returned would be deduplicated by inFlight and wasted round-trips.
+		// Wait until at least one worker finishes and frees capacity.
+		if int(inFlightCount.Load()) >= maxWorkers {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
 		pages, err := sm.GetPagesFromPageBuffer(maxWorkers)
 		if err != nil {
 			log.Error().Err(err).Msg("random-walk-layerless: failed to get pages from page buffer")
