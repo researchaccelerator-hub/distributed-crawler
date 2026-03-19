@@ -2,39 +2,31 @@ package telegramhelper
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
+	"golang.org/x/net/http2"
 )
 
-// utlsRoundTripper is an http.RoundTripper that dials TLS connections using
-// uTLS with a Chrome fingerprint, replacing Go's identifiable default JA3
-// fingerprint with one indistinguishable from a real browser.
-type utlsRoundTripper struct {
-	inner *http.Transport
-}
-
-// RoundTrip implements http.RoundTripper. For HTTPS requests it replaces the
-// standard TLS handshake with a uTLS Chrome handshake. HTTP requests are
-// forwarded to the inner transport unchanged.
-func (t *utlsRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return t.inner.RoundTrip(req)
-}
-
-// NewValidatorHTTPClient returns an *http.Client configured with a uTLS
-// transport that presents a Chrome browser TLS fingerprint. Drop-in
-// replacement for &http.Client{Timeout: ...}.
+// NewValidatorHTTPClient returns an *http.Client that uses golang.org/x/net/http2.Transport
+// with a uTLS Chrome TLS fingerprint. Using http2.Transport directly (rather than
+// http.Transport with a custom DialTLSContext) ensures HTTP/2 framing is handled
+// correctly when the server negotiates h2 via ALPN — which t.me always does.
+// The Chrome fingerprint is preserved because uTLS performs the TLS handshake.
 func NewValidatorHTTPClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
 	}
 
-	transport := &http.Transport{
-		DialContext: dialer.DialContext,
-		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+	h2Transport := &http2.Transport{
+		// DialTLSContext is called by http2.Transport for each new HTTPS connection.
+		// We perform the TLS handshake ourselves via uTLS so the ClientHello looks
+		// like Chrome rather than Go's standard library.
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
 			host, _, err := net.SplitHostPort(addr)
 			if err != nil {
 				return nil, err
@@ -45,14 +37,9 @@ func NewValidatorHTTPClient(timeout time.Duration) *http.Client {
 				return nil, err
 			}
 
-			// Restrict ALPN to HTTP/1.1 only. HelloChrome_Auto normally
-		// advertises h2, but the http.Transport with a custom DialTLSContext
-		// does not set up the HTTP/2 framing layer — so if the server
-		// negotiates h2 the connection breaks with a framing error.
-		tlsConn := utls.UClient(conn, &utls.Config{
+			tlsConn := utls.UClient(conn, &utls.Config{
 				ServerName:         host,
 				InsecureSkipVerify: false,
-				NextProtos:         []string{"http/1.1"},
 			}, utls.HelloChrome_Auto)
 
 			if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -61,18 +48,10 @@ func NewValidatorHTTPClient(timeout time.Duration) *http.Client {
 			}
 			return tlsConn, nil
 		},
-		MaxIdleConns:          10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
 	}
 
 	return &http.Client{
-		Transport: &utlsRoundTripper{inner: transport},
+		Transport: h2Transport,
 		Timeout:   timeout,
 	}
 }
-
-// Ensure utlsRoundTripper satisfies the interface at compile time.
-var _ http.RoundTripper = (*utlsRoundTripper)(nil)
-
