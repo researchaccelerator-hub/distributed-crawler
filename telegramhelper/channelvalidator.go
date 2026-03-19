@@ -143,6 +143,12 @@ func ParseChannelHTML(html string) (ChannelValidationResult, error) {
 		return ChannelValidationResult{Status: "not_channel", Reason: "not_supergroup"}, nil
 	}
 
+	// t.me/<reserved-path> (e.g. "addlist", "joinchat") redirects to telegram.org
+	// and returns the homepage with title "Telegram Messenger". Treat as not_found.
+	if title == "Telegram Messenger" {
+		return ChannelValidationResult{Status: "invalid", Reason: "not_found"}, nil
+	}
+
 	return ChannelValidationResult{}, fmt.Errorf("channelvalidator: unrecognised title pattern: %q", title)
 }
 

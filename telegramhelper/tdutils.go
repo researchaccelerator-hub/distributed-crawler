@@ -25,7 +25,7 @@ var channelLinkRegex = regexp.MustCompile(`(https?://)?t\.me/([a-zA-Z][a-zA-Z0-9
 // telegramReservedPaths are t.me path segments that are not channel usernames.
 // The regex captures these as if they were usernames, so we filter them out.
 var telegramReservedPaths = map[string]bool{
-	"joinchat": true, "addstickers": true, "addtheme": true,
+	"joinchat": true, "addlist": true, "addstickers": true, "addtheme": true,
 	"setlanguage": true, "share": true, "c": true, "s": true,
 	"iv": true, "proxy": true, "socks": true, "login": true,
 	"confirm": true, "bg": true,
