@@ -122,6 +122,10 @@ func (m *MockYouTubeStateManager) ClaimDiscoveredChannel(_ string, _ string) (bo
 func (m *MockYouTubeStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *MockYouTubeStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 func (m *MockYouTubeStateManager) InsertAccessEvent(_ string) error                                   { return nil }
+func (m *MockYouTubeStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)               { return nil, nil }
+func (m *MockYouTubeStateManager) DeleteEdgeRecord(_, _ string) error                                  { return nil }
+func (m *MockYouTubeStateManager) GetRandomSkippedEdge(_, _ string) (*state.EdgeRecord, error)        { return nil, nil }
+func (m *MockYouTubeStateManager) PromoteEdge(_, _ string) error                                       { return nil }
 
 func TestYouTubeCrawlerInitialize(t *testing.T) {
 	tests := []struct {

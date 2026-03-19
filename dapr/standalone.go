@@ -903,6 +903,16 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 						log.Error().Msg("random-walk-layerless: all connections retired due to FLOOD_WAIT, aborting crawl")
 						shouldStop.Store(true)
 					}
+				} else if errors.Is(procErr, crawl.ErrTDLib400) {
+					// Channel is permanently invalid — find a replacement edge, then
+					// remove the failed page from the buffer.
+					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: TDLib 400, finding replacement edge")
+					if replErr := crawl.Handle400Replacement(sm, &p, crawlCfg); replErr != nil {
+						log.Error().Err(replErr).Str("url", p.URL).Msg("random-walk-layerless: failed to find 400 replacement")
+					}
+					if delErr := sm.DeletePageBufferPages([]string{p.ID}); delErr != nil {
+						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete 400 page from buffer")
+					}
 				} else {
 					if procErr != nil {
 						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")

@@ -124,6 +124,10 @@ func (m *MockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, err
 func (m *MockStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *MockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 func (m *MockStateManager) InsertAccessEvent(_ string) error                                   { return nil }
+func (m *MockStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)               { return nil, nil }
+func (m *MockStateManager) DeleteEdgeRecord(_, _ string) error                                  { return nil }
+func (m *MockStateManager) GetRandomSkippedEdge(_, _ string) (*state.EdgeRecord, error)        { return nil, nil }
+func (m *MockStateManager) PromoteEdge(_, _ string) error                                       { return nil }
 
 func TestPanicRecovery(t *testing.T) {
 	// Create a YouTube crawler with a mock client that will panic

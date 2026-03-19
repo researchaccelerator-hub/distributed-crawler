@@ -222,6 +222,22 @@ func (lsm *LocalStateManager) InsertAccessEvent(reason string) error {
 	return fmt.Errorf("InsertAccessEvent not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) GetEdgeRecord(_, _ string) (*EdgeRecord, error) {
+	return nil, fmt.Errorf("GetEdgeRecord not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) DeleteEdgeRecord(_, _ string) error {
+	return fmt.Errorf("DeleteEdgeRecord not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) GetRandomSkippedEdge(_, _ string) (*EdgeRecord, error) {
+	return nil, fmt.Errorf("GetRandomSkippedEdge not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) PromoteEdge(_, _ string) error {
+	return fmt.Errorf("PromoteEdge not implemented for local state manager")
+}
+
 // SaveState persists the state to the filesystem
 func (lsm *LocalStateManager) SaveState() error {
 	state := lsm.GetState()

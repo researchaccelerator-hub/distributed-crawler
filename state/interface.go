@@ -187,6 +187,25 @@ type StateManagementInterface interface {
 	// rotation mechanism.
 	InsertAccessEvent(reason string) error
 
+	// Edge record repair (400-replacement)
+
+	// GetEdgeRecord returns the edge_records row matching the current crawl,
+	// sequence_id, and destination_channel. Returns nil, nil if not found.
+	GetEdgeRecord(sequenceID, destinationChannel string) (*EdgeRecord, error)
+
+	// DeleteEdgeRecord removes the edge_records row matching the current crawl,
+	// sequence_id, and destination_channel.
+	DeleteEdgeRecord(sequenceID, destinationChannel string) error
+
+	// GetRandomSkippedEdge returns a randomly chosen edge_records row where
+	// crawl_id matches, skipped=true, sequence_id=sequenceID, and
+	// source_channel=sourceChannel. Returns nil, nil if none exist.
+	GetRandomSkippedEdge(sequenceID, sourceChannel string) (*EdgeRecord, error)
+
+	// PromoteEdge sets skipped=false on the edge_records row matching the
+	// current crawl, sequence_id, and destination_channel.
+	PromoteEdge(sequenceID, destinationChannel string) error
+
 	// Cleanup
 	// Close performs cleanup operations when shutting down
 	Close() error

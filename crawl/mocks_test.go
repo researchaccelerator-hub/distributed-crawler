@@ -512,6 +512,32 @@ func (m *MockStateManager) InsertAccessEvent(reason string) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) GetEdgeRecord(sequenceID, destinationChannel string) (*state.EdgeRecord, error) {
+	args := m.Called(sequenceID, destinationChannel)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*state.EdgeRecord), args.Error(1)
+}
+
+func (m *MockStateManager) DeleteEdgeRecord(sequenceID, destinationChannel string) error {
+	args := m.Called(sequenceID, destinationChannel)
+	return args.Error(0)
+}
+
+func (m *MockStateManager) GetRandomSkippedEdge(sequenceID, sourceChannel string) (*state.EdgeRecord, error) {
+	args := m.Called(sequenceID, sourceChannel)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*state.EdgeRecord), args.Error(1)
+}
+
+func (m *MockStateManager) PromoteEdge(sequenceID, destinationChannel string) error {
+	args := m.Called(sequenceID, destinationChannel)
+	return args.Error(0)
+}
+
 // Close closes the state manager
 func (m *MockStateManager) Close() error {
 	args := m.Called()

@@ -37,6 +37,12 @@ var ErrWalkbackExhausted = fmt.Errorf("walkback attempts exhausted")
 // empty, the caller should abort the crawl.
 var ErrFloodWaitRetire = fmt.Errorf("FLOOD_WAIT threshold exceeded: client retired")
 
+// ErrTDLib400 is returned when TDLib responds with error code 400 (e.g.
+// CHANNEL_INVALID, USERNAME_INVALID) while fetching channel info. The channel
+// is permanently invalid and should be removed from edge_records; the caller
+// should select a replacement edge.
+var ErrTDLib400 = fmt.Errorf("TDLib 400: channel invalid or inaccessible")
+
 // floodWaitRetireThresholdSecs is the minimum FLOOD_WAIT retry-after duration (in
 // seconds) that causes the client to be retired. Shorter bans are transient: the
 // channel is skipped but the client continues processing.
@@ -90,6 +96,22 @@ func parseFloodWaitSecs(err error) (int, bool) {
 	return 0, false
 }
 
+// isTDLib400 reports whether err indicates a permanently-invalid channel that
+// should trigger edge replacement. This covers:
+//   - TDLib [400] responses (bracketed format)
+//   - TDLib 400 responses (unbracketed format, e.g. "400 USERNAME_INVALID")
+//   - "no messages found in the chat" (empty/inaccessible channel)
+func isTDLib400(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "[400]") ||
+		strings.Contains(s, "400 USERNAME_NOT_OCCUPIED") ||
+		strings.Contains(s, "400 USERNAME_INVALID") ||
+		strings.Contains(s, "no messages found in the chat")
+}
+
 // pickWalkbackChannel selects a random discovered channel to walk back to,
 // skipping sourceURL and any channel present in the exclude map.
 // Returns ErrWalkbackExhausted if no suitable channel is found within maxWalkbackAttempts.
@@ -114,6 +136,118 @@ func pickWalkbackChannel(sm state.StateManagementInterface, sourceURL string, ex
 		return url, nil
 	}
 	return "", fmt.Errorf("random-walk-walkback: channel %s: %w", sourceURL, ErrWalkbackExhausted)
+}
+
+// Handle400Replacement is called from the dispatcher when RunForChannelWithPool
+// returns ErrTDLib400. It:
+//  1. Persists the channel as invalid so future crawls skip it.
+//  2. Deletes the channel's edge_record from edge_records.
+//  3. Finds a replacement:
+//     - If the original edge was a walkback: perform another walkback.
+//     - Otherwise: promote a random skipped edge from the same sequence+source.
+//     - If no skipped edges remain: fall back to a walkback.
+//
+// The replacement page is written to page_buffer. The caller is responsible
+// for deleting the failed page from page_buffer.
+func Handle400Replacement(sm state.StateManagementInterface, p *state.Page, cfg common.CrawlerConfig) error {
+	channel := p.URL
+	sequenceID := p.SequenceID
+
+	log.Error().Str("channel", channel).Str("sequence_id", sequenceID).
+		Msg("random-walk-400: TDLib 400 — marking invalid and finding replacement edge")
+
+	if invalidErr := sm.MarkChannelInvalid(channel, "tdlib_400"); invalidErr != nil {
+		log.Warn().Err(invalidErr).Str("channel", channel).Msg("random-walk-400: failed to mark channel invalid")
+	}
+
+	edge, err := sm.GetEdgeRecord(sequenceID, channel)
+	if err != nil {
+		return fmt.Errorf("random-walk-400: GetEdgeRecord: %w", err)
+	}
+
+	if delErr := sm.DeleteEdgeRecord(sequenceID, channel); delErr != nil {
+		log.Warn().Err(delErr).Str("channel", channel).Msg("random-walk-400: failed to delete edge record")
+	}
+
+	if edge == nil {
+		log.Warn().Str("channel", channel).Msg("random-walk-400: no edge record found, falling back to walkback")
+		return handle400Walkback(sm, p, channel, sequenceID)
+	}
+
+	if edge.Walkback {
+		return handle400Walkback(sm, p, edge.SourceChannel, sequenceID)
+	}
+
+	// Forward edge: try a skipped edge from the same source+sequence.
+	skipped, skippedErr := sm.GetRandomSkippedEdge(sequenceID, edge.SourceChannel)
+	if skippedErr != nil {
+		log.Warn().Err(skippedErr).Str("channel", channel).Msg("random-walk-400: GetRandomSkippedEdge failed, falling back to walkback")
+		return handle400Walkback(sm, p, edge.SourceChannel, sequenceID)
+	}
+	if skipped == nil {
+		log.Info().Str("channel", channel).Msg("random-walk-400: no skipped edges remain, falling back to walkback")
+		return handle400Walkback(sm, p, edge.SourceChannel, sequenceID)
+	}
+
+	// Promote the chosen skipped edge to non-skipped.
+	if promoteErr := sm.PromoteEdge(sequenceID, skipped.DestinationChannel); promoteErr != nil {
+		log.Warn().Err(promoteErr).Str("channel", skipped.DestinationChannel).Msg("random-walk-400: PromoteEdge failed")
+	}
+
+	replacementPage := &state.Page{
+		ID:         uuid.New().String(),
+		ParentID:   p.ParentID,
+		Depth:      p.Depth,
+		URL:        skipped.DestinationChannel,
+		SequenceID: sequenceID,
+		Status:     "unfetched",
+	}
+	if addErr := sm.AddPageToPageBuffer(replacementPage); addErr != nil {
+		return fmt.Errorf("random-walk-400: failed to add replacement page to buffer: %w", addErr)
+	}
+
+	log.Info().Str("failed_channel", channel).Str("replacement_channel", skipped.DestinationChannel).
+		Str("sequence_id", sequenceID).Msg("random-walk-400: replaced with skipped edge")
+	return nil
+}
+
+// handle400Walkback picks a walkback channel and writes the new page + edge_record.
+// sourceChannel is the channel that originally discovered the 400'd channel.
+// sequenceID is the chain ID to record on the walkback edge_record.
+func handle400Walkback(sm state.StateManagementInterface, p *state.Page, sourceChannel, sequenceID string) error {
+	exclude := map[string]bool{p.URL: true}
+	walkbackURL, err := pickWalkbackChannel(sm, sourceChannel, exclude)
+	if err != nil {
+		return fmt.Errorf("random-walk-400: walkback: %w", err)
+	}
+
+	walkbackPage := &state.Page{
+		ID:         uuid.New().String(),
+		ParentID:   p.ParentID,
+		Depth:      p.Depth,
+		URL:        walkbackURL,
+		SequenceID: uuid.New().String(), // walkback starts a new chain
+		Status:     "unfetched",
+	}
+	edgeRecord := &state.EdgeRecord{
+		DestinationChannel: walkbackURL,
+		SourceChannel:      sourceChannel,
+		Walkback:           true,
+		Skipped:            false,
+		DiscoveryTime:      time.Now(),
+		SequenceID:         sequenceID, // edge belongs to the current chain
+	}
+
+	if addErr := sm.AddPageToPageBuffer(walkbackPage); addErr != nil {
+		return fmt.Errorf("random-walk-400: failed to add walkback page to buffer: %w", addErr)
+	}
+	if saveErr := sm.SaveEdgeRecords([]*state.EdgeRecord{edgeRecord}); saveErr != nil {
+		return fmt.Errorf("random-walk-400: failed to save walkback edge record: %w", saveErr)
+	}
+
+	log.Info().Str("failed_channel", p.URL).Str("walkback_channel", walkbackURL).
+		Str("sequence_id", sequenceID).Msg("random-walk-400: replaced with walkback")
+	return nil
 }
 
 // Global connection pool
@@ -460,6 +594,9 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 
 	active, err := isChannelActiveWithinPeriod(tdlibClient, channelInfo.chatDetails.Id, cfg.PostRecency)
 	if err != nil {
+		if isTDLib400(err) {
+			return nil, fmt.Errorf("%w: %w", ErrTDLib400, err)
+		}
 		return nil, err
 	}
 	if !active || channelInfo.messageCount == 0 || (cfg.SamplingMethod != "random-walk" && cfg.MinUsers > 0 && channelInfo.memberCount < int32(cfg.MinUsers)) {
@@ -706,6 +843,9 @@ func getChannelInfoWithDeps(
 		telegramhelper.DetectCacheOrServer(getChatStart, "GetChat")
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to get chat by cached ID for: %v", page.URL)
+			if isTDLib400(err) {
+				return nil, nil, fmt.Errorf("%w: %w", ErrTDLib400, err)
+			}
 			return nil, nil, err
 		}
 	} else {
@@ -714,6 +854,9 @@ func getChannelInfoWithDeps(
 		})
 		if err != nil {
 			log.Error().Err(err).Stack().Msgf("Failed to find channel: %v", page.URL)
+			if isTDLib400(err) {
+				return nil, nil, fmt.Errorf("%w: %w", ErrTDLib400, err)
+			}
 			return nil, nil, err
 		}
 	}

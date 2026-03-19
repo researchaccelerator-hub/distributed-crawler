@@ -78,6 +78,10 @@ func (m *mockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, err
 func (m *mockStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
 func (m *mockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 func (m *mockStateManager) InsertAccessEvent(_ string) error                                    { return nil }
+func (m *mockStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)               { return nil, nil }
+func (m *mockStateManager) DeleteEdgeRecord(_, _ string) error                                  { return nil }
+func (m *mockStateManager) GetRandomSkippedEdge(_, _ string) (*state.EdgeRecord, error)        { return nil, nil }
+func (m *mockStateManager) PromoteEdge(_, _ string) error                                       { return nil }
 func (m *mockStateManager) Close() error                                                        { return nil }
 
 // newTestChunker creates a Chunker wired to temp directories for use in tests.

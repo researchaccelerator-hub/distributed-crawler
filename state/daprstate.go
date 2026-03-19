@@ -3194,6 +3194,80 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	return nil
 }
 
+// GetEdgeRecord returns the edge_records row for the current crawl matching
+// sequence_id and destination_channel. Returns nil, nil if not found.
+func (dsm *DaprStateManager) GetEdgeRecord(sequenceID, destinationChannel string) (*EdgeRecord, error) {
+	sqlQuery := `SELECT source_channel, walkback, skipped FROM edge_records WHERE crawl_id=$1 AND sequence_id=$2 AND destination_channel=$3 LIMIT 1;`
+	rows, err := dsm.queryDatabase(sqlQuery, dsm.config.CrawlID, sequenceID, destinationChannel)
+	if err != nil {
+		return nil, fmt.Errorf("random-walk-400: GetEdgeRecord query failed: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	row := rows[0]
+	if len(row) < 3 {
+		return nil, fmt.Errorf("random-walk-400: GetEdgeRecord: unexpected row length %d", len(row))
+	}
+	sourceChannel, _ := row[0].(string)
+	walkback, _ := row[1].(bool)
+	skipped, _ := row[2].(bool)
+	return &EdgeRecord{
+		DestinationChannel: destinationChannel,
+		SourceChannel:      sourceChannel,
+		Walkback:           walkback,
+		Skipped:            skipped,
+		SequenceID:         sequenceID,
+	}, nil
+}
+
+// DeleteEdgeRecord removes the edge_records row for the current crawl matching
+// sequence_id and destination_channel.
+func (dsm *DaprStateManager) DeleteEdgeRecord(sequenceID, destinationChannel string) error {
+	sqlQuery := `DELETE FROM edge_records WHERE crawl_id=$1 AND sequence_id=$2 AND destination_channel=$3;`
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, []any{dsm.config.CrawlID, sequenceID, destinationChannel}); err != nil {
+		return fmt.Errorf("random-walk-400: DeleteEdgeRecord failed: %w", err)
+	}
+	return nil
+}
+
+// GetRandomSkippedEdge returns a randomly chosen skipped edge_records row for
+// the current crawl with the given sequence_id and source_channel.
+// Returns nil, nil if no skipped edges exist.
+func (dsm *DaprStateManager) GetRandomSkippedEdge(sequenceID, sourceChannel string) (*EdgeRecord, error) {
+	sqlQuery := `SELECT destination_channel, source_channel, sequence_id FROM edge_records WHERE crawl_id=$1 AND sequence_id=$2 AND source_channel=$3 AND skipped=true ORDER BY RANDOM() LIMIT 1;`
+	rows, err := dsm.queryDatabase(sqlQuery, dsm.config.CrawlID, sequenceID, sourceChannel)
+	if err != nil {
+		return nil, fmt.Errorf("random-walk-400: GetRandomSkippedEdge query failed: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	row := rows[0]
+	if len(row) < 3 {
+		return nil, fmt.Errorf("random-walk-400: GetRandomSkippedEdge: unexpected row length %d", len(row))
+	}
+	destChannel, _ := row[0].(string)
+	srcChannel, _ := row[1].(string)
+	seqID, _ := row[2].(string)
+	return &EdgeRecord{
+		DestinationChannel: destChannel,
+		SourceChannel:      srcChannel,
+		SequenceID:         seqID,
+		Skipped:            true,
+	}, nil
+}
+
+// PromoteEdge sets skipped=false on the edge_records row for the current crawl
+// matching sequence_id and destination_channel.
+func (dsm *DaprStateManager) PromoteEdge(sequenceID, destinationChannel string) error {
+	sqlQuery := `UPDATE edge_records SET skipped=false WHERE crawl_id=$1 AND sequence_id=$2 AND destination_channel=$3;`
+	if err := dsm.ExecuteDatabaseOperation(sqlQuery, []any{dsm.config.CrawlID, sequenceID, destinationChannel}); err != nil {
+		return fmt.Errorf("random-walk-400: PromoteEdge failed: %w", err)
+	}
+	return nil
+}
+
 func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 	log.Info().Str("log_tag", "rw_init").Msg("Initializing discovered channels")
 	// TODO: add to config
