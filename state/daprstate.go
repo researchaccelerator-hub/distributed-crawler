@@ -3753,7 +3753,10 @@ func (dsm *DaprStateManager) queryDatabase(sqlQuery string, params ...any) ([][]
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	metadata := map[string]string{"sql": sqlQuery}
+	// gRPC metadata values may not contain newlines or tabs; collapse all
+	// whitespace so multi-line SQL literals pass through without error.
+	normalizedSQL := strings.Join(strings.Fields(sqlQuery), " ")
+	metadata := map[string]string{"sql": normalizedSQL}
 	if len(params) > 0 {
 		jsonData, err := json.Marshal(params)
 		if err != nil {

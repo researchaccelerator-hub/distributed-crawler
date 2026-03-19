@@ -45,9 +45,14 @@ func NewValidatorHTTPClient(timeout time.Duration) *http.Client {
 				return nil, err
 			}
 
-			tlsConn := utls.UClient(conn, &utls.Config{
+			// Restrict ALPN to HTTP/1.1 only. HelloChrome_Auto normally
+		// advertises h2, but the http.Transport with a custom DialTLSContext
+		// does not set up the HTTP/2 framing layer — so if the server
+		// negotiates h2 the connection breaks with a framing error.
+		tlsConn := utls.UClient(conn, &utls.Config{
 				ServerName:         host,
 				InsecureSkipVerify: false,
+				NextProtos:         []string{"http/1.1"},
 			}, utls.HelloChrome_Auto)
 
 			if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -56,7 +61,6 @@ func NewValidatorHTTPClient(timeout time.Duration) *http.Client {
 			}
 			return tlsConn, nil
 		},
-		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
