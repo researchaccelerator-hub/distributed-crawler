@@ -11,18 +11,37 @@
 -- BEFORE RUNNING THIS SCRIPT:
 --   1. The executing identity must be the Entra ID admin for the Flexible
 --      Server (set in Azure portal → PostgreSQL → Authentication).
---   2. Substitute the two placeholder identity names below:
---        <crawler-app-managed-identity>   — user-assigned managed identity
---                                           attached to all crawler pods
---        <crawler-readonly-identity>      — optional; omit the block if not
---                                           used (e.g., a human analyst account
---                                           or a separate MI for monitoring)
---   3. Uncomment line for seeding seed_channel. Substitute place holder for path to seed files. 
---        <absolute_path_to_seed_channels> - csv file with just usernames, header included
+--   2. Set the IDENTITY CONFIGURATION variables below (or pass via -v flag).
+--   3. Uncomment the \COPY line for seeding seed_channels. Substitute the
+--      placeholder for the absolute path to your seed CSV file:
+--        <absolute_path_to_seed_channels> — CSV with a single 'channel_username'
+--                                           header column
 --
 -- Run with:
 --   psql "$DATABASE_URL" -f sql/setup.sql
+--
+-- To set identity names without editing this file, pass -v on the command line:
+--   psql "$DATABASE_URL" \
+--       -v crawler_app_identity="my-crawler-uami" \
+--       -v crawler_readonly_identity="my-readonly-uami" \
+--       -f sql/setup.sql
 -- =============================================================================
+
+
+-- =============================================================================
+-- IDENTITY CONFIGURATION
+-- Set these to the display names of your Azure Entra ID managed identities
+-- (exactly as they appear in the Azure portal).  Override at runtime with -v:
+--   psql ... -v crawler_app_identity="my-crawler-uami" ...
+-- =============================================================================
+\if :{?crawler_app_identity}
+\else
+    \set crawler_app_identity 'crawler-app-managed-identity'
+\endif
+\if :{?crawler_readonly_identity}
+\else
+    \set crawler_readonly_identity 'crawler-readonly-identity'
+\endif
 
 
 -- =============================================================================
@@ -68,14 +87,41 @@ $$;
 -- identities as they appear in Azure Entra ID.
 -- ---------------------------------------------------------------------------
 
+-- Promote psql \-v variables into session-scoped GUCs so PL/pgSQL can read them.
+SELECT set_config('app.crawler_app_identity',      :'crawler_app_identity',      false);
+SELECT set_config('app.crawler_readonly_identity', :'crawler_readonly_identity', false);
+
 -- Crawler pods runtime identity → crawler_app permissions
-SELECT pgaadauth_create_principal('<crawler-app-managed-identity>', false, false);
-GRANT crawler_app TO "<crawler-app-managed-identity>";
+-- pgaadauth_create_principal registers a new Entra principal as a PG role.
+-- If the principal already exists on this server (e.g. cross-subscription MI),
+-- this call will error — that is safe to ignore; the GRANT below still works.
+DO $$
+BEGIN
+    PERFORM pgaadauth_create_principal(current_setting('app.crawler_app_identity'), false, false);
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'pgaadauth_create_principal skipped (principal may already exist): %', SQLERRM;
+END;
+$$;
+DO $$
+BEGIN
+    EXECUTE format('GRANT crawler_app TO %I', current_setting('app.crawler_app_identity'));
+END;
+$$;
 
 -- Optional: read-only monitoring identity → crawler_readonly permissions
--- Uncomment and substitute if you have a dedicated readonly MI or user.
--- SELECT pgaadauth_create_principal('<crawler-readonly-identity>', false, false);
--- GRANT crawler_readonly TO "<crawler-readonly-identity>";
+-- Uncomment if you have a dedicated readonly MI or user.
+-- DO $$
+-- BEGIN
+--     PERFORM pgaadauth_create_principal(current_setting('app.crawler_readonly_identity'), false, false);
+-- EXCEPTION WHEN OTHERS THEN
+--     RAISE NOTICE 'pgaadauth_create_principal skipped: %', SQLERRM;
+-- END;
+-- $$;
+-- DO $$
+-- BEGIN
+--     EXECUTE format('GRANT crawler_readonly TO %I', current_setting('app.crawler_readonly_identity'));
+-- END;
+-- $$;
 
 
 -- =============================================================================

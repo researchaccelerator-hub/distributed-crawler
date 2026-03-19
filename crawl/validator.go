@@ -55,7 +55,7 @@ func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, c
 
 	requestRate := cfg.ValidatorRequestRate
 	if requestRate <= 0 {
-		requestRate = 120 // default: 120 calls/min = 500ms interval
+		requestRate = 6 // default: 6 calls/min = 10s interval, matching SearchPublicChat pace
 	}
 	jitterMs := cfg.ValidatorRequestJitterMs
 	if jitterMs <= 0 {
