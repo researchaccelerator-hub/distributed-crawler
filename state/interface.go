@@ -110,6 +110,11 @@ type StateManagementInterface interface {
 	// MarkChannelCrawled upserts the channel into seed_channels, recording the
 	// current time as last_crawled_at and caching the resolved chatID.
 	MarkChannelCrawled(username string, chatID int64) error
+	// MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row
+	// for the given username, if the row exists.  No-ops for channels not in the
+	// seed table.  The 30-day TTL is enforced in LoadSeedChannels and
+	// GetRandomSeedChannel by filtering out rows where invalidated_at is recent.
+	MarkSeedChannelInvalid(username string) error
 
 	// LoadInvalidChannels populates the in-memory invalid channel cache from the
 	// invalid_channels table (rows within the 30-day TTL window only).

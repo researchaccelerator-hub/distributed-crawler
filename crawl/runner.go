@@ -159,6 +159,9 @@ func Handle400Replacement(sm state.StateManagementInterface, p *state.Page, cfg 
 	if invalidErr := sm.MarkChannelInvalid(channel, "tdlib_400"); invalidErr != nil {
 		log.Warn().Err(invalidErr).Str("channel", channel).Msg("random-walk-400: failed to mark channel invalid")
 	}
+	if seedErr := sm.MarkSeedChannelInvalid(channel); seedErr != nil {
+		log.Warn().Err(seedErr).Str("channel", channel).Msg("random-walk-400: failed to mark seed channel invalid")
+	}
 
 	edge, err := sm.GetEdgeRecord(sequenceID, channel)
 	if err != nil {

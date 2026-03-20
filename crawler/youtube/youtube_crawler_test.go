@@ -86,6 +86,7 @@ func (m *MockYouTubeStateManager) MarkChannelCrawled(_ string, _ int64) error   
 func (m *MockYouTubeStateManager) LoadInvalidChannels() error                           { return nil }
 func (m *MockYouTubeStateManager) IsInvalidChannel(_ string) bool                       { return false }
 func (m *MockYouTubeStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
+func (m *MockYouTubeStateManager) MarkSeedChannelInvalid(_ string) error                { return nil }
 func (m *MockYouTubeStateManager) InitializeDiscoveredChannels() error         { return nil }
 func (m *MockYouTubeStateManager) InitializeRandomWalkLayer() error            { return nil }
 func (m *MockYouTubeStateManager) GetRandomDiscoveredChannel() (string, error) { return "", nil }

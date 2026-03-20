@@ -3319,7 +3319,7 @@ func (dsm *DaprStateManager) LoadSeedChannels() error {
 	log.Info().Str("log_tag", "rw_seed").Msg("Loading seed channels")
 	dsm.databaseBinding = databaseStorageBinding
 
-	query := "SELECT channel_username, chat_id FROM seed_channels;"
+	query := "SELECT channel_username, chat_id, invalidated_at FROM seed_channels;"
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
 		Operation: "query",
@@ -3343,13 +3343,25 @@ func (dsm *DaprStateManager) LoadSeedChannels() error {
 	defer dsm.chatIDCacheMu.Unlock()
 
 	loaded := 0
+	skipped := 0
 	for _, row := range rows {
-		if len(row) < 2 {
+		if len(row) < 3 {
 			continue
 		}
 		username, ok := row[0].(string)
 		if !ok || username == "" {
 			continue
+		}
+		// Skip channels whose seed-table invalidation is still within the 30-day TTL.
+		if row[2] != nil {
+			if invalidatedStr, ok := row[2].(string); ok {
+				if t, parseErr := time.Parse(time.RFC3339, invalidatedStr); parseErr == nil {
+					if time.Since(t) < invalidChannelTTL {
+						skipped++
+						continue
+					}
+				}
+			}
 		}
 		if addErr := dsm.BaseStateManager.AddDiscoveredChannel(username); addErr != nil {
 			// Already in the set — not an error worth logging at warn level
@@ -3363,7 +3375,7 @@ func (dsm *DaprStateManager) LoadSeedChannels() error {
 		loaded++
 	}
 
-	log.Info().Int("loaded", loaded).Str("log_tag", "rw_seed").Msg("Finished loading seed channels")
+	log.Info().Int("loaded", loaded).Int("skipped_invalid", skipped).Str("log_tag", "rw_seed").Msg("Finished loading seed channels")
 	return nil
 }
 
@@ -3448,6 +3460,14 @@ func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64) e
 
 	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at) VALUES ($1, $2, NOW()) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
 	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+}
+
+// MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row
+// for the given username, if one exists.  Channels not in the seed table are
+// silently ignored — this is intentional (only seed channels need the flag).
+func (dsm *DaprStateManager) MarkSeedChannelInvalid(username string) error {
+	sqlQuery := `UPDATE seed_channels SET invalidated_at = NOW() WHERE channel_username = $1;`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username})
 }
 
 const invalidChannelTTL = 30 * 24 * time.Hour
@@ -4144,7 +4164,7 @@ func (dsm *DaprStateManager) FlushBatchStats(batchID, crawlID string, edges []*P
 
 // GetRandomSeedChannel returns a random channel_username from seed_channels.
 func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
-	sqlQuery := `SELECT channel_username FROM seed_channels ORDER BY RANDOM() LIMIT 1;`
+	sqlQuery := `SELECT channel_username FROM seed_channels WHERE (invalidated_at IS NULL OR invalidated_at < NOW() - INTERVAL '30 days') ORDER BY RANDOM() LIMIT 1;`
 	rows, err := dsm.queryDatabase(sqlQuery)
 	if err != nil {
 		return "", fmt.Errorf("validator-db: failed to get random seed channel: %w", err)

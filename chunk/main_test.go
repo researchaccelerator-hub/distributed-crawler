@@ -53,6 +53,7 @@ func (m *mockStateManager) MarkChannelCrawled(_ string, _ int64) error          
 func (m *mockStateManager) LoadInvalidChannels() error                                             { return nil }
 func (m *mockStateManager) IsInvalidChannel(_ string) bool                                         { return false }
 func (m *mockStateManager) MarkChannelInvalid(_ string, _ string) error                            { return nil }
+func (m *mockStateManager) MarkSeedChannelInvalid(_ string) error                                  { return nil }
 func (m *mockStateManager) InitializeDiscoveredChannels() error                                { return nil }
 func (m *mockStateManager) InitializeRandomWalkLayer() error                                   { return nil }
 func (m *mockStateManager) GetRandomDiscoveredChannel() (string, error)                        { return "", nil }

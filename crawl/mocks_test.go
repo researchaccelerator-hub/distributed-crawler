@@ -396,6 +396,10 @@ func (m *MockStateManager) MarkChannelInvalid(username string, reason string) er
 	args := m.Called(username, reason)
 	return args.Error(0)
 }
+func (m *MockStateManager) MarkSeedChannelInvalid(username string) error {
+	args := m.Called(username)
+	return args.Error(0)
+}
 
 // random-walk database functions
 func (m *MockStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error {

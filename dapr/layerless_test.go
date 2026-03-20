@@ -52,6 +52,7 @@ func (n *noopStateManager) MarkChannelCrawled(_ string, _ int64) error          
 func (n *noopStateManager) LoadInvalidChannels() error                                    { return nil }
 func (n *noopStateManager) IsInvalidChannel(_ string) bool                                { return false }
 func (n *noopStateManager) MarkChannelInvalid(_ string, _ string) error                   { return nil }
+func (n *noopStateManager) MarkSeedChannelInvalid(_ string) error                         { return nil }
 func (n *noopStateManager) UploadCombinedFile(_ string) error                             { return nil }
 func (n *noopStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error            { return nil }
 func (n *noopStateManager) InsertPendingEdge(_ *state.PendingEdge) error                  { return nil }

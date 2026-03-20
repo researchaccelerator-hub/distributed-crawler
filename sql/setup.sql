@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS seed_channels (
     channel_username  VARCHAR(64)  PRIMARY KEY,
     chat_id           BIGINT,                   -- cached TDLib chat ID; NULL = not yet resolved
     last_crawled_at   TIMESTAMP,                -- NULL = never crawled; set by MarkChannelCrawled()
+    invalidated_at    TIMESTAMP,                -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
     member_count      INTEGER,
     inserted_at       TIMESTAMP    NOT NULL DEFAULT NOW()
 );

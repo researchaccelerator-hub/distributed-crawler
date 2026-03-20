@@ -180,6 +180,7 @@ func TestHandle400Replacement_ForwardEdge_SkippedEdgeAvailable(t *testing.T) {
 	}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return(skippedEdge, nil)
@@ -220,6 +221,7 @@ func TestHandle400Replacement_ForwardEdge_NoSkippedEdges_FallsBackToWalkback(t *
 	}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return((*state.EdgeRecord)(nil), nil)
@@ -256,6 +258,7 @@ func TestHandle400Replacement_ForwardEdge_GetSkippedEdgeErrors_FallsBackToWalkba
 	}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return((*state.EdgeRecord)(nil), fmt.Errorf("db timeout"))
@@ -289,6 +292,7 @@ func TestHandle400Replacement_WalkbackEdge_MakesAnotherWalkback(t *testing.T) {
 	}
 
 	sm.On("MarkChannelInvalid", "bad_walkback_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_walkback_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_walkback_channel").Return(walkbackEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_walkback_channel").Return(nil)
 	sm.On("GetRandomDiscoveredChannel").Return("new_walkback_chan", nil)
@@ -322,6 +326,7 @@ func TestHandle400Replacement_NoEdgeRecord_FallsBackToWalkback(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("MarkChannelInvalid", "orphan_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "orphan_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "orphan_channel").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "orphan_channel").Return(nil)
 	sm.On("GetRandomDiscoveredChannel").Return("walkback_chan", nil)
@@ -345,6 +350,7 @@ func TestHandle400Replacement_GetEdgeRecordError_Propagated(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return((*state.EdgeRecord)(nil), fmt.Errorf("db timeout"))
 
 	err := Handle400Replacement(sm, page, cfg)
@@ -380,6 +386,7 @@ func TestHandle400Replacement_MarkInvalidFails_ReplacementStillProceeds(t *testi
 	}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(fmt.Errorf("db write failed"))
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return(skippedEdge, nil)
@@ -418,6 +425,7 @@ func TestHandle400Replacement_DeleteEdgeRecordFails_ReplacementStillProceeds(t *
 	}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(fmt.Errorf("delete failed"))
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return(skippedEdge, nil)
@@ -455,6 +463,7 @@ func TestHandle400Replacement_PromoteEdgeFails_PageStillBuffered(t *testing.T) {
 	}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return(skippedEdge, nil)
@@ -492,6 +501,7 @@ func TestHandle400Replacement_AddPageToBufferFails_ReturnsError(t *testing.T) {
 	}
 
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return(skippedEdge, nil)
@@ -531,6 +541,7 @@ func TestHandle400Replacement_PromotedPage_InheritsOriginalSequenceID(t *testing
 
 	var capturedPage *state.Page
 	sm.On("MarkChannelInvalid", "bad_channel", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "bad_channel").Return(nil)
 	sm.On("GetEdgeRecord", "original-seq", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "original-seq", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "original-seq", "source_chan").Return(skippedEdge, nil)
