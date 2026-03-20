@@ -4179,9 +4179,9 @@ func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
 	return username, nil
 }
 
-// ClaimDiscoveredChannel atomically claims first-discovery of a channel for a
-// crawl.  Returns true if this call inserted (first claim), false if already
-// claimed.
+// ClaimDiscoveredChannel atomically claims first-discovery of a channel across
+// all crawls.  Returns true if this call inserted (first claim), false if
+// already claimed by any previous crawl.  crawlID is stored for audit only.
 //
 // Uses a CTE so the answer comes back in a single round-trip:
 //
@@ -4190,7 +4190,7 @@ func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
 //
 // COUNT = 1 → we inserted (first claim).  COUNT = 0 → conflict (already claimed).
 func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
-	sqlQuery := `WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id) VALUES ($1, $2) ON CONFLICT (channel_username, crawl_id) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`
+	sqlQuery := `WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id) VALUES ($1, $2) ON CONFLICT (channel_username) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`
 
 	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID)
 	if err != nil {
@@ -4208,11 +4208,11 @@ func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (b
 	return false, nil
 }
 
-// IsChannelDiscovered checks whether a channel has already been claimed for a
-// crawl without inserting.
-func (dsm *DaprStateManager) IsChannelDiscovered(username, crawlID string) (bool, error) {
-	sqlQuery := `SELECT 1 FROM discovered_channels WHERE channel_username = $1 AND crawl_id = $2 LIMIT 1;`
-	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID)
+// IsChannelDiscovered checks whether a channel has been discovered by any crawl
+// in the crawler's history, without inserting.
+func (dsm *DaprStateManager) IsChannelDiscovered(username string) (bool, error) {
+	sqlQuery := `SELECT 1 FROM discovered_channels WHERE channel_username = $1 LIMIT 1;`
+	rows, err := dsm.queryDatabase(sqlQuery, username)
 	if err != nil {
 		return false, fmt.Errorf("validator-db: failed to check discovered channel: %w", err)
 	}

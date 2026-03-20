@@ -468,7 +468,7 @@ func TestIsChannelDiscovered_Found(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	found, err := dsm.IsChannelDiscovered("known_chan", "crawl-1")
+	found, err := dsm.IsChannelDiscovered("known_chan")
 	require.NoError(t, err)
 	assert.True(t, found)
 }
@@ -481,7 +481,7 @@ func TestIsChannelDiscovered_NotFound(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	found, err := dsm.IsChannelDiscovered("unknown_chan", "crawl-1")
+	found, err := dsm.IsChannelDiscovered("unknown_chan")
 	require.NoError(t, err)
 	assert.False(t, found)
 }
@@ -494,7 +494,7 @@ func TestIsChannelDiscovered_SQLInjectionSafe(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	_, err := dsm.IsChannelDiscovered("it's_a_test", "crawl-1")
+	_, err := dsm.IsChannelDiscovered("it's_a_test")
 	require.NoError(t, err)
 
 	mc.mu.Lock()

@@ -67,7 +67,7 @@ func (n *noopStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, error)
 func (n *noopStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error { return nil }
 func (n *noopStateManager) GetRandomSeedChannel() (string, error)                         { return "", nil }
 func (n *noopStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)       { return false, nil }
-func (n *noopStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)          { return false, nil }
+func (n *noopStateManager) IsChannelDiscovered(_ string) (bool, error)                    { return false, nil }
 func (n *noopStateManager) CountIncompleteBatches(_ string) (int, error)                  { return 0, nil }
 func (n *noopStateManager) InsertAccessEvent(_ string) error                              { return nil }
 func (n *noopStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)          { return nil, nil }

@@ -120,7 +120,7 @@ func (m *MockYouTubeStateManager) RecoverStaleBatchClaims(_ time.Duration) (int,
 func (m *MockYouTubeStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
 func (m *MockYouTubeStateManager) GetRandomSeedChannel() (string, error)                              { return "", nil }
 func (m *MockYouTubeStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
-func (m *MockYouTubeStateManager) IsChannelDiscovered(_ string, _ string) (bool, error)               { return false, nil }
+func (m *MockYouTubeStateManager) IsChannelDiscovered(_ string) (bool, error)                         { return false, nil }
 func (m *MockYouTubeStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 func (m *MockYouTubeStateManager) InsertAccessEvent(_ string) error                                   { return nil }
 func (m *MockYouTubeStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)               { return nil, nil }

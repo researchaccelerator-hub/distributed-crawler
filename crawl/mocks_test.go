@@ -501,8 +501,8 @@ func (m *MockStateManager) ClaimDiscoveredChannel(username, crawlID string) (boo
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockStateManager) IsChannelDiscovered(username, crawlID string) (bool, error) {
-	args := m.Called(username, crawlID)
+func (m *MockStateManager) IsChannelDiscovered(username string) (bool, error) {
+	args := m.Called(username)
 	return args.Bool(0), args.Error(1)
 }
 

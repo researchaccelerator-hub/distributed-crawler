@@ -30,7 +30,7 @@ func TestValidateSingleEdge_Valid(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("IsInvalidChannel", "testchan").Return(false)
-	sm.On("IsChannelDiscovered", "testchan", "crawl-1").Return(false, nil)
+	sm.On("IsChannelDiscovered", "testchan").Return(false, nil)
 	sm.On("ClaimDiscoveredChannel", "testchan", "crawl-1").Return(true, nil)
 	sm.On("UpsertSeedChannelChatID", "testchan", int64(0)).Return(nil)
 
@@ -60,7 +60,7 @@ func TestValidateSingleEdge_TransientError(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("IsInvalidChannel", "testchan").Return(false)
-	sm.On("IsChannelDiscovered", "testchan", "crawl-1").Return(false, nil)
+	sm.On("IsChannelDiscovered", "testchan").Return(false, nil)
 
 	edge := &state.PendingEdge{
 		PendingID:          1,
@@ -91,7 +91,7 @@ func TestValidateSingleEdge_BlockedError(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("IsInvalidChannel", "testchan").Return(false)
-	sm.On("IsChannelDiscovered", "testchan", "crawl-1").Return(false, nil)
+	sm.On("IsChannelDiscovered", "testchan").Return(false, nil)
 
 	edge := &state.PendingEdge{
 		PendingID:          1,
@@ -122,7 +122,7 @@ func TestValidateSingleEdge_NotChannel(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("IsInvalidChannel", "userchan").Return(false)
-	sm.On("IsChannelDiscovered", "userchan", "crawl-1").Return(false, nil)
+	sm.On("IsChannelDiscovered", "userchan").Return(false, nil)
 	sm.On("MarkChannelInvalid", "userchan", "not_supergroup").Return(nil)
 
 	edge := &state.PendingEdge{
@@ -161,7 +161,7 @@ func TestValidateSingleEdge_AlreadyInvalid(t *testing.T) {
 
 	assert.Equal(t, "invalid", update.ValidationStatus)
 	assert.Equal(t, "cached_invalid", update.ValidationReason)
-	sm.AssertNotCalled(t, "IsChannelDiscovered", mock.Anything, mock.Anything)
+	sm.AssertNotCalled(t, "IsChannelDiscovered", mock.Anything)
 }
 
 func TestValidateSingleEdge_AlreadyDiscovered(t *testing.T) {
@@ -169,7 +169,7 @@ func TestValidateSingleEdge_AlreadyDiscovered(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("IsInvalidChannel", "known_chan").Return(false)
-	sm.On("IsChannelDiscovered", "known_chan", "crawl-1").Return(true, nil)
+	sm.On("IsChannelDiscovered", "known_chan").Return(true, nil)
 
 	edge := &state.PendingEdge{
 		PendingID:          2,
@@ -189,7 +189,7 @@ func TestValidateSingleEdge_ValidButRaceLost(t *testing.T) {
 	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
 
 	sm.On("IsInvalidChannel", "raced_chan").Return(false)
-	sm.On("IsChannelDiscovered", "raced_chan", "crawl-1").Return(false, nil)
+	sm.On("IsChannelDiscovered", "raced_chan").Return(false, nil)
 	sm.On("ClaimDiscoveredChannel", "raced_chan", "crawl-1").Return(false, nil) // another validator won
 
 	edge := &state.PendingEdge{
@@ -422,7 +422,7 @@ func TestRunEdgeValidation_EntersBlockedState(t *testing.T) {
 			ValidationStatus:   "validating",
 		}
 		sm.On("IsInvalidChannel", edges[i].DestinationChannel).Return(false)
-		sm.On("IsChannelDiscovered", edges[i].DestinationChannel, "crawl-1").Return(false, nil)
+		sm.On("IsChannelDiscovered", edges[i].DestinationChannel).Return(false, nil)
 		sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
 			PendingID:        i + 1,
 			ValidationStatus: "pending",
@@ -480,7 +480,7 @@ func TestRunEdgeValidation_ProbeResumesValidation(t *testing.T) {
 			DestinationChannel: fmt.Sprintf("blocked%d", i),
 		}
 		sm.On("IsInvalidChannel", phase1[i].DestinationChannel).Return(false)
-		sm.On("IsChannelDiscovered", phase1[i].DestinationChannel, "crawl-1").Return(false, nil)
+		sm.On("IsChannelDiscovered", phase1[i].DestinationChannel).Return(false, nil)
 		sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
 			PendingID:        i + 1,
 			ValidationStatus: "pending",
@@ -494,7 +494,7 @@ func TestRunEdgeValidation_ProbeResumesValidation(t *testing.T) {
 		DestinationChannel: "goodchan",
 	}
 	sm.On("IsInvalidChannel", "goodchan").Return(false)
-	sm.On("IsChannelDiscovered", "goodchan", "crawl-1").Return(false, nil)
+	sm.On("IsChannelDiscovered", "goodchan").Return(false, nil)
 	sm.On("ClaimDiscoveredChannel", "goodchan", "crawl-1").Return(true, nil)
 	sm.On("UpsertSeedChannelChatID", "goodchan", int64(0)).Return(nil)
 	sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{

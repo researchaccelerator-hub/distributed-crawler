@@ -99,15 +99,15 @@ CREATE TABLE source_type_stats (
 -- ---------------------------------------------------------------------------
 -- discovered_channels
 -- DB-backed first-discovery dedup.  Used by validators to enforce exactly-once
--- discovery across all pods within a crawl.  The composite PRIMARY KEY on
--- (channel_username, crawl_id) serialises concurrent INSERT ... ON CONFLICT
--- so exactly one validator wins per channel per crawl.
+-- discovery across all crawls in the crawler's history.  The PRIMARY KEY on
+-- channel_username serialises concurrent INSERT ... ON CONFLICT so exactly one
+-- validator wins per channel across all crawls.  crawl_id is stored for audit.
 -- ---------------------------------------------------------------------------
 CREATE TABLE discovered_channels (
     channel_username VARCHAR(64)  NOT NULL,
     crawl_id         VARCHAR(64)  NOT NULL,
     discovered_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (channel_username, crawl_id)
+    PRIMARY KEY (channel_username)
 );
 
 
@@ -193,8 +193,11 @@ GRANT SELECT ON TABLE access_events        TO crawler_readonly;
 --     channel_username VARCHAR(64)  NOT NULL,
 --     crawl_id         VARCHAR(64)  NOT NULL,
 --     discovered_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
---     PRIMARY KEY (channel_username, crawl_id)
+--     PRIMARY KEY (channel_username)
 -- );
+-- Existing deployments: drop composite PK and add single-column PK.
+-- ALTER TABLE discovered_channels DROP CONSTRAINT IF EXISTS discovered_channels_pkey;
+-- ALTER TABLE discovered_channels ADD PRIMARY KEY (channel_username);
 
 -- CREATE INDEX IF NOT EXISTS idx_pending_batches_status ON pending_edge_batches (status, created_at);
 -- CREATE INDEX IF NOT EXISTS idx_pending_batches_crawl_incomplete ON pending_edge_batches (crawl_id) WHERE status <> 'completed';

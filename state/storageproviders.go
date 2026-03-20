@@ -214,7 +214,7 @@ func (lsm *LocalStateManager) ClaimDiscoveredChannel(username, crawlID string) (
 	return false, fmt.Errorf("ClaimDiscoveredChannel not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) IsChannelDiscovered(username, crawlID string) (bool, error) {
+func (lsm *LocalStateManager) IsChannelDiscovered(username string) (bool, error) {
 	return false, fmt.Errorf("IsChannelDiscovered not implemented for local state manager")
 }
 

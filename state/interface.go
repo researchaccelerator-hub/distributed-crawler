@@ -173,14 +173,15 @@ type StateManagementInterface interface {
 	// GetRandomSeedChannel returns a random channel_username from seed_channels.
 	GetRandomSeedChannel() (string, error)
 
-	// ClaimDiscoveredChannel atomically claims first-discovery of a channel for a
-	// crawl.  Returns true if this call made the claim (INSERT succeeded), false
-	// if the channel was already claimed.
+	// ClaimDiscoveredChannel atomically claims first-discovery of a channel.
+	// Returns true if this call inserted (first claim), false if already claimed
+	// by any crawl.  crawlID is stored for audit only.
 	ClaimDiscoveredChannel(username, crawlID string) (bool, error)
 
-	// IsChannelDiscovered checks whether a channel has already been claimed for a
-	// crawl without inserting. Used by validators to skip HTTP calls.
-	IsChannelDiscovered(username, crawlID string) (bool, error)
+	// IsChannelDiscovered checks whether a channel has been discovered by any
+	// crawl in the crawler's history, without inserting. Used by validators to
+	// skip HTTP calls.
+	IsChannelDiscovered(username string) (bool, error)
 
 	// CountIncompleteBatches returns the count of pending_edge_batches with
 	// status != 'completed' for the given crawl_id.

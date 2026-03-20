@@ -212,8 +212,8 @@ func validateSingleEdge(
 		}, outcomeDefinitive
 	}
 
-	// Check if already discovered for this crawl (DB check, no INSERT)
-	discovered, err := sm.IsChannelDiscovered(channel, edge.CrawlID)
+	// Check if already discovered by any crawl (DB check, no INSERT)
+	discovered, err := sm.IsChannelDiscovered(channel)
 	if err != nil {
 		log.Warn().Err(err).Str("channel", channel).Msg("validator-edge: IsChannelDiscovered check failed")
 		// Fall through to HTTP validation
