@@ -162,7 +162,7 @@ func (lsm *LocalStateManager) AddPageToPageBuffer(page *Page) error {
 	return fmt.Errorf(" not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) DeletePageBufferPages(_ []string) error {
+func (lsm *LocalStateManager) DeletePageBufferPages(_ []string, _ []string) error {
 	return fmt.Errorf("DeletePageBufferPages not implemented for local state manager")
 }
 

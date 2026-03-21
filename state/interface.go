@@ -104,7 +104,7 @@ type StateManagementInterface interface {
 	AddPageToPageBuffer(page *Page) error
 	// DeletePageBufferPages removes specific pages by ID from the page buffer.
 	// Used in tandem mode to avoid wiping pages the validator wrote after the read.
-	DeletePageBufferPages(pageIDs []string) error
+	DeletePageBufferPages(pageIDs []string, pageURLs []string) error
 
 	// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
 	// for the given username. Returns zero time if the channel has never been crawled.

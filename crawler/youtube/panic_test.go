@@ -111,7 +111,7 @@ func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 }
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
 func (m *MockStateManager) AddPageToPageBuffer(page *state.Page) error                  { return nil }
-func (m *MockStateManager) DeletePageBufferPages(_ []string) error                      { return nil }
+func (m *MockStateManager) DeletePageBufferPages(_ []string, _ []string) error          { return nil }
 func (m *MockStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
 func (m *MockStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
 func (m *MockStateManager) ClosePendingBatch(_ string) error                                   { return nil }

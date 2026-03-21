@@ -3677,7 +3677,7 @@ func (dsm *DaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params []
 }
 
 // DeletePageBufferPages removes specific pages by ID in a single query.
-func (dsm *DaprStateManager) DeletePageBufferPages(pageIDs []string) error {
+func (dsm *DaprStateManager) DeletePageBufferPages(pageIDs []string, pageURLs []string) error {
 	if len(pageIDs) == 0 {
 		return nil
 	}
@@ -3693,7 +3693,7 @@ func (dsm *DaprStateManager) DeletePageBufferPages(pageIDs []string) error {
 	if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
 		return fmt.Errorf("random-walk-layer: failed to delete %d pages from page buffer: %w", len(pageIDs), err)
 	}
-	log.Info().Int("count", len(pageIDs)).Str("log_tag", "rw_page_buffer").Msg("Deleted specific pages from page buffer")
+	log.Info().Int("count", len(pageIDs)).Strs("urls", pageURLs).Str("log_tag", "rw_page_buffer").Msg("Deleted specific pages from page buffer")
 	return nil
 }
 

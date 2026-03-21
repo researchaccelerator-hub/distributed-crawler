@@ -1395,12 +1395,16 @@ func processAllMessagesWithProcessor(
 	}
 
 	// Log processing summary
+	discoveredCount := len(discoveredChannels)
+	if cfg.TandemCrawl {
+		discoveredCount = len(seenInBatch)
+	}
 	log.Info().
 		Int("messages_processed", processed).
 		Int("messages_fetched", fetched).
 		Int("messages_deleted", deleted).
 		Int("messages_failed", failed).
-		Int("discovered_channels", len(discoveredChannels)).
+		Int("discovered_channels", discoveredCount).
 		Str("page_url", owner.URL).
 		Str("page_id", owner.ID).
 		Msg("Message processing summary")

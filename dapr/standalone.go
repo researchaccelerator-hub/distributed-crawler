@@ -910,14 +910,14 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 					if replErr := crawl.Handle400Replacement(sm, &p, crawlCfg); replErr != nil {
 						log.Error().Err(replErr).Str("url", p.URL).Msg("random-walk-layerless: failed to find 400 replacement")
 					}
-					if delErr := sm.DeletePageBufferPages([]string{p.ID}); delErr != nil {
+					if delErr := sm.DeletePageBufferPages([]string{p.ID}, []string{p.URL}); delErr != nil {
 						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete 400 page from buffer")
 					}
 				} else {
 					if procErr != nil {
 						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")
 					}
-					if delErr := sm.DeletePageBufferPages([]string{p.ID}); delErr != nil {
+					if delErr := sm.DeletePageBufferPages([]string{p.ID}, []string{p.URL}); delErr != nil {
 						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete page from buffer")
 					}
 				}

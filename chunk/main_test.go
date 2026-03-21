@@ -65,7 +65,7 @@ func (m *mockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error         
 func (m *mockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)                    { return nil, nil }
 func (m *mockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error                   { return nil }
 func (m *mockStateManager) AddPageToPageBuffer(_ *state.Page) error                           { return nil }
-func (m *mockStateManager) DeletePageBufferPages(_ []string) error                             { return nil }
+func (m *mockStateManager) DeletePageBufferPages(_ []string, _ []string) error                 { return nil }
 func (m *mockStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
 func (m *mockStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
 func (m *mockStateManager) ClosePendingBatch(_ string) error                                   { return nil }

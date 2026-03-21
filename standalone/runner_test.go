@@ -224,7 +224,7 @@ func (m *MockDaprStateManager) ExecuteDatabaseOperation(sqlQuery string, params 
 	return nil
 }
 func (m *MockDaprStateManager) AddPageToPageBuffer(page *state.Page) error  { return nil }
-func (m *MockDaprStateManager) DeletePageBufferPages(_ []string) error       { return nil }
+func (m *MockDaprStateManager) DeletePageBufferPages(_ []string, _ []string) error { return nil }
 func (m *MockDaprStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
 func (m *MockDaprStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
 func (m *MockDaprStateManager) ClosePendingBatch(_ string) error                                   { return nil }
@@ -372,7 +372,7 @@ func (m *MockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error         
 func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)       { return nil, nil }
 func (m *MockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error     { return nil }
 func (m *MockStateManager) AddPageToPageBuffer(_ *state.Page) error             { return nil }
-func (m *MockStateManager) DeletePageBufferPages(_ []string) error               { return nil }
+func (m *MockStateManager) DeletePageBufferPages(_ []string, _ []string) error   { return nil }
 func (m *MockStateManager) UploadCombinedFile(_ string) error                    { return nil }
 
 // pending-batch / validator stubs

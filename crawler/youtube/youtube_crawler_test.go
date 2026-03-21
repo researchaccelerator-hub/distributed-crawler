@@ -109,7 +109,7 @@ func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, para
 	return nil
 }
 func (m *MockYouTubeStateManager) AddPageToPageBuffer(page *state.Page) error { return nil }
-func (m *MockYouTubeStateManager) DeletePageBufferPages(_ []string) error     { return nil }
+func (m *MockYouTubeStateManager) DeletePageBufferPages(_ []string, _ []string) error { return nil }
 func (m *MockYouTubeStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
 func (m *MockYouTubeStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
 func (m *MockYouTubeStateManager) ClosePendingBatch(_ string) error                                   { return nil }

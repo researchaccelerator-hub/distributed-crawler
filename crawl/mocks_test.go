@@ -427,8 +427,8 @@ func (m *MockStateManager) AddPageToPageBuffer(page *state.Page) error {
 	return args.Error(0)
 }
 
-func (m *MockStateManager) DeletePageBufferPages(pageIDs []string) error {
-	args := m.Called(pageIDs)
+func (m *MockStateManager) DeletePageBufferPages(pageIDs []string, pageURLs []string) error {
+	args := m.Called(pageIDs, pageURLs)
 	return args.Error(0)
 }
 

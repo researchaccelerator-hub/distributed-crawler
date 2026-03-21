@@ -47,7 +47,7 @@ func (n *noopStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error         
 func (n *noopStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)            { return nil, nil }
 func (n *noopStateManager) ExecuteDatabaseOperation(_ string, _ []any) error              { return nil }
 func (n *noopStateManager) AddPageToPageBuffer(_ *state.Page) error                       { return nil }
-func (n *noopStateManager) DeletePageBufferPages(_ []string) error                        { return nil }
+func (n *noopStateManager) DeletePageBufferPages(_ []string, _ []string) error             { return nil }
 func (n *noopStateManager) GetChannelLastCrawled(_ string) (time.Time, error)             { return time.Time{}, nil }
 func (n *noopStateManager) MarkChannelCrawled(_ string, _ int64) error                    { return nil }
 func (n *noopStateManager) LoadInvalidChannels() error                                    { return nil }
