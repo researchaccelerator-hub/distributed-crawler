@@ -275,9 +275,15 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 	// Validator-only mode: run the validation loop and exit.
 	if crawlCfg.ValidateOnly {
 		log.Info().Msg("validator-mode: starting validation-only loop")
-		// Load shared caches used by the validator
+		// Load shared caches used by the validator (same order as random-walk init).
+		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
+			log.Warn().Err(seedErr).Msg("validator-mode: failed to load seed channels (continuing)")
+		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
 			log.Warn().Err(invalidErr).Msg("validator-mode: failed to load invalid channels (continuing)")
+		}
+		if discErr := sm.InitializeDiscoveredChannels(); discErr != nil {
+			log.Fatal().Err(discErr).Msg("validator-mode: failed to initialize discovered channels")
 		}
 		// Recover edges/batches stuck in intermediate states from prior crashes.
 		const staleThreshold = 10 * time.Minute
