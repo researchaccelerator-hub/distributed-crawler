@@ -382,6 +382,10 @@ func (m *MockStateManager) GetCachedChatID(username string) (int64, bool) {
 	args := m.Called(username)
 	return args.Get(0).(int64), args.Bool(1)
 }
+func (m *MockStateManager) IsSeedChannel(username string) bool {
+	args := m.Called(username)
+	return args.Bool(0)
+}
 func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)         { return time.Time{}, nil }
 func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error                { return nil }
 func (m *MockStateManager) LoadInvalidChannels() error {

@@ -61,6 +61,10 @@ type DaprStateManager struct {
 	chatIDCache   map[string]int64
 	chatIDCacheMu sync.RWMutex
 
+	// seedChannelSet holds every username loaded from seed_channels at startup.
+	// Written once during LoadSeedChannels; read-only after that.
+	seedChannelSet map[string]struct{}
+
 	// Invalid channel cache: username -> time it was marked invalid (TTL = 30 days)
 	invalidChannelCache   map[string]time.Time
 	invalidChannelCacheMu sync.RWMutex
@@ -192,6 +196,7 @@ func NewDaprStateManager(config Config) (*DaprStateManager, error) {
 		cacheExpirationDays:   cacheExpirationDays,
 
 		chatIDCache:         make(map[string]int64),
+		seedChannelSet:      make(map[string]struct{}),
 		invalidChannelCache: make(map[string]time.Time),
 	}
 
@@ -3172,13 +3177,17 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 			continue
 		}
 
+		crawlID := dsm.config.CrawlID
+		if record.CrawlID != "" {
+			crawlID = record.CrawlID
+		}
 		values := []any{
 			record.DestinationChannel,
 			record.SourceChannel,
 			record.Walkback,
 			record.Skipped,
 			record.DiscoveryTime,
-			dsm.config.CrawlID,
+			crawlID,
 			record.SequenceID,
 		}
 
@@ -3363,6 +3372,7 @@ func (dsm *DaprStateManager) LoadSeedChannels() error {
 				}
 			}
 		}
+		dsm.seedChannelSet[username] = struct{}{}
 		if addErr := dsm.BaseStateManager.AddDiscoveredChannel(username); addErr != nil {
 			// Already in the set — not an error worth logging at warn level
 			log.Debug().Str("channel", username).Str("log_tag", "rw_seed").Msg("Channel already in discovered set")
@@ -3398,6 +3408,12 @@ func (dsm *DaprStateManager) GetCachedChatID(username string) (int64, bool) {
 	defer dsm.chatIDCacheMu.RUnlock()
 	id, ok := dsm.chatIDCache[username]
 	return id, ok
+}
+
+// IsSeedChannel reports whether username was loaded from seed_channels at startup.
+func (dsm *DaprStateManager) IsSeedChannel(username string) bool {
+	_, ok := dsm.seedChannelSet[username]
+	return ok
 }
 
 // GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels

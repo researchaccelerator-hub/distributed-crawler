@@ -447,6 +447,7 @@ func processWalkbackBatch(
 		Skipped:            false,
 		DiscoveryTime:      time.Now(),
 		SequenceID:         sequenceID,
+		CrawlID:            batch.CrawlID,
 	}
 	edgeRecords = append(edgeRecords, primary)
 
@@ -459,6 +460,7 @@ func processWalkbackBatch(
 			Skipped:            true,
 			DiscoveryTime:      time.Now(),
 			SequenceID:         batch.SequenceID,
+			CrawlID:            batch.CrawlID,
 		}
 		edgeRecords = append(edgeRecords, skipped)
 	}

@@ -329,6 +329,7 @@ func TestHandle400Replacement_NoEdgeRecord_FallsBackToWalkback(t *testing.T) {
 	sm.On("MarkSeedChannelInvalid", "orphan_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "orphan_channel").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "orphan_channel").Return(nil)
+	sm.On("IsSeedChannel", "orphan_channel").Return(false)
 	sm.On("GetRandomDiscoveredChannel").Return("walkback_chan", nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
@@ -337,6 +338,33 @@ func TestHandle400Replacement_NoEdgeRecord_FallsBackToWalkback(t *testing.T) {
 
 	assert.NoError(t, err)
 	sm.AssertCalled(t, "GetRandomDiscoveredChannel")
+}
+
+// No edge record + IsSeedChannel = true → picks from seed_channels, no edge written.
+func TestHandle400Replacement_SeedChannel_PicksFromSeedTable(t *testing.T) {
+	sm := new(MockStateManager)
+	page := &state.Page{
+		ID:         "p1",
+		URL:        "seed_chan",
+		SequenceID: "seq-1",
+		Depth:      0,
+	}
+	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
+
+	sm.On("MarkChannelInvalid", "seed_chan", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "seed_chan").Return(nil)
+	sm.On("GetEdgeRecord", "seq-1", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
+	sm.On("DeleteEdgeRecord", "seq-1", "seed_chan").Return(nil)
+	sm.On("IsSeedChannel", "seed_chan").Return(true)
+	sm.On("GetRandomSeedChannel").Return("replacement_seed", nil)
+	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
+
+	err := Handle400Replacement(sm, page, cfg)
+
+	assert.NoError(t, err)
+	sm.AssertCalled(t, "GetRandomSeedChannel")
+	sm.AssertNotCalled(t, "SaveEdgeRecords", mock.Anything)
+	sm.AssertNotCalled(t, "GetRandomDiscoveredChannel")
 }
 
 // GetEdgeRecord returning an error must be propagated to the caller.

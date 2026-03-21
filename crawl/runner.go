@@ -173,6 +173,10 @@ func Handle400Replacement(sm state.StateManagementInterface, p *state.Page, cfg 
 	}
 
 	if edge == nil {
+		if sm.IsSeedChannel(channel) {
+			log.Warn().Str("channel", channel).Msg("random-walk-400: seed channel invalid, picking replacement from seed_channels")
+			return handle400SeedReplacement(sm, p)
+		}
 		log.Warn().Str("channel", channel).Msg("random-walk-400: no edge record found, falling back to walkback")
 		return handle400Walkback(sm, p, channel, sequenceID)
 	}
@@ -250,6 +254,32 @@ func handle400Walkback(sm state.StateManagementInterface, p *state.Page, sourceC
 
 	log.Info().Str("failed_channel", p.URL).Str("walkback_channel", walkbackURL).
 		Str("sequence_id", sequenceID).Msg("random-walk-400: replaced with walkback")
+	return nil
+}
+
+// handle400SeedReplacement is called when the 400'd channel was a seed channel
+// (no incoming edge record). It picks a random valid seed channel and adds it
+// to the page buffer without creating an edge record.
+func handle400SeedReplacement(sm state.StateManagementInterface, p *state.Page) error {
+	seedURL, err := sm.GetRandomSeedChannel()
+	if err != nil {
+		return fmt.Errorf("random-walk-400: seed replacement: %w", err)
+	}
+
+	seedPage := &state.Page{
+		ID:         uuid.New().String(),
+		ParentID:   p.ParentID,
+		Depth:      p.Depth,
+		URL:        seedURL,
+		SequenceID: uuid.New().String(),
+		Status:     "unfetched",
+	}
+	if addErr := sm.AddPageToPageBuffer(seedPage); addErr != nil {
+		return fmt.Errorf("random-walk-400: failed to add seed replacement page to buffer: %w", addErr)
+	}
+
+	log.Info().Str("failed_channel", p.URL).Str("seed_channel", seedURL).
+		Msg("random-walk-400: replaced invalid seed channel with random seed channel")
 	return nil
 }
 

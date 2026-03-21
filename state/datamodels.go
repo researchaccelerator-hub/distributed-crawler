@@ -77,6 +77,7 @@ type EdgeRecord struct {
 	Walkback           bool      `json:"walkback"`
 	Skipped            bool      `json:"skipped"`
 	SequenceID         string    `json:"sequenceId"` // UUID shared across all edges in one forward chain
+	CrawlID            string    `json:"crawlId"`    // If set, overrides the state manager's own CrawlID in edge_records
 }
 
 // PendingEdgeBatch represents a batch of edges from a single source channel

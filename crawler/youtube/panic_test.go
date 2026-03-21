@@ -85,6 +85,7 @@ func (m *MockStateManager) Close() error                                   { ret
 func (m *MockStateManager) LoadSeedChannels() error                               { return nil }
 func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
 func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
+func (m *MockStateManager) IsSeedChannel(_ string) bool                          { return false }
 func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
 func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
 func (m *MockStateManager) LoadInvalidChannels() error                           { return nil }

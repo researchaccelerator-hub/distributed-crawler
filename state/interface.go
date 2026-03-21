@@ -85,6 +85,8 @@ type StateManagementInterface interface {
 	UpsertSeedChannelChatID(username string, chatID int64) error
 	// GetCachedChatID returns the cached TDLib chat ID for username, if known.
 	GetCachedChatID(username string) (int64, bool)
+	// IsSeedChannel reports whether username was loaded from seed_channels at startup.
+	IsSeedChannel(username string) bool
 
 	// Initializes discovered channels from database
 	// Only implemented for dapr currently
