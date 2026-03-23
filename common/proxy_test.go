@@ -3,86 +3,107 @@ package common
 import "testing"
 
 func TestPodProxyAddr(t *testing.T) {
+	addrs := []string{
+		"1.2.3.4:1080",
+		"5.6.7.8:1080",
+		"9.10.11.12:1080",
+	}
+
 	tests := []struct {
 		name         string
 		podName      string
-		proxyDNSBase string
-		proxyRegion  string
+		addrs        []string
 		proxyOrdinal int
 		want         string
+		wantErr      bool
 	}{
 		{
-			name:         "disabled when dns base empty",
+			name:         "disabled when addrs empty",
 			podName:      "crawler-0",
-			proxyDNSBase: "",
-			proxyRegion:  "eastus",
+			addrs:        nil,
 			proxyOrdinal: -1,
 			want:         "",
 		},
 		{
 			name:         "derives ordinal from pod name",
-			podName:      "crawler-3",
-			proxyDNSBase: "mycrawl-proxy",
-			proxyRegion:  "eastus",
+			podName:      "crawler-2",
+			addrs:        addrs,
 			proxyOrdinal: -1,
-			want:         "mycrawl-proxy-3.eastus.azurecontainer.io:1080",
+			want:         "9.10.11.12:1080",
 		},
 		{
 			name:         "ordinal 0 from pod name",
 			podName:      "crawler-0",
-			proxyDNSBase: "mycrawl-proxy",
-			proxyRegion:  "westus2",
+			addrs:        addrs,
 			proxyOrdinal: -1,
-			want:         "mycrawl-proxy-0.westus2.azurecontainer.io:1080",
+			want:         "1.2.3.4:1080",
 		},
 		{
 			name:         "multi-segment pod name uses last segment",
-			podName:      "my-app-crawler-12",
-			proxyDNSBase: "prod-proxy",
-			proxyRegion:  "eastus",
+			podName:      "my-app-crawler-1",
+			addrs:        addrs,
 			proxyOrdinal: -1,
-			want:         "prod-proxy-12.eastus.azurecontainer.io:1080",
+			want:         "5.6.7.8:1080",
 		},
 		{
 			name:         "non-numeric pod suffix defaults to 0",
 			podName:      "crawler-abc",
-			proxyDNSBase: "mycrawl-proxy",
-			proxyRegion:  "eastus",
+			addrs:        addrs,
 			proxyOrdinal: -1,
-			want:         "mycrawl-proxy-0.eastus.azurecontainer.io:1080",
+			want:         "1.2.3.4:1080",
 		},
 		{
 			name:         "empty pod name defaults to 0",
 			podName:      "",
-			proxyDNSBase: "mycrawl-proxy",
-			proxyRegion:  "eastus",
+			addrs:        addrs,
 			proxyOrdinal: -1,
-			want:         "mycrawl-proxy-0.eastus.azurecontainer.io:1080",
+			want:         "1.2.3.4:1080",
 		},
 		{
 			name:         "explicit ordinal overrides pod name",
-			podName:      "crawler-3",
-			proxyDNSBase: "mycrawl-proxy",
-			proxyRegion:  "eastus",
-			proxyOrdinal: 7,
-			want:         "mycrawl-proxy-7.eastus.azurecontainer.io:1080",
+			podName:      "crawler-0",
+			addrs:        addrs,
+			proxyOrdinal: 2,
+			want:         "9.10.11.12:1080",
 		},
 		{
 			name:         "explicit ordinal 0",
-			podName:      "crawler-5",
-			proxyDNSBase: "mycrawl-proxy",
-			proxyRegion:  "eastus",
+			podName:      "crawler-2",
+			addrs:        addrs,
 			proxyOrdinal: 0,
-			want:         "mycrawl-proxy-0.eastus.azurecontainer.io:1080",
+			want:         "1.2.3.4:1080",
+		},
+		{
+			name:         "ordinal exceeds list length",
+			podName:      "crawler-5",
+			addrs:        addrs,
+			proxyOrdinal: -1,
+			wantErr:      true,
+		},
+		{
+			name:         "explicit ordinal exceeds list length",
+			podName:      "crawler-0",
+			addrs:        addrs,
+			proxyOrdinal: 10,
+			wantErr:      true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := PodProxyAddr(tt.podName, tt.proxyDNSBase, tt.proxyRegion, tt.proxyOrdinal)
+			got, err := PodProxyAddr(tt.podName, tt.addrs, tt.proxyOrdinal)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if got != tt.want {
-				t.Errorf("PodProxyAddr(%q, %q, %q, %d) = %q, want %q",
-					tt.podName, tt.proxyDNSBase, tt.proxyRegion, tt.proxyOrdinal, got, tt.want)
+				t.Errorf("PodProxyAddr(%q, %v, %d) = %q, want %q",
+					tt.podName, tt.addrs, tt.proxyOrdinal, got, tt.want)
 			}
 		})
 	}

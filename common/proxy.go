@@ -6,26 +6,31 @@ import (
 	"strings"
 )
 
-// PodProxyAddr returns the SOCKS5 proxy address for this pod, derived from
-// the pod's StatefulSet ordinal and the DNS base name + region.
-// Returns "" if proxyDNSBase is empty (proxies disabled → direct connection).
+// PodProxyAddr returns the SOCKS5 proxy address for this pod by selecting
+// from a list of proxy addresses using the pod's StatefulSet ordinal.
+// Returns "" if addrs is empty (proxies disabled → direct connection).
 //
 // If proxyOrdinal >= 0, it is used directly instead of parsing the pod name.
 // This supports local development where there is no StatefulSet pod name.
-func PodProxyAddr(podName, proxyDNSBase, proxyRegion string, proxyOrdinal int) string {
-	if proxyDNSBase == "" {
-		return ""
+func PodProxyAddr(podName string, addrs []string, proxyOrdinal int) (string, error) {
+	if len(addrs) == 0 {
+		return "", nil
 	}
+
 	ordinal := proxyOrdinal
 	if ordinal < 0 {
 		// Derive from pod name: "crawler-3" → 3
 		parts := strings.Split(podName, "-")
 		parsed, err := strconv.Atoi(parts[len(parts)-1])
 		if err != nil {
-			ordinal = 0 // local dev / non-StatefulSet — use proxy-0
+			ordinal = 0 // local dev / non-StatefulSet — use first proxy
 		} else {
 			ordinal = parsed
 		}
 	}
-	return fmt.Sprintf("%s-%d.%s.azurecontainer.io:1080", proxyDNSBase, ordinal, proxyRegion)
+
+	if ordinal >= len(addrs) {
+		return "", fmt.Errorf("proxy ordinal %d exceeds proxy list length %d", ordinal, len(addrs))
+	}
+	return addrs[ordinal], nil
 }

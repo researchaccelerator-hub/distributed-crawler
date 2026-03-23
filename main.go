@@ -387,21 +387,23 @@ Examples:
 			Msg("Crawler limits configured")
 
 		// Resolve SOCKS5 proxy address from CLI flags + env vars.
-		// ProxyDNSBase and ProxyRegion are CLI-only
-		// Credentials come from env only
+		// ProxyAddrs is CLI-only (different crawl types share the same manifest).
+		// Credentials come from env only (secrets should not appear in process args).
 		crawlerCfg.ProxyUser = os.Getenv("PROXY_USER")
 		crawlerCfg.ProxyPass = os.Getenv("PROXY_PASS")
 
-		if crawlerCfg.ProxyDNSBase != "" {
-			if crawlerCfg.ProxyRegion == "" {
-				return fmt.Errorf("--proxy-region (or PROXY_REGION env) is required when proxy is enabled")
-			}
+		if len(crawlerCfg.ProxyAddrs) > 0 {
 			podName := os.Getenv("POD_NAME")
-			crawlerCfg.ProxyAddr = common.PodProxyAddr(podName, crawlerCfg.ProxyDNSBase, crawlerCfg.ProxyRegion, crawlerCfg.ProxyOrdinal)
+			addr, err := common.PodProxyAddr(podName, crawlerCfg.ProxyAddrs, crawlerCfg.ProxyOrdinal)
+			if err != nil {
+				return fmt.Errorf("proxy resolution failed: %w", err)
+			}
+			crawlerCfg.ProxyAddr = addr
 			log.Info().
 				Str("proxy_addr", crawlerCfg.ProxyAddr).
 				Str("pod_name", podName).
 				Int("proxy_ordinal", crawlerCfg.ProxyOrdinal).
+				Int("proxy_pool_size", len(crawlerCfg.ProxyAddrs)).
 				Msg("SOCKS5 proxy configured for this pod")
 		}
 
@@ -812,8 +814,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorClaimBatchSize, "validator-claim-batch-size", 10, "Number of pending edges to claim per DB round-trip (default: 10)")
 
 	// SOCKS5 proxy flags
-	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyDNSBase, "proxy-dns-base", "", "SOCKS5 proxy DNS base name (e.g., 'mycrawl-proxy'); empty = no proxy")
-	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyRegion, "proxy-region", "", "Azure region for proxy ACI containers (e.g., 'eastus')")
+	rootCmd.PersistentFlags().StringSliceVar(&crawlerCfg.ProxyAddrs, "proxy-addrs", []string{}, "Comma-separated SOCKS5 proxy addresses (ip:port), one per pod ordinal; empty = no proxy")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyOrdinal, "proxy-ordinal", -1, "Override proxy ordinal for local dev (-1 = derive from POD_NAME)")
 
 	// Combine files flags
