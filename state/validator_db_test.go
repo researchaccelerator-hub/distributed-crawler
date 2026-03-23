@@ -804,3 +804,78 @@ func TestRecoverStaleBatchClaims_FreshBatchNotTouched(t *testing.T) {
 		assert.NotContains(t, call.Metadata["sql"], "SET status = 'closed'")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// RecoverOrphanEdges
+// ---------------------------------------------------------------------------
+
+// Orphan edges on completed batches are counted and then deleted.
+func TestRecoverOrphanEdges_DeletesEdgesOnCompletedBatches(t *testing.T) {
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			if strings.Contains(in.Metadata["sql"], "SELECT COUNT(*)") {
+				// 3 orphan edges exist
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(3)}})}, nil
+			}
+			// DELETE call
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverOrphanEdges()
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	// 2 calls: COUNT query + DELETE
+	assert.Equal(t, 2, callCount)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	lastSQL := mc.bindingCalls[callCount-1].Metadata["sql"]
+	assert.Contains(t, lastSQL, "DELETE FROM pending_edges")
+	assert.Contains(t, lastSQL, "completed")
+}
+
+// No completed batches → count = 0, no DELETE issued.
+func TestRecoverOrphanEdges_NoOrphans_ReturnsZeroAndSkipsDelete(t *testing.T) {
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			if strings.Contains(in.Metadata["sql"], "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(0)}})}, nil
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverOrphanEdges()
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+	// Only the COUNT query — no DELETE should have been issued.
+	assert.Equal(t, 1, callCount)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "DELETE FROM pending_edges")
+	}
+}
+
+// Count query error propagates without issuing a DELETE.
+func TestRecoverOrphanEdges_CountQueryError_Propagated(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			return nil, fmt.Errorf("db connection lost")
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverOrphanEdges()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "db connection lost")
+	assert.Equal(t, 0, n)
+}

@@ -752,6 +752,90 @@ func TestRunForChannelWithPool_400VsFloodWait_OnlyFloodWaitRetires(t *testing.T)
 	assert.Equal(t, 1, ConnectionPoolTotalSize(), "ErrTDLib400 must not retire the connection")
 }
 
+// ── handle400SeedReplacement: error paths and sequence ID ─────────────────
+
+// GetRandomSeedChannel returning an error must be propagated.
+func TestHandle400SeedReplacement_GetRandomSeedChannelError_Propagated(t *testing.T) {
+	sm := new(MockStateManager)
+	page := &state.Page{
+		ID:         "p1",
+		URL:        "seed_chan",
+		SequenceID: "seq-1",
+	}
+	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
+
+	sm.On("MarkChannelInvalid", "seed_chan", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "seed_chan").Return(nil)
+	sm.On("GetEdgeRecord", "seq-1", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
+	sm.On("DeleteEdgeRecord", "seq-1", "seed_chan").Return(nil)
+	sm.On("IsSeedChannel", "seed_chan").Return(true)
+	sm.On("GetRandomSeedChannel").Return("", fmt.Errorf("seed table empty"))
+
+	err := Handle400Replacement(sm, page, cfg)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "seed table empty")
+	sm.AssertNotCalled(t, "AddPageToPageBuffer", mock.Anything)
+}
+
+// AddPageToPageBuffer failing inside handle400SeedReplacement must propagate the error.
+func TestHandle400SeedReplacement_AddPageToBufferFails_ReturnsError(t *testing.T) {
+	sm := new(MockStateManager)
+	page := &state.Page{
+		ID:         "p1",
+		URL:        "seed_chan",
+		SequenceID: "seq-1",
+	}
+	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
+
+	sm.On("MarkChannelInvalid", "seed_chan", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "seed_chan").Return(nil)
+	sm.On("GetEdgeRecord", "seq-1", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
+	sm.On("DeleteEdgeRecord", "seq-1", "seed_chan").Return(nil)
+	sm.On("IsSeedChannel", "seed_chan").Return(true)
+	sm.On("GetRandomSeedChannel").Return("replacement_seed", nil)
+	sm.On("AddPageToPageBuffer", mock.Anything).Return(fmt.Errorf("buffer write failed"))
+
+	err := Handle400Replacement(sm, page, cfg)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "buffer write failed")
+}
+
+// Seed replacement page must start a fresh SequenceID (new chain, no edge record).
+func TestHandle400SeedReplacement_ReplacementPageHasFreshSequenceID(t *testing.T) {
+	sm := new(MockStateManager)
+	page := &state.Page{
+		ID:         "p1",
+		URL:        "seed_chan",
+		SequenceID: "original-seq",
+		ParentID:   "parent-1",
+		Depth:      0,
+	}
+	cfg := common.CrawlerConfig{CrawlID: "crawl-1"}
+
+	var capturedPage *state.Page
+	sm.On("MarkChannelInvalid", "seed_chan", "tdlib_400").Return(nil)
+	sm.On("MarkSeedChannelInvalid", "seed_chan").Return(nil)
+	sm.On("GetEdgeRecord", "original-seq", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
+	sm.On("DeleteEdgeRecord", "original-seq", "seed_chan").Return(nil)
+	sm.On("IsSeedChannel", "seed_chan").Return(true)
+	sm.On("GetRandomSeedChannel").Return("replacement_seed", nil)
+	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
+		capturedPage = p
+		return true
+	})).Return(nil)
+
+	require.NoError(t, Handle400Replacement(sm, page, cfg))
+
+	require.NotNil(t, capturedPage)
+	assert.Equal(t, "replacement_seed", capturedPage.URL)
+	assert.NotEqual(t, "original-seq", capturedPage.SequenceID, "seed replacement must start a new chain")
+	assert.NotEmpty(t, capturedPage.SequenceID)
+	// No edge record must be written — seeds have no incoming edge.
+	sm.AssertNotCalled(t, "SaveEdgeRecords", mock.Anything)
+}
+
 // ── End-to-end detection: each error string triggers ErrTDLib400 ───────────
 
 // Table-driven: confirms each known trigger string is detected by isTDLib400
