@@ -63,12 +63,12 @@ CREATE INDEX idx_edge_records_crawl_source
 
 
 -- ---------------------------------------------------------------------------
--- layer_buffer
+-- page_buffer
 -- Transient queue of pages to process in the next BFS/random-walk layer.
 -- Scoped per pod via crawl_id — each pod only reads/writes its own rows.
 -- Rows are deleted after a layer completes; this table should stay small.
 -- ---------------------------------------------------------------------------
-CREATE TABLE layer_buffer (
+CREATE TABLE page_buffer (
     page_id    VARCHAR(36)  PRIMARY KEY,     -- UUID
     parent_id  VARCHAR(36)  NOT NULL,        -- UUID of parent page
     depth      INTEGER      NOT NULL,
@@ -78,8 +78,8 @@ CREATE TABLE layer_buffer (
 );
 
 -- All runtime queries filter on crawl_id (pod isolation)
-CREATE INDEX idx_layer_buffer_crawl_id
-    ON layer_buffer (crawl_id);
+CREATE INDEX idx_page_buffer_crawl_id
+    ON page_buffer (crawl_id);
 
 
 -- ---------------------------------------------------------------------------
@@ -92,6 +92,7 @@ CREATE TABLE seed_channels (
     channel_username   VARCHAR(64)  PRIMARY KEY,
     chat_id            BIGINT,               -- cached TDLib chat ID; NULL = not yet resolved
     last_crawled_at    TIMESTAMP,            -- NULL = never crawled; set by MarkChannelCrawled()
+    invalidated_at     TIMESTAMP,            -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
     member_count       INTEGER,
     inserted_at        TIMESTAMP    NOT NULL DEFAULT NOW()
 );
@@ -133,7 +134,7 @@ CREATE INDEX idx_invalid_channels_invalidated_at
 -- INSERT into edge_records can call nextval().
 -- ---------------------------------------------------------------------------
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE edge_records      TO crawler_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE layer_buffer      TO crawler_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE page_buffer      TO crawler_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE seed_channels     TO crawler_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE invalid_channels  TO crawler_app;
 
@@ -145,7 +146,7 @@ GRANT USAGE, SELECT ON SEQUENCE edge_records_edge_id_seq TO crawler_app;
 -- SELECT only — no sequence access needed.
 -- ---------------------------------------------------------------------------
 GRANT SELECT ON TABLE edge_records      TO crawler_readonly;
-GRANT SELECT ON TABLE layer_buffer      TO crawler_readonly;
+GRANT SELECT ON TABLE page_buffer      TO crawler_readonly;
 GRANT SELECT ON TABLE seed_channels     TO crawler_readonly;
 GRANT SELECT ON TABLE invalid_channels  TO crawler_readonly;
 
@@ -167,14 +168,14 @@ GRANT SELECT ON TABLE invalid_channels  TO crawler_readonly;
 
 -- Add sequence_id columns (if upgrading from pre-sequence schema):
 -- ALTER TABLE edge_records  ADD COLUMN IF NOT EXISTS sequence_id VARCHAR(36) NOT NULL DEFAULT '';
--- ALTER TABLE layer_buffer  ADD COLUMN IF NOT EXISTS sequence_id VARCHAR(36) NOT NULL DEFAULT '';
+-- ALTER TABLE page_buffer  ADD COLUMN IF NOT EXISTS sequence_id VARCHAR(36) NOT NULL DEFAULT '';
 
 -- Widen channel username columns (VARCHAR(32) → VARCHAR(64)):
 -- ALTER TABLE edge_records  ALTER COLUMN destination_channel TYPE VARCHAR(64);
 -- ALTER TABLE edge_records  ALTER COLUMN source_channel      TYPE VARCHAR(64);
 -- ALTER TABLE edge_records  ALTER COLUMN crawl_id            TYPE VARCHAR(64);
--- ALTER TABLE layer_buffer  ALTER COLUMN url                 TYPE VARCHAR(64);
--- ALTER TABLE layer_buffer  ALTER COLUMN crawl_id            TYPE VARCHAR(64);
+-- ALTER TABLE page_buffer  ALTER COLUMN url                 TYPE VARCHAR(64);
+-- ALTER TABLE page_buffer  ALTER COLUMN crawl_id            TYPE VARCHAR(64);
 
 -- Add invalid_channels table (if it doesn't exist):
 -- CREATE TABLE IF NOT EXISTS invalid_channels (
@@ -189,7 +190,7 @@ GRANT SELECT ON TABLE invalid_channels  TO crawler_readonly;
 -- CREATE INDEX IF NOT EXISTS idx_edge_records_sequence_id    ON edge_records (sequence_id) WHERE sequence_id <> '';
 -- CREATE INDEX IF NOT EXISTS idx_edge_records_discovery_time ON edge_records (discovery_time);
 -- CREATE INDEX IF NOT EXISTS idx_edge_records_crawl_source   ON edge_records (crawl_id, source_channel);
--- CREATE INDEX IF NOT EXISTS idx_layer_buffer_crawl_id       ON layer_buffer (crawl_id);
+-- CREATE INDEX IF NOT EXISTS idx_page_buffer_crawl_id       ON page_buffer (crawl_id);
 -- CREATE INDEX IF NOT EXISTS idx_seed_channels_last_crawled  ON seed_channels (last_crawled_at NULLS FIRST);
 -- CREATE INDEX IF NOT EXISTS idx_seed_channels_uncrawled     ON seed_channels (inserted_at) WHERE last_crawled_at IS NULL;
 -- CREATE INDEX IF NOT EXISTS idx_invalid_channels_invalidated_at ON invalid_channels (invalidated_at);

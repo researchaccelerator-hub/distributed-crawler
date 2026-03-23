@@ -85,11 +85,13 @@ func (m *MockStateManager) Close() error                                   { ret
 func (m *MockStateManager) LoadSeedChannels() error                               { return nil }
 func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
 func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
+func (m *MockStateManager) IsSeedChannel(_ string) bool                          { return false }
 func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
 func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
 func (m *MockStateManager) LoadInvalidChannels() error                           { return nil }
 func (m *MockStateManager) IsInvalidChannel(_ string) bool                       { return false }
 func (m *MockStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
+func (m *MockStateManager) MarkSeedChannelInvalid(_ string) error                { return nil }
 func (m *MockStateManager) InitializeDiscoveredChannels() error             { return nil }
 func (m *MockStateManager) InitializeRandomWalkLayer() error                { return nil }
 func (m *MockStateManager) GetRandomDiscoveredChannel() (string, error)     { return "", nil }
@@ -104,12 +106,30 @@ func (m *MockStateManager) StoreChannelData(channelID string, channelData *model
 func (m *MockStateManager) UploadCombinedFile(filename string) error { return nil }
 
 // random-walk database operations
-func (m *MockStateManager) GetPagesFromLayerBuffer() ([]state.Page, error) {
+func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return []state.Page{}, nil
 }
-func (m *MockStateManager) WipeLayerBuffer() error                                       { return nil }
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
-func (m *MockStateManager) AddPageToLayerBuffer(page *state.Page) error                  { return nil }
+func (m *MockStateManager) AddPageToPageBuffer(page *state.Page) error                  { return nil }
+func (m *MockStateManager) DeletePageBufferPages(_ []string, _ []string) error          { return nil }
+func (m *MockStateManager) CreatePendingBatch(_ *state.PendingEdgeBatch) error                 { return nil }
+func (m *MockStateManager) InsertPendingEdge(_ *state.PendingEdge) error                       { return nil }
+func (m *MockStateManager) ClosePendingBatch(_ string) error                                   { return nil }
+func (m *MockStateManager) ClaimPendingEdges(_ int) ([]*state.PendingEdge, error)              { return nil, nil }
+func (m *MockStateManager) UpdatePendingEdge(_ state.PendingEdgeUpdate) error                  { return nil }
+func (m *MockStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*state.PendingEdge, error) { return nil, nil, nil }
+func (m *MockStateManager) CompletePendingBatch(_ string) error                                { return nil }
+func (m *MockStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, error)               { return 0, nil }
+func (m *MockStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
+func (m *MockStateManager) GetRandomSeedChannel() (string, error)                              { return "", nil }
+func (m *MockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
+func (m *MockStateManager) IsChannelDiscovered(_ string) (bool, error)                         { return false, nil }
+func (m *MockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
+func (m *MockStateManager) InsertAccessEvent(_ string) error                                   { return nil }
+func (m *MockStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)               { return nil, nil }
+func (m *MockStateManager) DeleteEdgeRecord(_, _ string) error                                  { return nil }
+func (m *MockStateManager) GetRandomSkippedEdge(_, _ string) (*state.EdgeRecord, error)        { return nil, nil }
+func (m *MockStateManager) PromoteEdge(_, _ string) error                                       { return nil }
 
 func TestPanicRecovery(t *testing.T) {
 	// Create a YouTube crawler with a mock client that will panic

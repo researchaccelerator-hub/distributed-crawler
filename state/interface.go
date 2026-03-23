@@ -85,6 +85,8 @@ type StateManagementInterface interface {
 	UpsertSeedChannelChatID(username string, chatID int64) error
 	// GetCachedChatID returns the cached TDLib chat ID for username, if known.
 	GetCachedChatID(username string) (int64, bool)
+	// IsSeedChannel reports whether username was loaded from seed_channels at startup.
+	IsSeedChannel(username string) bool
 
 	// Initializes discovered channels from database
 	// Only implemented for dapr currently
@@ -97,10 +99,12 @@ type StateManagementInterface interface {
 	StoreChannelData(channelID string, channelData *model.ChannelData) error
 	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
-	GetPagesFromLayerBuffer() ([]Page, error)
-	WipeLayerBuffer() error
+	GetPagesFromPageBuffer(limit int) ([]Page, error)
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
-	AddPageToLayerBuffer(page *Page) error
+	AddPageToPageBuffer(page *Page) error
+	// DeletePageBufferPages removes specific pages by ID from the page buffer.
+	// Used in tandem mode to avoid wiping pages the validator wrote after the read.
+	DeletePageBufferPages(pageIDs []string, pageURLs []string) error
 
 	// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
 	// for the given username. Returns zero time if the channel has never been crawled.
@@ -108,6 +112,11 @@ type StateManagementInterface interface {
 	// MarkChannelCrawled upserts the channel into seed_channels, recording the
 	// current time as last_crawled_at and caching the resolved chatID.
 	MarkChannelCrawled(username string, chatID int64) error
+	// MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row
+	// for the given username, if the row exists.  No-ops for channels not in the
+	// seed table.  The 30-day TTL is enforced in LoadSeedChannels and
+	// GetRandomSeedChannel by filtering out rows where invalidated_at is recent.
+	MarkSeedChannelInvalid(username string) error
 
 	// LoadInvalidChannels populates the in-memory invalid channel cache from the
 	// invalid_channels table (rows within the 30-day TTL window only).
@@ -121,6 +130,89 @@ type StateManagementInterface interface {
 
 	// Combined files
 	UploadCombinedFile(filename string) error
+
+	// Validator / tandem-crawl methods
+
+	// CreatePendingBatch inserts a new batch row with status='open'.
+	// Called by the crawler when the first potential edge is found for a source channel.
+	CreatePendingBatch(batch *PendingEdgeBatch) error
+
+	// InsertPendingEdge writes a single pending edge row. Called as each edge is
+	// discovered (streaming — does not wait for the channel to finish).
+	InsertPendingEdge(edge *PendingEdge) error
+
+	// ClosePendingBatch sets status='closed' and closed_at=NOW(), signalling that
+	// the crawler has finished extracting edges from this source channel.
+	ClosePendingBatch(batchID string) error
+
+	// ClaimPendingEdges atomically claims up to limit edges with
+	// validation_status='pending', ordered by discovery_time.  Uses
+	// UPDATE ... WHERE pending_id IN (SELECT ... FOR UPDATE SKIP LOCKED)
+	// to allow concurrent validators.
+	ClaimPendingEdges(limit int) ([]*PendingEdge, error)
+
+	// UpdatePendingEdge sets validation_status, validation_reason, and
+	// validated_at for one edge.
+	UpdatePendingEdge(update PendingEdgeUpdate) error
+
+	// ClaimWalkbackBatch finds the oldest batch where status='closed' and no
+	// pending_edges have validation_status='pending'. Atomically sets
+	// status='processing'.  Returns (nil, nil, nil) if no batch is ready.
+	ClaimWalkbackBatch() (*PendingEdgeBatch, []*PendingEdge, error)
+
+	// CompletePendingBatch sets status='completed' and completed_at=NOW().
+	CompletePendingBatch(batchID string) error
+
+	// RecoverStaleBatchClaims resets pending_edge_batches stuck in 'processing'
+	// for longer than staleThreshold back to 'closed', incrementing attempt_count.
+	// Batches that have reached maxBatchAttempts are logged and left in place.
+	RecoverStaleBatchClaims(staleThreshold time.Duration) (int, error)
+
+	// FlushBatchStats upserts source_type_stats for the batch, then DELETEs
+	// all pending_edges rows for that batch.
+	FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error
+
+	// GetRandomSeedChannel returns a random channel_username from seed_channels.
+	GetRandomSeedChannel() (string, error)
+
+	// ClaimDiscoveredChannel atomically claims first-discovery of a channel.
+	// Returns true if this call inserted (first claim), false if already claimed
+	// by any crawl.  crawlID is stored for audit only.
+	ClaimDiscoveredChannel(username, crawlID string) (bool, error)
+
+	// IsChannelDiscovered checks whether a channel has been discovered by any
+	// crawl in the crawler's history, without inserting. Used by validators to
+	// skip HTTP calls.
+	IsChannelDiscovered(username string) (bool, error)
+
+	// CountIncompleteBatches returns the count of pending_edge_batches with
+	// status != 'completed' for the given crawl_id.
+	CountIncompleteBatches(crawlID string) (int, error)
+
+	// InsertAccessEvent appends a row to access_events recording that the
+	// validator detected an IP-level block.  An external process polls this
+	// table to trigger IP rotation; the validator has no knowledge of the
+	// rotation mechanism.
+	InsertAccessEvent(reason string) error
+
+	// Edge record repair (400-replacement)
+
+	// GetEdgeRecord returns the edge_records row matching the current crawl,
+	// sequence_id, and destination_channel. Returns nil, nil if not found.
+	GetEdgeRecord(sequenceID, destinationChannel string) (*EdgeRecord, error)
+
+	// DeleteEdgeRecord removes the edge_records row matching the current crawl,
+	// sequence_id, and destination_channel.
+	DeleteEdgeRecord(sequenceID, destinationChannel string) error
+
+	// GetRandomSkippedEdge returns a randomly chosen edge_records row where
+	// crawl_id matches, skipped=true, sequence_id=sequenceID, and
+	// source_channel=sourceChannel. Returns nil, nil if none exist.
+	GetRandomSkippedEdge(sequenceID, sourceChannel string) (*EdgeRecord, error)
+
+	// PromoteEdge sets skipped=false on the edge_records row matching the
+	// current crawl, sequence_id, and destination_channel.
+	PromoteEdge(sequenceID, destinationChannel string) error
 
 	// Cleanup
 	// Close performs cleanup operations when shutting down

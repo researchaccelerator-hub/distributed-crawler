@@ -212,8 +212,10 @@ Examples:
 			log.Debug().Msg("YouTube platform selected for dapr-job mode; API key validation will occur when job data is processed")
 		}
 
-		// Validate sampling method combinations (skip URL validation for dapr-job mode)
-		if err := validateSamplingMethod(common.SamplingValidationInput{
+		// Validate sampling method combinations (skip for validate-only and dapr-job mode)
+		if crawlerCfg.ValidateOnly {
+			log.Debug().Msg("validate-only mode: skipping sampling method validation")
+		} else if err := validateSamplingMethod(common.SamplingValidationInput{
 			Platform:       crawlerCfg.Platform,
 			SamplingMethod: crawlerCfg.SamplingMethod,
 			URLList:        urlList,
@@ -782,6 +784,13 @@ func init() {
 	rootCmd.PersistentFlags().Int64Var(&crawlerCfg.MinChannelVideos, "min-channel-videos", 10, "Minimum videos per channel for inclusion")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.NullConfig, "null-config", "{}", "Config for handling of null values in post and channel data. See README for more information")
 	rootCmd.PersistentFlags().BoolVar(&exitOnComplete, "exit-on-complete", false, "Exit with code 0 after a successful crawl (useful for Kubernetes cron jobs)")
+
+	// Validator / tandem-crawl mode flags
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.TandemCrawl, "tandem-crawl", false, "Tandem mode: write edges to pending_edges for validator (no SearchPublicChat)")
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.ValidateOnly, "validate-only", false, "Run as validator pod: process pending edges via HTTP, no crawl loop")
+	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ValidatorRequestRate, "validator-request-rate", 6, "HTTP validation calls per minute (default: 6)")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorRequestJitterMs, "validator-request-jitter-ms", 200, "Max jitter in ms between validator HTTP requests (default: 200)")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorClaimBatchSize, "validator-claim-batch-size", 10, "Number of pending edges to claim per DB round-trip (default: 10)")
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")

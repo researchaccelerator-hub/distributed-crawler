@@ -7,8 +7,8 @@ package state
 //   - IsInvalidChannel / MarkChannelInvalid         — invalid channel TTL cache
 //   - GetChannelLastCrawled                         — parameterized SQL regression + result parsing
 //   - MarkChannelCrawled                            — DB write + cache update
-//   - AddPageToLayerBuffer / GetPagesFromLayerBuffer — layer buffer round-trip
-//   - WipeLayerBuffer                               — scoped DELETE
+//   - AddPageToPageBuffer / GetPagesFromPageBuffer — page buffer round-trip
+//   - DeletePageBufferPages                         — scoped DELETE by ID
 //   - SaveEdgeRecords                               — in-memory append + DB writes with SequenceID
 //   - AddDiscoveredChannel / IsDiscoveredChannel / GetRandomDiscoveredChannel — DiscoveredChannels
 //   - InitializeRandomWalkLayer                     — seed page generation from discovered set
@@ -298,10 +298,10 @@ func TestMarkChannelCrawled_UpdatesCacheAndCallsDB(t *testing.T) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// AddPageToLayerBuffer
+// AddPageToPageBuffer
 // ────────────────────────────────────────────────────────────────────────────
 
-func TestAddPageToLayerBuffer_Success(t *testing.T) {
+func TestAddPageToPageBuffer_Success(t *testing.T) {
 	mc := &mockDaprClient{}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
@@ -313,7 +313,7 @@ func TestAddPageToLayerBuffer_Success(t *testing.T) {
 		SequenceID: "seq-abc",
 	}
 
-	if err := dsm.AddPageToLayerBuffer(page); err != nil {
+	if err := dsm.AddPageToPageBuffer(page); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -321,17 +321,17 @@ func TestAddPageToLayerBuffer_Success(t *testing.T) {
 		t.Fatal("expected a DB binding call")
 	}
 	call := mc.bindingCalls[0]
-	if !strings.Contains(call.Metadata["sql"], "layer_buffer") {
-		t.Fatalf("expected SQL to reference layer_buffer, got: %s", call.Metadata["sql"])
+	if !strings.Contains(call.Metadata["sql"], "page_buffer") {
+		t.Fatalf("expected SQL to reference page_buffer, got: %s", call.Metadata["sql"])
 	}
 }
 
-func TestAddPageToLayerBuffer_ParamsContainCrawlID(t *testing.T) {
+func TestAddPageToPageBuffer_ParamsContainCrawlID(t *testing.T) {
 	mc := &mockDaprClient{}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
 	page := &Page{ID: "pg-1", ParentID: "p-0", Depth: 0, URL: "t.me/c", SequenceID: "s1"}
-	_ = dsm.AddPageToLayerBuffer(page)
+	_ = dsm.AddPageToPageBuffer(page)
 
 	call := mc.bindingCalls[0]
 	if !strings.Contains(call.Metadata["params"], "crawl-rw-123") {
@@ -339,12 +339,12 @@ func TestAddPageToLayerBuffer_ParamsContainCrawlID(t *testing.T) {
 	}
 }
 
-func TestAddPageToLayerBuffer_SequenceIDInParams(t *testing.T) {
+func TestAddPageToPageBuffer_SequenceIDInParams(t *testing.T) {
 	mc := &mockDaprClient{}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
 	page := &Page{ID: "pg-2", ParentID: "p-0", Depth: 0, URL: "t.me/d", SequenceID: "unique-seq-xyz"}
-	_ = dsm.AddPageToLayerBuffer(page)
+	_ = dsm.AddPageToPageBuffer(page)
 
 	call := mc.bindingCalls[0]
 	if !strings.Contains(call.Metadata["params"], "unique-seq-xyz") {
@@ -352,7 +352,7 @@ func TestAddPageToLayerBuffer_SequenceIDInParams(t *testing.T) {
 	}
 }
 
-func TestAddPageToLayerBuffer_ErrorPropagated(t *testing.T) {
+func TestAddPageToPageBuffer_ErrorPropagated(t *testing.T) {
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
 			return nil, errors.New("constraint violation")
@@ -360,17 +360,17 @@ func TestAddPageToLayerBuffer_ErrorPropagated(t *testing.T) {
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 	page := &Page{ID: "p", ParentID: "pp", Depth: 0, URL: "t.me/e", SequenceID: "s"}
-	err := dsm.AddPageToLayerBuffer(page)
+	err := dsm.AddPageToPageBuffer(page)
 	if err == nil {
 		t.Fatal("expected error to propagate from DB failure")
 	}
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// GetPagesFromLayerBuffer
+// GetPagesFromPageBuffer
 // ────────────────────────────────────────────────────────────────────────────
 
-func TestGetPagesFromLayerBuffer_EmptyResult(t *testing.T) {
+func TestGetPagesFromPageBuffer_EmptyResult(t *testing.T) {
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
 			data, _ := json.Marshal([][]interface{}{})
@@ -378,7 +378,7 @@ func TestGetPagesFromLayerBuffer_EmptyResult(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	pages, err := dsm.GetPagesFromLayerBuffer()
+	pages, err := dsm.GetPagesFromPageBuffer(10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestGetPagesFromLayerBuffer_EmptyResult(t *testing.T) {
 	}
 }
 
-func TestGetPagesFromLayerBuffer_ParsesPages(t *testing.T) {
+func TestGetPagesFromPageBuffer_ParsesPages(t *testing.T) {
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
 			// Columns: page_id, parent_id, depth, url, crawl_id, sequence_id
@@ -400,7 +400,7 @@ func TestGetPagesFromLayerBuffer_ParsesPages(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	pages, err := dsm.GetPagesFromLayerBuffer()
+	pages, err := dsm.GetPagesFromPageBuffer(10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -425,59 +425,37 @@ func TestGetPagesFromLayerBuffer_ParsesPages(t *testing.T) {
 	}
 }
 
-func TestGetPagesFromLayerBuffer_QueryScopedToCrawlID(t *testing.T) {
-	capturedSQL := ""
+func TestGetPagesFromPageBuffer_QueryScopedToCrawlID(t *testing.T) {
+	var capturedParams string
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
-			capturedSQL = in.Metadata["sql"]
+			capturedParams = in.Metadata["params"]
 			data, _ := json.Marshal([][]interface{}{})
 			return &daprc.BindingEvent{Data: data}, nil
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	_, _ = dsm.GetPagesFromLayerBuffer()
+	_, _ = dsm.GetPagesFromPageBuffer(10)
 
-	if !strings.Contains(capturedSQL, "crawl-rw-123") {
-		t.Fatalf("expected crawl_id in SQL for multi-pod isolation, got: %s", capturedSQL)
+	// crawl_id must be passed as a parameter, not interpolated into the SQL.
+	if !strings.Contains(capturedParams, "crawl-rw-123") {
+		t.Fatalf("expected crawl_id in params for multi-pod isolation, got: %s", capturedParams)
 	}
 }
 
-func TestGetPagesFromLayerBuffer_BindingError(t *testing.T) {
+func TestGetPagesFromPageBuffer_BindingError(t *testing.T) {
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
 			return nil, errors.New("db timeout")
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	_, err := dsm.GetPagesFromLayerBuffer()
+	_, err := dsm.GetPagesFromPageBuffer(10)
 	if err == nil {
 		t.Fatal("expected error from binding failure")
 	}
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// WipeLayerBuffer
-// ────────────────────────────────────────────────────────────────────────────
-
-func TestWipeLayerBuffer_UsesParameterizedDelete(t *testing.T) {
-	mc := &mockDaprClient{}
-	dsm := newTestDSMRW(mc, defaultRWConfig())
-
-	if err := dsm.WipeLayerBuffer(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(mc.bindingCalls) == 0 {
-		t.Fatal("expected DB binding call")
-	}
-	call := mc.bindingCalls[0]
-	if !strings.Contains(call.Metadata["sql"], "layer_buffer") {
-		t.Fatalf("expected SQL to reference layer_buffer, got: %s", call.Metadata["sql"])
-	}
-	// DELETE must be scoped to this crawl_id via params, not raw interpolation
-	if !strings.Contains(call.Metadata["params"], "crawl-rw-123") {
-		t.Fatalf("expected crawl_id in params for scoped delete, got: %s", call.Metadata["params"])
-	}
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // SaveEdgeRecords
@@ -666,12 +644,14 @@ func TestInitializeRandomWalkLayer_CreatesCorrectNumberOfPages(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	dsm.mutex.RLock()
-	pageCount := len(dsm.layerMap[0])
-	dsm.mutex.RUnlock()
-
-	if pageCount != 3 {
-		t.Fatalf("expected 3 seed pages at depth 0, got %d", pageCount)
+	var insertCount int
+	for _, call := range mc.bindingCalls {
+		if strings.Contains(call.Metadata["sql"], "page_buffer") {
+			insertCount++
+		}
+	}
+	if insertCount != 3 {
+		t.Fatalf("expected 3 seed pages at depth 0, got %d", insertCount)
 	}
 }
 
@@ -688,13 +668,24 @@ func TestInitializeRandomWalkLayer_PagesHaveSequenceIDs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	dsm.mutex.RLock()
-	defer dsm.mutex.RUnlock()
-	for _, pid := range dsm.layerMap[0] {
-		page := dsm.pageMap[pid]
-		if page.SequenceID == "" {
-			t.Errorf("seed page %s has empty SequenceID", pid)
+	var checkedPages int
+	for _, call := range mc.bindingCalls {
+		if !strings.Contains(call.Metadata["sql"], "page_buffer") {
+			continue
 		}
+		var params []any
+		if err := json.Unmarshal([]byte(call.Metadata["params"]), &params); err != nil {
+			t.Fatalf("failed to parse params: %v", err)
+		}
+		// params: [page_id, parent_id, depth, url, crawl_id, sequence_id]
+		seqID, _ := params[5].(string)
+		if seqID == "" {
+			t.Errorf("seed page has empty SequenceID; params=%v", params)
+		}
+		checkedPages++
+	}
+	if checkedPages != 2 {
+		t.Fatalf("expected 2 seed pages, got %d", checkedPages)
 	}
 }
 
@@ -713,11 +704,17 @@ func TestInitializeRandomWalkLayer_NoDuplicateSeeds(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	dsm.mutex.RLock()
-	defer dsm.mutex.RUnlock()
 	seen := make(map[string]bool)
-	for _, pid := range dsm.layerMap[0] {
-		url := dsm.pageMap[pid].URL
+	for _, call := range mc.bindingCalls {
+		if !strings.Contains(call.Metadata["sql"], "page_buffer") {
+			continue
+		}
+		var params []any
+		if err := json.Unmarshal([]byte(call.Metadata["params"]), &params); err != nil {
+			t.Fatalf("failed to parse params: %v", err)
+		}
+		// params: [page_id, parent_id, depth, url, crawl_id, sequence_id]
+		url, _ := params[3].(string)
 		if seen[url] {
 			t.Errorf("duplicate seed URL: %s", url)
 		}

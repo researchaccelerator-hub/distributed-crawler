@@ -88,6 +88,14 @@ type CrawlerConfig struct {
 	ExitOnComplete     bool                   // Exit with code 0 after a successful crawl (useful for Kubernetes cron jobs)
 	MaxCrawlDuration   time.Duration          // Maximum wall-clock duration for a random-walk crawl (0 = unlimited)
 	RateLimitConfig    TelegramRateLimitConfig // Per-connection Telegram API rate limits
+
+	// Validator / tandem-crawl mode
+	TandemCrawl              bool    // Crawler writes to pending_edges; no SearchPublicChat
+	ValidateOnly             bool    // Pod runs RunValidationLoop; no crawl loop
+	ValidatorRequestRate     float64 // HTTP calls per minute for validator (default: 120)
+	ValidatorRequestJitterMs int     // Max jitter in ms for validator requests (default: 200)
+	ValidatorClaimBatchSize  int     // Edges to claim per DB round-trip (default: 10)
+	ValidatorTimeout         time.Duration // Abort crawl if blocked waiting for validator for this long (0 = disabled)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

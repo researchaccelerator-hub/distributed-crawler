@@ -11,18 +11,37 @@
 -- BEFORE RUNNING THIS SCRIPT:
 --   1. The executing identity must be the Entra ID admin for the Flexible
 --      Server (set in Azure portal → PostgreSQL → Authentication).
---   2. Substitute the two placeholder identity names below:
---        <crawler-app-managed-identity>   — user-assigned managed identity
---                                           attached to all crawler pods
---        <crawler-readonly-identity>      — optional; omit the block if not
---                                           used (e.g., a human analyst account
---                                           or a separate MI for monitoring)
---   3. Uncomment line for seeding seed_channel. Substitute place holder for path to seed files. 
---        <absolute_path_to_seed_channels> - csv file with just usernames, header included
+--   2. Set the IDENTITY CONFIGURATION variables below (or pass via -v flag).
+--   3. Uncomment the \COPY line for seeding seed_channels. Substitute the
+--      placeholder for the absolute path to your seed CSV file:
+--        <absolute_path_to_seed_channels> — CSV with a single 'channel_username'
+--                                           header column
 --
 -- Run with:
 --   psql "$DATABASE_URL" -f sql/setup.sql
+--
+-- To set identity names without editing this file, pass -v on the command line:
+--   psql "$DATABASE_URL" \
+--       -v crawler_app_identity="my-crawler-uami" \
+--       -v crawler_readonly_identity="my-readonly-uami" \
+--       -f sql/setup.sql
 -- =============================================================================
+
+
+-- =============================================================================
+-- IDENTITY CONFIGURATION
+-- Set these to the display names of your Azure Entra ID managed identities
+-- (exactly as they appear in the Azure portal).  Override at runtime with -v:
+--   psql ... -v crawler_app_identity="my-crawler-uami" ...
+-- =============================================================================
+\if :{?crawler_app_identity}
+\else
+    \set crawler_app_identity 'crawler-app-managed-identity'
+\endif
+\if :{?crawler_readonly_identity}
+\else
+    \set crawler_readonly_identity 'crawler-readonly-identity'
+\endif
 
 
 -- =============================================================================
@@ -68,14 +87,41 @@ $$;
 -- identities as they appear in Azure Entra ID.
 -- ---------------------------------------------------------------------------
 
+-- Promote psql \-v variables into session-scoped GUCs so PL/pgSQL can read them.
+SELECT set_config('app.crawler_app_identity',      :'crawler_app_identity',      false);
+SELECT set_config('app.crawler_readonly_identity', :'crawler_readonly_identity', false);
+
 -- Crawler pods runtime identity → crawler_app permissions
-SELECT pgaadauth_create_principal('<crawler-app-managed-identity>', false, false);
-GRANT crawler_app TO "<crawler-app-managed-identity>";
+-- pgaadauth_create_principal registers a new Entra principal as a PG role.
+-- If the principal already exists on this server (e.g. cross-subscription MI),
+-- this call will error — that is safe to ignore; the GRANT below still works.
+DO $$
+BEGIN
+    PERFORM pgaadauth_create_principal(current_setting('app.crawler_app_identity'), false, false);
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'pgaadauth_create_principal skipped (principal may already exist): %', SQLERRM;
+END;
+$$;
+DO $$
+BEGIN
+    EXECUTE format('GRANT crawler_app TO %I', current_setting('app.crawler_app_identity'));
+END;
+$$;
 
 -- Optional: read-only monitoring identity → crawler_readonly permissions
--- Uncomment and substitute if you have a dedicated readonly MI or user.
--- SELECT pgaadauth_create_principal('<crawler-readonly-identity>', false, false);
--- GRANT crawler_readonly TO "<crawler-readonly-identity>";
+-- Uncomment if you have a dedicated readonly MI or user.
+-- DO $$
+-- BEGIN
+--     PERFORM pgaadauth_create_principal(current_setting('app.crawler_readonly_identity'), false, false);
+-- EXCEPTION WHEN OTHERS THEN
+--     RAISE NOTICE 'pgaadauth_create_principal skipped: %', SQLERRM;
+-- END;
+-- $$;
+-- DO $$
+-- BEGIN
+--     EXECUTE format('GRANT crawler_readonly TO %I', current_setting('app.crawler_readonly_identity'));
+-- END;
+-- $$;
 
 
 -- =============================================================================
@@ -130,13 +176,13 @@ GRANT SELECT ON TABLE edge_records                              TO crawler_reado
 
 
 -- =============================================================================
--- TABLE: layer_buffer
+-- TABLE: page_buffer
 -- Transient queue of pages to process in the next BFS/random-walk layer.
 -- Scoped per pod via crawl_id — each pod only reads/writes its own rows.
 -- Rows are deleted after a layer completes; this table should stay small.
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS layer_buffer (
+CREATE TABLE IF NOT EXISTS page_buffer (
     page_id     VARCHAR(36)  PRIMARY KEY,     -- UUID
     parent_id   VARCHAR(36)  NOT NULL,        -- UUID of parent page
     depth       INTEGER      NOT NULL,
@@ -146,11 +192,11 @@ CREATE TABLE IF NOT EXISTS layer_buffer (
 );
 
 -- All runtime queries filter on crawl_id (pod isolation)
-CREATE INDEX IF NOT EXISTS idx_layer_buffer_crawl_id
-    ON layer_buffer (crawl_id);
+CREATE INDEX IF NOT EXISTS idx_page_buffer_crawl_id
+    ON page_buffer (crawl_id);
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE layer_buffer      TO crawler_app;
-GRANT SELECT ON TABLE layer_buffer                              TO crawler_readonly;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE page_buffer      TO crawler_app;
+GRANT SELECT ON TABLE page_buffer                              TO crawler_readonly;
 
 
 -- =============================================================================
@@ -164,6 +210,7 @@ CREATE TABLE IF NOT EXISTS seed_channels (
     channel_username  VARCHAR(64)  PRIMARY KEY,
     chat_id           BIGINT,                   -- cached TDLib chat ID; NULL = not yet resolved
     last_crawled_at   TIMESTAMP,                -- NULL = never crawled; set by MarkChannelCrawled()
+    invalidated_at    TIMESTAMP,                -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
     member_count      INTEGER,
     inserted_at       TIMESTAMP    NOT NULL DEFAULT NOW()
 );

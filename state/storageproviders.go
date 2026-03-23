@@ -149,20 +149,97 @@ func (lsm *LocalStateManager) InitializeRandomWalkLayer() error {
 	return fmt.Errorf("InitializeRandomWalkLayer not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) GetPagesFromLayerBuffer() ([]Page, error) {
-	return []Page{}, fmt.Errorf("GetPagesFromLayerBuffer not implemented for local state manager")
+func (lsm *LocalStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
+	return []Page{}, fmt.Errorf("GetPagesFromPageBuffer not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) WipeLayerBuffer() error {
-	return fmt.Errorf("WipeLayerBuffer not implemented for local state manager")
-}
 
 func (lsm *LocalStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return fmt.Errorf("ExecuteDatabaseOperation not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) AddPageToLayerBuffer(page *Page) error {
+func (lsm *LocalStateManager) AddPageToPageBuffer(page *Page) error {
 	return fmt.Errorf(" not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) DeletePageBufferPages(_ []string, _ []string) error {
+	return fmt.Errorf("DeletePageBufferPages not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CreatePendingBatch(batch *PendingEdgeBatch) error {
+	return fmt.Errorf("CreatePendingBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) InsertPendingEdge(edge *PendingEdge) error {
+	return fmt.Errorf("InsertPendingEdge not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClosePendingBatch(batchID string) error {
+	return fmt.Errorf("ClosePendingBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClaimPendingEdges(limit int) ([]*PendingEdge, error) {
+	return nil, fmt.Errorf("ClaimPendingEdges not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) UpdatePendingEdge(update PendingEdgeUpdate) error {
+	return fmt.Errorf("UpdatePendingEdge not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClaimWalkbackBatch() (*PendingEdgeBatch, []*PendingEdge, error) {
+	return nil, nil, fmt.Errorf("ClaimWalkbackBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CompletePendingBatch(batchID string) error {
+	return fmt.Errorf("CompletePendingBatch not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, error) {
+	return 0, nil
+}
+
+func (lsm *LocalStateManager) FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error {
+	return fmt.Errorf("FlushBatchStats not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) GetRandomSeedChannel() (string, error) {
+	return "", fmt.Errorf("GetRandomSeedChannel not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) MarkSeedChannelInvalid(username string) error {
+	return fmt.Errorf("MarkSeedChannelInvalid not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
+	return false, fmt.Errorf("ClaimDiscoveredChannel not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) IsChannelDiscovered(username string) (bool, error) {
+	return false, fmt.Errorf("IsChannelDiscovered not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CountIncompleteBatches(crawlID string) (int, error) {
+	return 0, fmt.Errorf("CountIncompleteBatches not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) InsertAccessEvent(reason string) error {
+	return fmt.Errorf("InsertAccessEvent not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) GetEdgeRecord(_, _ string) (*EdgeRecord, error) {
+	return nil, fmt.Errorf("GetEdgeRecord not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) DeleteEdgeRecord(_, _ string) error {
+	return fmt.Errorf("DeleteEdgeRecord not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) GetRandomSkippedEdge(_, _ string) (*EdgeRecord, error) {
+	return nil, fmt.Errorf("GetRandomSkippedEdge not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) PromoteEdge(_, _ string) error {
+	return fmt.Errorf("PromoteEdge not implemented for local state manager")
 }
 
 // SaveState persists the state to the filesystem
