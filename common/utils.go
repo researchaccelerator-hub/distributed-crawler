@@ -96,6 +96,14 @@ type CrawlerConfig struct {
 	ValidatorRequestJitterMs int     // Max jitter in ms for validator requests (default: 200)
 	ValidatorClaimBatchSize  int     // Edges to claim per DB round-trip (default: 10)
 	ValidatorTimeout         time.Duration // Abort crawl if blocked waiting for validator for this long (0 = disabled)
+
+	// SOCKS5 proxy — all empty by default (direct connection)
+	ProxyDNSBase string // e.g. "mycrawl-proxy"; if empty, proxies are disabled
+	ProxyRegion  string // e.g. "eastus"
+	ProxyUser    string // SOCKS5 auth username (from env PROXY_USER)
+	ProxyPass    string // SOCKS5 auth password (from env PROXY_PASS)
+	ProxyOrdinal int    // Override ordinal for local dev (-1 = derive from POD_NAME)
+	ProxyAddr    string // Resolved proxy address for this pod (set at startup)
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

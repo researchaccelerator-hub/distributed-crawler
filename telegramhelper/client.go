@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -360,6 +361,36 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
 		}
+
+		// Configure SOCKS5 proxy if enabled. Fail hard so we never crawl
+		// without the expected outbound IP.
+		if cfg.ProxyAddr != "" {
+			host, portStr, splitErr := net.SplitHostPort(cfg.ProxyAddr)
+			if splitErr != nil {
+				errChan <- fmt.Errorf("invalid proxy address %q: %w", cfg.ProxyAddr, splitErr)
+				return
+			}
+			port, convErr := strconv.Atoi(portStr)
+			if convErr != nil {
+				errChan <- fmt.Errorf("invalid proxy port %q: %w", portStr, convErr)
+				return
+			}
+			_, proxyErr := tdlibClient.AddProxy(&client.AddProxyRequest{
+				Server: host,
+				Port:   int32(port),
+				Enable: true,
+				Type: &client.ProxyTypeSocks5{
+					Username: cfg.ProxyUser,
+					Password: cfg.ProxyPass,
+				},
+			})
+			if proxyErr != nil {
+				errChan <- fmt.Errorf("failed to configure TDLib SOCKS5 proxy %q: %w", cfg.ProxyAddr, proxyErr)
+				return
+			}
+			log.Info().Str("proxy", cfg.ProxyAddr).Msg("TDLib SOCKS5 proxy configured")
+		}
+
 		clientReady <- tdlibClient
 	}()
 

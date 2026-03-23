@@ -386,6 +386,25 @@ Examples:
 			Bool("skip_media_download", crawlerCfg.SkipMediaDownload).
 			Msg("Crawler limits configured")
 
+		// Resolve SOCKS5 proxy address from CLI flags + env vars.
+		// ProxyDNSBase and ProxyRegion are CLI-only
+		// Credentials come from env only
+		crawlerCfg.ProxyUser = os.Getenv("PROXY_USER")
+		crawlerCfg.ProxyPass = os.Getenv("PROXY_PASS")
+
+		if crawlerCfg.ProxyDNSBase != "" {
+			if crawlerCfg.ProxyRegion == "" {
+				return fmt.Errorf("--proxy-region (or PROXY_REGION env) is required when proxy is enabled")
+			}
+			podName := os.Getenv("POD_NAME")
+			crawlerCfg.ProxyAddr = common.PodProxyAddr(podName, crawlerCfg.ProxyDNSBase, crawlerCfg.ProxyRegion, crawlerCfg.ProxyOrdinal)
+			log.Info().
+				Str("proxy_addr", crawlerCfg.ProxyAddr).
+				Str("pod_name", podName).
+				Int("proxy_ordinal", crawlerCfg.ProxyOrdinal).
+				Msg("SOCKS5 proxy configured for this pod")
+		}
+
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
 		if minPostDateStr != "" {
@@ -791,6 +810,11 @@ func init() {
 	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ValidatorRequestRate, "validator-request-rate", 6, "HTTP validation calls per minute (default: 6)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorRequestJitterMs, "validator-request-jitter-ms", 200, "Max jitter in ms between validator HTTP requests (default: 200)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorClaimBatchSize, "validator-claim-batch-size", 10, "Number of pending edges to claim per DB round-trip (default: 10)")
+
+	// SOCKS5 proxy flags
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyDNSBase, "proxy-dns-base", "", "SOCKS5 proxy DNS base name (e.g., 'mycrawl-proxy'); empty = no proxy")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyRegion, "proxy-region", "", "Azure region for proxy ACI containers (e.g., 'eastus')")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyOrdinal, "proxy-ordinal", -1, "Override proxy ordinal for local dev (-1 = derive from POD_NAME)")
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")

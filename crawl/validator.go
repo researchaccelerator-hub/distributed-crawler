@@ -3,6 +3,7 @@ package crawl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"time"
@@ -51,7 +52,12 @@ type validatorBlockedState struct {
 //
 // Both goroutines exit when the context is cancelled.
 func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, cfg common.CrawlerConfig) error {
-	httpClient := telegramhelper.NewValidatorHTTPClient(10 * time.Second)
+	httpClient, err := telegramhelper.NewValidatorHTTPClientWithProxy(
+		cfg.ProxyAddr, cfg.ProxyUser, cfg.ProxyPass, 10*time.Second,
+	)
+	if err != nil {
+		return fmt.Errorf("validator: failed to create HTTP client: %w", err)
+	}
 
 	requestRate := cfg.ValidatorRequestRate
 	if requestRate <= 0 {
