@@ -52,6 +52,10 @@ type validatorBlockedState struct {
 //
 // Both goroutines exit when the context is cancelled.
 func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, cfg common.CrawlerConfig) error {
+	if err := common.VerifyOutboundIP(cfg.ProxyAddr, cfg.ProxyUser, cfg.ProxyPass); err != nil {
+		return fmt.Errorf("validator: proxy IP verification failed: %w", err)
+	}
+
 	httpClient, err := telegramhelper.NewValidatorHTTPClientWithProxy(
 		cfg.ProxyAddr, cfg.ProxyUser, cfg.ProxyPass, 10*time.Second,
 	)
