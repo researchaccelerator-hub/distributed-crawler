@@ -262,7 +262,8 @@ func validateSingleEdge(
 		}, outcomeTransient
 	}
 
-	log.Info().Str("channel", channel).Str("status", result.Status).Str("reason", result.Reason).
+	log.Info().Str("channel", channel).Str("source_channel", edge.SourceChannel).
+		Str("status", result.Status).Str("reason", result.Reason).
 		Str("source_type", edge.SourceType).Msg("validator-edge: validation result")
 
 	// Apply side effects based on result
@@ -496,8 +497,33 @@ func processWalkbackBatch(
 		log.Warn().Err(err).Str("batch_id", batch.BatchID).Msg("validator-walkback: FlushBatchStats failed; orphan edges will be cleaned at next startup")
 	}
 
-	log.Info().Str("batch_id", batch.BatchID).Str("next_url", nextURL).
-		Bool("walkback", walkback).Int("edge_records", len(edgeRecords)).
+	// Tally validation outcomes for the batch summary.
+	var validCount, invalidCount, duplicateCount, pendingCount, validatingCount, unknownCount int
+	for _, e := range allEdges {
+		switch e.ValidationStatus {
+		case "valid":
+			validCount++
+		case "not_channel", "invalid":
+			invalidCount++
+		case "duplicate":
+			duplicateCount++
+		case "pending":
+			pendingCount++
+		case "validating":
+			validatingCount++
+		default:
+			log.Warn().Str("batch_id", batch.BatchID).Str("status", e.ValidationStatus).
+				Str("channel", e.DestinationChannel).Msg("validator-walkback: unexpected edge validation status")
+			unknownCount++
+		}
+	}
+
+	log.Info().Str("batch_id", batch.BatchID).Str("source_channel", batch.SourceChannel).
+		Int("total_edges", len(allEdges)).Int("valid", validCount).
+		Int("invalid", invalidCount).Int("duplicate", duplicateCount).
+		Int("pending", pendingCount).Int("validating", validatingCount).Int("unknown", unknownCount).
+		Int("edge_records", len(edgeRecords)).
+		Str("next_url", nextURL).Bool("walkback", walkback).
 		Msg("validator-walkback: batch completed")
 
 	return nil
