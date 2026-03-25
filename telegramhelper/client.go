@@ -225,39 +225,6 @@ func maskPhoneNumber(phoneNumber string) string {
 // or connection problems occur. If authentication requires user interaction for phone code,
 // the function will prompt for input through the CLI interactor.
 
-// proxyInjectingAuthorizer wraps a real AuthorizationStateHandler and calls
-// AddProxy on the first WaitTdlibParameters state — the earliest point where
-// the receiver goroutine is running but TDLib has not yet opened any network
-// connections. This guarantees all traffic (including auth) routes through the
-// proxy, with no race window.
-type proxyInjectingAuthorizer struct {
-	inner    client.AuthorizationStateHandler
-	proxyReq *client.AddProxyRequest
-}
-
-func (p *proxyInjectingAuthorizer) Handle(c *client.Client, state client.AuthorizationState) error {
-	log.Info().Str("state", state.AuthorizationStateType()).Msg("TDLib auth state received")
-	if state.AuthorizationStateType() == client.TypeAuthorizationStateWaitTdlibParameters {
-		if p.proxyReq != nil {
-			log.Info().Str("proxy", p.proxyReq.Server).Int32("port", p.proxyReq.Port).Msg("Calling AddProxy before auth...")
-			start := time.Now()
-			if _, err := c.AddProxy(p.proxyReq); err != nil {
-				return fmt.Errorf("failed to add SOCKS5 proxy before auth (took %s): %w", time.Since(start), err)
-			}
-			log.Info().Str("proxy", p.proxyReq.Server).Dur("elapsed", time.Since(start)).Msg("TDLib SOCKS5 proxy configured before auth")
-			p.proxyReq = nil // only inject once
-		}
-	}
-	log.Info().Str("state", state.AuthorizationStateType()).Msg("Delegating to inner auth handler...")
-	start := time.Now()
-	err := p.inner.Handle(c, state)
-	log.Info().Str("state", state.AuthorizationStateType()).Dur("elapsed", time.Since(start)).Err(err).Msg("Inner auth handler returned")
-	return err
-}
-
-func (p *proxyInjectingAuthorizer) Close() {
-	p.inner.Close()
-}
 
 func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	// We'll use the default CLI interactor but prepare environment variables
@@ -372,11 +339,12 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	// The phone number will be picked up by the default CLI interactor
 	SetupAuth(phoneNumber, phoneCode)
 
-	// Wrap the authorizer with a proxy injector if a proxy is configured.
-	// This ensures AddProxy is called at the WaitTdlibParameters stage —
-	// after the receiver goroutine is running but before TDLib opens any
-	// network connections — so all traffic including auth goes through the proxy.
-	var authHandler client.AuthorizationStateHandler = authorizer
+	// Build proxy option if configured. Using WithProxy passes AddProxy as a
+	// NewClient Option, which go-tdlib runs in a goroutine. The request is sent
+	// to TDLib immediately (fire-and-forget at the C level) so the proxy IS
+	// configured before SetTdlibParameters, but the auth flow is not blocked
+	// waiting for TDLib's addProxy response (which hangs in some environments).
+	var clientOpts []client.Option
 	if cfg.ProxyAddr != "" {
 		host, portStr, splitErr := net.SplitHostPort(cfg.ProxyAddr)
 		if splitErr != nil {
@@ -386,18 +354,17 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		if convErr != nil {
 			return nil, fmt.Errorf("invalid proxy port %q: %w", portStr, convErr)
 		}
-		authHandler = &proxyInjectingAuthorizer{
-			inner: authorizer,
-			proxyReq: &client.AddProxyRequest{
-				Server: host,
-				Port:   int32(port),
-				Enable: true,
-				Type: &client.ProxyTypeSocks5{
-					Username: cfg.ProxyUser,
-					Password: cfg.ProxyPass,
-				},
+		proxyReq := &client.AddProxyRequest{
+			Server: host,
+			Port:   int32(port),
+			Enable: true,
+			Type: &client.ProxyTypeSocks5{
+				Username: cfg.ProxyUser,
+				Password: cfg.ProxyPass,
 			},
 		}
+		clientOpts = append(clientOpts, client.WithProxy(proxyReq))
+		log.Info().Str("proxy", cfg.ProxyAddr).Msg("Proxy will be injected via WithProxy option (non-blocking)")
 	}
 
 	// Use the default CLI interactor which will read the environment variables
@@ -407,7 +374,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	errChan := make(chan error)
 
 	go func() {
-		tdlibClient, err := client.NewClient(authHandler)
+		tdlibClient, err := client.NewClient(authorizer, clientOpts...)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
