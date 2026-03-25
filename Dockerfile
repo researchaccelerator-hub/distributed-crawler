@@ -1,7 +1,6 @@
 FROM acrnetcus.azurecr.io/tdlib:latest AS builder
 
-# RUN apk add --no-cache g++ make cmake git linux-headers binutils graphviz valgrind curl
-RUN apk add --no-cache g++ make cmake git linux-headers binutils
+RUN apk add --no-cache g++ make cmake git linux-headers binutils curl
 
 # Install Go 1.25 explicitly to match go.mod requirement
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') && \
