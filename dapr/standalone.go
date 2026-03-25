@@ -182,11 +182,6 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 			}
 		}
 
-		// Temporary: give promtail time to attach before TDLib auth logs start
-		log.Info().Msg("Sleeping 300s to allow promtail to start collecting logs...")
-		time.Sleep(300 * time.Second)
-		log.Info().Msg("Sleep complete, proceeding with TDLib initialization")
-
 		baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
 		cleaner := telegramhelper.NewFileCleaner(
 			baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
