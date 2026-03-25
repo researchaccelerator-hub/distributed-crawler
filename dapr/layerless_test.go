@@ -93,6 +93,97 @@ func (b *blockedValidatorSM) CountIncompleteBatches(_ string) (int, error) {
 	return b.incompleteBatches, nil
 }
 
+// ---------------------------------------------------------------------------
+// seedPageBufferIfNeeded
+// ---------------------------------------------------------------------------
+
+// seedTrackingSM tracks which seeding path was taken.
+type seedTrackingSM struct {
+	noopStateManager
+	existingPages     []state.Page
+	incompleteBatches int
+	seededURLs        []string // URLs passed to AddPageToPageBuffer
+	initLayerCalled   bool
+}
+
+func (s *seedTrackingSM) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
+	return s.existingPages, nil
+}
+
+func (s *seedTrackingSM) CountIncompleteBatches(_ string) (int, error) {
+	return s.incompleteBatches, nil
+}
+
+func (s *seedTrackingSM) AddPageToPageBuffer(p *state.Page) error {
+	s.seededURLs = append(s.seededURLs, p.URL)
+	return nil
+}
+
+func (s *seedTrackingSM) InitializeRandomWalkLayer() error {
+	s.initLayerCalled = true
+	return nil
+}
+
+func TestSeedPageBuffer_ResumesFromExistingPages(t *testing.T) {
+	sm := &seedTrackingSM{
+		existingPages: []state.Page{{ID: "p1", URL: "chan1"}},
+	}
+	cfg := common.CrawlerConfig{TandemCrawl: true, CrawlID: "c1"}
+
+	err := seedPageBufferIfNeeded(sm, cfg, nil)
+	require.NoError(t, err)
+	assert.False(t, sm.initLayerCalled, "should not re-seed when pages exist")
+	assert.Empty(t, sm.seededURLs)
+}
+
+func TestSeedPageBuffer_ResumesFromPendingEdges(t *testing.T) {
+	sm := &seedTrackingSM{
+		incompleteBatches: 5,
+	}
+	cfg := common.CrawlerConfig{TandemCrawl: true, CrawlID: "c1"}
+
+	err := seedPageBufferIfNeeded(sm, cfg, nil)
+	require.NoError(t, err)
+	assert.False(t, sm.initLayerCalled, "should not re-seed when pending edges exist")
+	assert.Empty(t, sm.seededURLs)
+}
+
+func TestSeedPageBuffer_SeedsFromURLList(t *testing.T) {
+	sm := &seedTrackingSM{}
+	cfg := common.CrawlerConfig{CrawlID: "c1"}
+
+	err := seedPageBufferIfNeeded(sm, cfg, []string{"chan_a", "chan_b"})
+	require.NoError(t, err)
+	assert.False(t, sm.initLayerCalled)
+	assert.Equal(t, []string{"chan_a", "chan_b"}, sm.seededURLs)
+}
+
+func TestSeedPageBuffer_FallsBackToRandomSeed(t *testing.T) {
+	sm := &seedTrackingSM{}
+	cfg := common.CrawlerConfig{CrawlID: "c1"}
+
+	err := seedPageBufferIfNeeded(sm, cfg, nil)
+	require.NoError(t, err)
+	assert.True(t, sm.initLayerCalled, "should call InitializeRandomWalkLayer when no URLs and no pending work")
+	assert.Empty(t, sm.seededURLs)
+}
+
+func TestSeedPageBuffer_NonTandem_IgnoresPendingEdges(t *testing.T) {
+	// When TandemCrawl is false, pending edges should not prevent re-seeding.
+	sm := &seedTrackingSM{
+		incompleteBatches: 5,
+	}
+	cfg := common.CrawlerConfig{TandemCrawl: false, CrawlID: "c1"}
+
+	err := seedPageBufferIfNeeded(sm, cfg, nil)
+	require.NoError(t, err)
+	assert.True(t, sm.initLayerCalled, "non-tandem mode should ignore pending edges and re-seed")
+}
+
+// ---------------------------------------------------------------------------
+// RunRandomWalkLayerless circuit breaker
+// ---------------------------------------------------------------------------
+
 func TestRunRandomWalkLayerless_CircuitBreaker_Fires(t *testing.T) {
 	orig := layerlessPollInterval
 	layerlessPollInterval = 10 * time.Millisecond

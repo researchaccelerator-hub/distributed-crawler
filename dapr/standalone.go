@@ -360,31 +360,8 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			log.Fatal().Err(err).Msg("random-walk-init: failed to pull discovered channels")
 		}
 
-		// Seed the page_buffer only on a fresh start (empty buffer = not resuming).
-		existingPages, _ := sm.GetPagesFromPageBuffer(1)
-		if len(existingPages) == 0 {
-			if len(stringList) > 0 {
-				log.Info().Int("count", len(stringList)).Msg("random-walk-init: seeding page buffer from URL list")
-				for _, url := range stringList {
-					page := &state.Page{
-						ID:         uuid.New().String(),
-						URL:        url,
-						Depth:      0,
-						Status:     "unfetched",
-						Timestamp:  time.Now(),
-						SequenceID: uuid.New().String(),
-					}
-					if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
-						log.Error().Err(bufErr).Str("url", url).Msg("random-walk-init: failed to seed URL into page buffer")
-					}
-				}
-			} else {
-				if initErr := sm.InitializeRandomWalkLayer(); initErr != nil {
-					log.Fatal().Err(initErr).Msg("random-walk-init: failed to initialize page buffer from discovered channels")
-				}
-			}
-		} else {
-			log.Info().Int("count", len(existingPages)).Msg("random-walk-init: resuming from existing page buffer")
+		if err := seedPageBufferIfNeeded(sm, crawlCfg, stringList); err != nil {
+			log.Fatal().Err(err).Msg("random-walk-init: failed to seed page buffer")
 		}
 
 		if err := RunRandomWalkLayerless(sm, crawlCfg); err != nil {
@@ -802,6 +779,52 @@ var layerlessPollInterval = 5 * time.Second
 //   - No depth counter or layer-map state to maintain
 //   - Crash-restart is safe: unprocessed pages remain in the buffer
 //   - No convoy effect: workers operate independently, not in lock-step batches
+// seedPageBufferIfNeeded checks whether the page buffer already has work or
+// whether pending validator batches exist before deciding to seed fresh pages.
+// Returns nil when seeding is skipped (resume) or succeeds.
+func seedPageBufferIfNeeded(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, seedURLs []string) error {
+	existingPages, _ := sm.GetPagesFromPageBuffer(1)
+	if len(existingPages) > 0 {
+		log.Info().Int("count", len(existingPages)).Msg("random-walk-init: resuming from existing page buffer")
+		return nil
+	}
+
+	// In tandem mode, the validator may still have edges from a previous run
+	// that will produce new pages.  Don't re-seed if so.
+	if crawlCfg.TandemCrawl {
+		pendingBatches, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
+		if countErr != nil {
+			log.Warn().Err(countErr).Msg("random-walk-init: could not check incomplete batches")
+		}
+		if countErr == nil && pendingBatches > 0 {
+			log.Info().Int("incomplete_batches", pendingBatches).
+				Msg("random-walk-init: page buffer empty but pending edges exist, resuming without re-seeding")
+			return nil
+		}
+	}
+
+	// Fresh start — seed from CLI URLs or discovered channels.
+	if len(seedURLs) > 0 {
+		log.Info().Int("count", len(seedURLs)).Msg("random-walk-init: seeding page buffer from URL list")
+		for _, url := range seedURLs {
+			page := &state.Page{
+				ID:         uuid.New().String(),
+				URL:        url,
+				Depth:      0,
+				Status:     "unfetched",
+				Timestamp:  time.Now(),
+				SequenceID: uuid.New().String(),
+			}
+			if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
+				log.Error().Err(bufErr).Str("url", url).Msg("random-walk-init: failed to seed URL into page buffer")
+			}
+		}
+		return nil
+	}
+
+	return sm.InitializeRandomWalkLayer()
+}
+
 //   - Tandem mode works naturally: the validator writes to page_buffer and this
 //     loop picks up the results without any special batching logic
 func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) error {
