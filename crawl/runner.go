@@ -312,6 +312,9 @@ func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerCon
 			Verbosity:         cfg.TDLibVerbosity,
 			StorageRoot:       storagePrefix,
 			RateLimitConfig:   cfg.RateLimitConfig,
+			ProxyAddr:         cfg.ProxyAddr,
+			ProxyUser:         cfg.ProxyUser,
+			ProxyPass:         cfg.ProxyPass,
 		}
 
 		pool, err := telegramhelper.NewConnectionPool(poolConfig)

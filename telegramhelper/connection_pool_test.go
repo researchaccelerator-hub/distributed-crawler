@@ -262,6 +262,86 @@ func TestRetireConnection_PoolDrainedToZero(t *testing.T) {
 	}
 }
 
+func TestNewConnectionPool_ProxyPropagatedToDefaultConfig(t *testing.T) {
+	cfg := ConnectionPoolConfig{
+		PoolSize:    2,
+		StorageRoot: "test",
+		ProxyAddr:   "10.0.0.1:1080",
+		ProxyUser:   "alice",
+		ProxyPass:   "secret",
+	}
+
+	pool, err := NewConnectionPool(cfg)
+	if err != nil {
+		t.Fatalf("NewConnectionPool: %v", err)
+	}
+
+	if pool.defaultConfig.ProxyAddr != cfg.ProxyAddr {
+		t.Errorf("ProxyAddr: want %q, got %q", cfg.ProxyAddr, pool.defaultConfig.ProxyAddr)
+	}
+	if pool.defaultConfig.ProxyUser != cfg.ProxyUser {
+		t.Errorf("ProxyUser: want %q, got %q", cfg.ProxyUser, pool.defaultConfig.ProxyUser)
+	}
+	if pool.defaultConfig.ProxyPass != cfg.ProxyPass {
+		t.Errorf("ProxyPass: want %q, got %q", cfg.ProxyPass, pool.defaultConfig.ProxyPass)
+	}
+}
+
+// MockPoolTelegramServiceWithConfig records the CrawlerConfig each client was created with.
+type MockPoolTelegramServiceWithConfig struct {
+	Configs []common.CrawlerConfig
+}
+
+func (m *MockPoolTelegramServiceWithConfig) InitializeClient(storagePrefix string) (crawler.TDLibClient, error) {
+	return m.InitializeClientWithConfig(storagePrefix, common.CrawlerConfig{})
+}
+
+func (m *MockPoolTelegramServiceWithConfig) InitializeClientWithConfig(storagePrefix string, config common.CrawlerConfig) (crawler.TDLibClient, error) {
+	m.Configs = append(m.Configs, config)
+	return &MockTDLibClient{ID: fmt.Sprintf("mock-%d", len(m.Configs))}, nil
+}
+
+func (m *MockPoolTelegramServiceWithConfig) GetMe(libClient crawler.TDLibClient) (*client.User, error) {
+	return nil, nil
+}
+
+func TestConnectionPool_GetConnection_UsesProxyConfig(t *testing.T) {
+	mockService := &MockPoolTelegramServiceWithConfig{}
+
+	pool := &ConnectionPool{
+		availableConns: make(map[string]crawler.TDLibClient),
+		inUseConns:     make(map[string]crawler.TDLibClient),
+		maxSize:        2,
+		service:        mockService,
+		storagePrefix:  "test",
+		defaultConfig: common.CrawlerConfig{
+			ProxyAddr: "10.0.0.1:1080",
+			ProxyUser: "alice",
+			ProxyPass: "secret",
+		},
+		connDirMap: make(map[string]string),
+	}
+
+	_, _, err := pool.GetConnection(context.Background())
+	if err != nil {
+		t.Fatalf("GetConnection: %v", err)
+	}
+
+	if len(mockService.Configs) == 0 {
+		t.Fatal("expected InitializeClientWithConfig to be called")
+	}
+	got := mockService.Configs[0]
+	if got.ProxyAddr != "10.0.0.1:1080" {
+		t.Errorf("ProxyAddr: want %q, got %q", "10.0.0.1:1080", got.ProxyAddr)
+	}
+	if got.ProxyUser != "alice" {
+		t.Errorf("ProxyUser: want %q, got %q", "alice", got.ProxyUser)
+	}
+	if got.ProxyPass != "secret" {
+		t.Errorf("ProxyPass: want %q, got %q", "secret", got.ProxyPass)
+	}
+}
+
 func TestConnectionPoolErrorHandling(t *testing.T) {
 	// Create a pool with mock service
 	mockService := &MockPoolTelegramService{}

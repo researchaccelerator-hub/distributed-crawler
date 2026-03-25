@@ -40,6 +40,9 @@ type ConnectionPoolConfig struct {
 	Verbosity         int                            // TDLib verbosity level (0-10, where 10 is most verbose)
 	StorageRoot       string
 	RateLimitConfig   common.TelegramRateLimitConfig // Per-connection Telegram API rate limits
+	ProxyAddr         string                         // SOCKS5 proxy address (host:port)
+	ProxyUser         string                         // SOCKS5 auth username
+	ProxyPass         string                         // SOCKS5 auth password
 }
 
 // NewConnectionPool creates a new connection pool with the specified configuration.
@@ -66,6 +69,9 @@ func NewConnectionPool(config ConnectionPoolConfig) (*ConnectionPool, error) {
 		defaultConfig: common.CrawlerConfig{
 			TDLibDatabaseURLs: config.TDLibDatabaseURLs,
 			TDLibVerbosity:    config.Verbosity,
+			ProxyAddr:         config.ProxyAddr,
+			ProxyUser:         config.ProxyUser,
+			ProxyPass:         config.ProxyPass,
 		},
 		connDirMap:      make(map[string]string),
 		rateLimitConfig: rateLimitCfg,

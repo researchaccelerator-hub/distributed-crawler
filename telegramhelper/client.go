@@ -346,24 +346,10 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	errChan := make(chan error)
 
 	go func() {
-		tdlibClient, err := client.NewClient(authorizer)
-		// Set verbosity level from config (default is 1, lower values increase verbosity)
-		verbosityLevel := 1 // Default value if not configured
-		if cfg.TDLibVerbosity > 0 {
-			verbosityLevel = cfg.TDLibVerbosity
-		}
-
-		log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level")
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: int32(verbosityLevel)}
-		tdlibClient.SetLogVerbosityLevel(&verb)
-
-		if err != nil {
-			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
-			return
-		}
-
-		// Configure SOCKS5 proxy if enabled. Fail hard so we never crawl
-		// without the expected outbound IP.
+		// Build NewClient options. Proxy is passed as a WithProxy option so that
+		// TDLib has the proxy configured before it makes any network connections
+		// during the authorization flow — eliminating the bare-connect window.
+		opts := []client.Option{}
 		if cfg.ProxyAddr != "" {
 			host, portStr, splitErr := net.SplitHostPort(cfg.ProxyAddr)
 			if splitErr != nil {
@@ -375,7 +361,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 				errChan <- fmt.Errorf("invalid proxy port %q: %w", portStr, convErr)
 				return
 			}
-			_, proxyErr := tdlibClient.AddProxy(&client.AddProxyRequest{
+			opts = append(opts, client.WithProxy(&client.AddProxyRequest{
 				Server: host,
 				Port:   int32(port),
 				Enable: true,
@@ -383,13 +369,24 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 					Username: cfg.ProxyUser,
 					Password: cfg.ProxyPass,
 				},
-			})
-			if proxyErr != nil {
-				errChan <- fmt.Errorf("failed to configure TDLib SOCKS5 proxy %q: %w", cfg.ProxyAddr, proxyErr)
-				return
-			}
-			log.Info().Str("proxy", cfg.ProxyAddr).Msg("TDLib SOCKS5 proxy configured")
+			}))
+			log.Info().Str("proxy", cfg.ProxyAddr).Msg("TDLib SOCKS5 proxy configured before auth")
 		}
+
+		tdlibClient, err := client.NewClient(authorizer, opts...)
+		if err != nil {
+			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
+			return
+		}
+
+		// Set verbosity level from config (default is 1, lower values increase verbosity)
+		verbosityLevel := 1
+		if cfg.TDLibVerbosity > 0 {
+			verbosityLevel = cfg.TDLibVerbosity
+		}
+		log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level")
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: int32(verbosityLevel)}
+		tdlibClient.SetLogVerbosityLevel(&verb)
 
 		clientReady <- tdlibClient
 	}()
