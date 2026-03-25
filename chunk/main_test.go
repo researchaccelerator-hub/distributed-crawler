@@ -74,6 +74,7 @@ func (m *mockStateManager) UpdatePendingEdge(_ state.PendingEdgeUpdate) error   
 func (m *mockStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*state.PendingEdge, error) { return nil, nil, nil }
 func (m *mockStateManager) CompletePendingBatch(_ string) error                                { return nil }
 func (m *mockStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, error)               { return 0, nil }
+func (m *mockStateManager) RecoverStaleValidatingEdges(_ time.Duration) (int, error)          { return 0, nil }
 func (m *mockStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
 func (m *mockStateManager) GetRandomSeedChannel() (string, error)                              { return "", nil }
 func (m *mockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }

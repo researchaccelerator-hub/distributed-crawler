@@ -806,6 +806,81 @@ func TestRecoverStaleBatchClaims_FreshBatchNotTouched(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// RecoverStaleValidatingEdges
+// ---------------------------------------------------------------------------
+
+func TestRecoverStaleValidatingEdges_StaleReturnsCount(t *testing.T) {
+	// Edges stuck in 'validating' with old validated_at → reset to 'pending'.
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			sql := in.Metadata["sql"]
+			if strings.Contains(sql, "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(3)}})}, nil
+			}
+			// UPDATE
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleValidatingEdges(10 * time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	assert.Equal(t, 2, callCount) // COUNT + UPDATE
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	lastSQL := mc.bindingCalls[callCount-1].Metadata["sql"]
+	assert.Contains(t, lastSQL, "SET validation_status = 'pending'")
+	assert.Contains(t, lastSQL, "validated_at = NULL")
+}
+
+func TestRecoverStaleValidatingEdges_NoneStale(t *testing.T) {
+	// No stale edges → count = 0, no UPDATE issued.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			if strings.Contains(in.Metadata["sql"], "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(0)}})}, nil
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleValidatingEdges(10 * time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "SET validation_status")
+	}
+}
+
+func TestRecoverStaleValidatingEdges_MinThresholdClamped(t *testing.T) {
+	// Threshold < 1 minute should be clamped to 1 minute.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			sql := in.Metadata["sql"]
+			if strings.Contains(sql, "SELECT COUNT(*)") {
+				// Verify the interval uses 1 minute, not 0
+				assert.Contains(t, sql, "INTERVAL '1 minutes'")
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(0)}})}, nil
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleValidatingEdges(5 * time.Second) // less than 1 minute
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// ---------------------------------------------------------------------------
 // RecoverOrphanEdges
 // ---------------------------------------------------------------------------
 

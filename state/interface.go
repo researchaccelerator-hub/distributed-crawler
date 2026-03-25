@@ -168,6 +168,11 @@ type StateManagementInterface interface {
 	// Batches that have reached maxBatchAttempts are logged and left in place.
 	RecoverStaleBatchClaims(staleThreshold time.Duration) (int, error)
 
+	// RecoverStaleValidatingEdges resets pending_edges stuck in 'validating'
+	// for longer than staleThreshold back to 'pending'. This recovers edges
+	// orphaned when a validator pod dies mid-validation.
+	RecoverStaleValidatingEdges(staleThreshold time.Duration) (int, error)
+
 	// FlushBatchStats upserts source_type_stats for the batch, then DELETEs
 	// all pending_edges rows for that batch.
 	FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error

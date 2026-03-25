@@ -339,6 +339,11 @@ func runWalkbackProcessor(
 			} else if n > 0 {
 				log.Info().Int("recovered", n).Msg("validator-walkback: recovered stale batch claims")
 			}
+			if n, recErr := sm.RecoverStaleValidatingEdges(staleBatchRecoveryThreshold); recErr != nil {
+				log.Warn().Err(recErr).Msg("validator-walkback: failed to recover stale validating edges")
+			} else if n > 0 {
+				log.Info().Int("recovered", n).Msg("validator-walkback: recovered stale validating edges")
+			}
 		default:
 		}
 

@@ -298,6 +298,11 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			} else if n > 0 {
 				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale batch claims")
 			}
+			if n, recErr := sm.RecoverStaleValidatingEdges(staleThreshold); recErr != nil {
+				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale validating edges")
+			} else if n > 0 {
+				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale validating edges")
+			}
 			if n, recErr := dsm.RecoverOrphanEdges(); recErr != nil {
 				log.Warn().Err(recErr).Msg("validator-mode: failed to recover orphan edges")
 			} else if n > 0 {

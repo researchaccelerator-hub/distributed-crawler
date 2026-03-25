@@ -65,6 +65,7 @@ func (n *noopStateManager) ClaimWalkbackBatch() (*state.PendingEdgeBatch, []*sta
 }
 func (n *noopStateManager) CompletePendingBatch(_ string) error                           { return nil }
 func (n *noopStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, error)          { return 0, nil }
+func (n *noopStateManager) RecoverStaleValidatingEdges(_ time.Duration) (int, error)     { return 0, nil }
 func (n *noopStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error { return nil }
 func (n *noopStateManager) GetRandomSeedChannel() (string, error)                         { return "", nil }
 func (n *noopStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)       { return false, nil }

@@ -4352,6 +4352,42 @@ func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duratio
 	return staleCount, nil
 }
 
+// RecoverStaleValidatingEdges resets pending_edges stuck in 'validating' for
+// longer than staleThreshold back to 'pending'. This recovers edges orphaned
+// when a validator pod dies mid-validation.
+func (dsm *DaprStateManager) RecoverStaleValidatingEdges(staleThreshold time.Duration) (int, error) {
+	minutes := int(staleThreshold.Minutes())
+	if minutes < 1 {
+		minutes = 1
+	}
+
+	countSQL := fmt.Sprintf(
+		`SELECT COUNT(*) FROM pending_edges WHERE validation_status = 'validating' AND validated_at < NOW() - INTERVAL '%d minutes';`,
+		minutes)
+	rows, err := dsm.queryDatabase(countSQL)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count stale validating edges: %w", err)
+	}
+	staleCount := 0
+	if len(rows) > 0 && len(rows[0]) > 0 {
+		if v, ok := rows[0][0].(float64); ok {
+			staleCount = int(v)
+		}
+	}
+
+	if staleCount > 0 {
+		recoverSQL := fmt.Sprintf(
+			`UPDATE pending_edges SET validation_status = 'pending', validated_at = NULL WHERE validation_status = 'validating' AND validated_at < NOW() - INTERVAL '%d minutes';`,
+			minutes)
+		if err := dsm.ExecuteDatabaseOperation(recoverSQL, nil); err != nil {
+			return 0, fmt.Errorf("validator-db: failed to recover stale validating edges: %w", err)
+		}
+		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("validator-db: recovered stale validating edges")
+	}
+	return staleCount, nil
+}
+
 // RecoverOrphanEdges deletes pending_edges that belong to completed batches.
 // These arise when a validator crashes after CompletePendingBatch but before
 // FlushBatchStats finishes deleting the edges.  Safe to run at any time since
