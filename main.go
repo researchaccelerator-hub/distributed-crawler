@@ -393,6 +393,9 @@ Examples:
 		crawlerCfg.ProxyPass = os.Getenv("PROXY_PASS")
 
 		if len(crawlerCfg.ProxyAddrs) > 0 {
+			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
+				return fmt.Errorf("proxy configured but PROXY_USER and/or PROXY_PASS env vars are not set")
+			}
 			podName := os.Getenv("POD_NAME")
 			addr, err := common.PodProxyAddr(podName, crawlerCfg.ProxyAddrs, crawlerCfg.ProxyOrdinal)
 			if err != nil {
