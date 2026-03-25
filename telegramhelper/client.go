@@ -236,16 +236,23 @@ type proxyInjectingAuthorizer struct {
 }
 
 func (p *proxyInjectingAuthorizer) Handle(c *client.Client, state client.AuthorizationState) error {
+	log.Info().Str("state", state.AuthorizationStateType()).Msg("TDLib auth state received")
 	if state.AuthorizationStateType() == client.TypeAuthorizationStateWaitTdlibParameters {
 		if p.proxyReq != nil {
+			log.Info().Str("proxy", p.proxyReq.Server).Int32("port", p.proxyReq.Port).Msg("Calling AddProxy before auth...")
+			start := time.Now()
 			if _, err := c.AddProxy(p.proxyReq); err != nil {
-				return fmt.Errorf("failed to add SOCKS5 proxy before auth: %w", err)
+				return fmt.Errorf("failed to add SOCKS5 proxy before auth (took %s): %w", time.Since(start), err)
 			}
-			log.Info().Str("proxy", p.proxyReq.Server).Msg("TDLib SOCKS5 proxy configured before auth")
+			log.Info().Str("proxy", p.proxyReq.Server).Dur("elapsed", time.Since(start)).Msg("TDLib SOCKS5 proxy configured before auth")
 			p.proxyReq = nil // only inject once
 		}
 	}
-	return p.inner.Handle(c, state)
+	log.Info().Str("state", state.AuthorizationStateType()).Msg("Delegating to inner auth handler...")
+	start := time.Now()
+	err := p.inner.Handle(c, state)
+	log.Info().Str("state", state.AuthorizationStateType()).Dur("elapsed", time.Since(start)).Err(err).Msg("Inner auth handler returned")
+	return err
 }
 
 func (p *proxyInjectingAuthorizer) Close() {
@@ -418,6 +425,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		clientReady <- tdlibClient
 	}()
 
+	log.Info().Msg("Waiting for TDLib client initialization (timeout: 60s)...")
 	select {
 	case tdlibClient := <-clientReady:
 		log.Info().Msg("Client initialized successfully")
@@ -425,9 +433,9 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	case err := <-errChan:
 		log.Fatal().Err(err).Msg("Error initializing client")
 		return nil, err
-	case <-time.After(30 * time.Second):
-		log.Warn().Msg("Timeout reached. Exiting application.")
-		return nil, fmt.Errorf("timeout initializing TDLib client")
+	case <-time.After(60 * time.Second):
+		log.Warn().Str("proxy", cfg.ProxyAddr).Msg("Timeout reached after 60s — TDLib auth did not complete. Check proxy connectivity and credentials.")
+		return nil, fmt.Errorf("timeout initializing TDLib client (proxy=%s)", cfg.ProxyAddr)
 	}
 
 }

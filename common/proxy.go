@@ -3,6 +3,7 @@ package common
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,6 +40,23 @@ func PodProxyAddr(podName string, addrs []string, proxyOrdinal int) (string, err
 		return "", fmt.Errorf("proxy ordinal %d exceeds proxy list length %d", ordinal, len(addrs))
 	}
 	return addrs[ordinal], nil
+}
+
+// CheckProxyTCP does a raw TCP dial to the proxy address with a short timeout.
+// This catches unreachable/down proxies immediately instead of waiting for TDLib
+// to hang for 30s with no diagnostics.
+func CheckProxyTCP(proxyAddr string, timeout time.Duration) error {
+	if proxyAddr == "" {
+		return nil
+	}
+	log.Info().Str("proxy", proxyAddr).Dur("timeout", timeout).Msg("TCP pre-flight check to proxy")
+	conn, err := net.DialTimeout("tcp", proxyAddr, timeout)
+	if err != nil {
+		return fmt.Errorf("proxy TCP pre-flight failed (addr=%s): %w", proxyAddr, err)
+	}
+	conn.Close()
+	log.Info().Str("proxy", proxyAddr).Msg("proxy TCP pre-flight OK")
+	return nil
 }
 
 // VerifyOutboundIP checks the outbound IP by hitting ifconfig.me, routing through

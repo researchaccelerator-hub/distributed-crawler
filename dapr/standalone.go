@@ -172,6 +172,21 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 
 		log.Info().Msg("Using YouTube platform with the provided API key")
 	} else {
+		// Pre-flight: verify proxy is reachable before spending 30s in TDLib init
+		if crawlerCfg.ProxyAddr != "" {
+			if err := common.CheckProxyTCP(crawlerCfg.ProxyAddr, 5*time.Second); err != nil {
+				log.Fatal().Err(err).Msg("Proxy is not reachable — aborting before TDLib init")
+			}
+			if err := common.VerifyOutboundIP(crawlerCfg.ProxyAddr, crawlerCfg.ProxyUser, crawlerCfg.ProxyPass); err != nil {
+				log.Fatal().Err(err).Msg("Proxy IP verification failed — aborting before TDLib init")
+			}
+		}
+
+		// Temporary: give promtail time to attach before TDLib auth logs start
+		log.Info().Msg("Sleeping 300s to allow promtail to start collecting logs...")
+		time.Sleep(300 * time.Second)
+		log.Info().Msg("Sleep complete, proceeding with TDLib initialization")
+
 		baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
 		cleaner := telegramhelper.NewFileCleaner(
 			baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
