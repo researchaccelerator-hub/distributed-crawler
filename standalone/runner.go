@@ -97,8 +97,7 @@ func generatePCode() {
 		}
 	}
 
-	authorizer := client.ClientAuthorizer()
-	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
+	authorizer := client.ClientAuthorizer(&client.SetTdlibParametersRequest{
 		UseTestDc:           false,
 		DatabaseDirectory:   filepath.Join(tdlibDir, "database"),
 		FilesDirectory:      filepath.Join(tdlibDir, "files"),
@@ -112,7 +111,7 @@ func generatePCode() {
 		DeviceModel:         "Server",
 		SystemVersion:       "1.0.0",
 		ApplicationVersion:  "1.0.0",
-	}
+	})
 
 	// Set up authentication environment variables
 	telegramhelper.SetupAuth(phoneNumber, phoneCode)

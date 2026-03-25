@@ -224,9 +224,35 @@ func maskPhoneNumber(phoneNumber string) string {
 // Connection timeouts ensure the process doesn't hang indefinitely if authentication
 // or connection problems occur. If authentication requires user interaction for phone code,
 // the function will prompt for input through the CLI interactor.
-func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
-	authorizer := client.ClientAuthorizer()
 
+// proxyInjectingAuthorizer wraps a real AuthorizationStateHandler and calls
+// AddProxy on the first WaitTdlibParameters state — the earliest point where
+// the receiver goroutine is running but TDLib has not yet opened any network
+// connections. This guarantees all traffic (including auth) routes through the
+// proxy, with no race window.
+type proxyInjectingAuthorizer struct {
+	inner    client.AuthorizationStateHandler
+	proxyReq *client.AddProxyRequest
+}
+
+func (p *proxyInjectingAuthorizer) Handle(c *client.Client, state client.AuthorizationState) error {
+	if state.AuthorizationStateType() == client.TypeAuthorizationStateWaitTdlibParameters {
+		if p.proxyReq != nil {
+			if _, err := c.AddProxy(p.proxyReq); err != nil {
+				return fmt.Errorf("failed to add SOCKS5 proxy before auth: %w", err)
+			}
+			log.Info().Str("proxy", p.proxyReq.Server).Msg("TDLib SOCKS5 proxy configured before auth")
+			p.proxyReq = nil // only inject once
+		}
+	}
+	return p.inner.Handle(c, state)
+}
+
+func (p *proxyInjectingAuthorizer) Close() {
+	p.inner.Close()
+}
+
+func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	// We'll use the default CLI interactor but prepare environment variables
 	// so we need to track the phoneCode for later
 
@@ -317,7 +343,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 
 	log.Info().Msgf("Using TDLib database directory: %s", dbDir)
 
-	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
+	authorizer := client.ClientAuthorizer(&client.SetTdlibParametersRequest{
 		UseTestDc:           false,
 		DatabaseDirectory:   dbDir,
 		FilesDirectory:      filesDir,
@@ -331,13 +357,41 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		DeviceModel:         "Server",
 		SystemVersion:       "1.0.0",
 		ApplicationVersion:  "1.0.0",
-	}
+	})
 
 	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM. IF YOUR PHONE CODE IS INVALID, YOU MUST RE-RUN WITH A VALID CODE.")
 
 	// Set up authentication environment variables
 	// The phone number will be picked up by the default CLI interactor
 	SetupAuth(phoneNumber, phoneCode)
+
+	// Wrap the authorizer with a proxy injector if a proxy is configured.
+	// This ensures AddProxy is called at the WaitTdlibParameters stage —
+	// after the receiver goroutine is running but before TDLib opens any
+	// network connections — so all traffic including auth goes through the proxy.
+	var authHandler client.AuthorizationStateHandler = authorizer
+	if cfg.ProxyAddr != "" {
+		host, portStr, splitErr := net.SplitHostPort(cfg.ProxyAddr)
+		if splitErr != nil {
+			return nil, fmt.Errorf("invalid proxy address %q: %w", cfg.ProxyAddr, splitErr)
+		}
+		port, convErr := strconv.Atoi(portStr)
+		if convErr != nil {
+			return nil, fmt.Errorf("invalid proxy port %q: %w", portStr, convErr)
+		}
+		authHandler = &proxyInjectingAuthorizer{
+			inner: authorizer,
+			proxyReq: &client.AddProxyRequest{
+				Server: host,
+				Port:   int32(port),
+				Enable: true,
+				Type: &client.ProxyTypeSocks5{
+					Username: cfg.ProxyUser,
+					Password: cfg.ProxyPass,
+				},
+			},
+		}
+	}
 
 	// Use the default CLI interactor which will read the environment variables
 	go client.CliInteractor(authorizer)
@@ -346,34 +400,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	errChan := make(chan error)
 
 	go func() {
-		// Build NewClient options. Proxy is passed as a WithProxy option so that
-		// TDLib has the proxy configured before it makes any network connections
-		// during the authorization flow — eliminating the bare-connect window.
-		opts := []client.Option{}
-		if cfg.ProxyAddr != "" {
-			host, portStr, splitErr := net.SplitHostPort(cfg.ProxyAddr)
-			if splitErr != nil {
-				errChan <- fmt.Errorf("invalid proxy address %q: %w", cfg.ProxyAddr, splitErr)
-				return
-			}
-			port, convErr := strconv.Atoi(portStr)
-			if convErr != nil {
-				errChan <- fmt.Errorf("invalid proxy port %q: %w", portStr, convErr)
-				return
-			}
-			opts = append(opts, client.WithProxy(&client.AddProxyRequest{
-				Server: host,
-				Port:   int32(port),
-				Enable: true,
-				Type: &client.ProxyTypeSocks5{
-					Username: cfg.ProxyUser,
-					Password: cfg.ProxyPass,
-				},
-			}))
-			log.Info().Str("proxy", cfg.ProxyAddr).Msg("TDLib SOCKS5 proxy configured before auth")
-		}
-
-		tdlibClient, err := client.NewClient(authorizer, opts...)
+		tdlibClient, err := client.NewClient(authHandler)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
