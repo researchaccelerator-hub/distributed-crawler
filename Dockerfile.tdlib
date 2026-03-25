@@ -19,7 +19,11 @@ RUN apk add --no-cache --virtual .build-deps \
 RUN apk update &&\
     apk upgrade &&\
     apk add alpine-sdk linux-headers git zlib-dev gperf php cmake &&\
+    # Pin TDLib to 6e15f5bb5070 (2026-01-19). The next commit (7a0e70b, 2026-01-20)
+    # changed addProxy from flat params (server, port, type) to a nested proxy
+    # object, which go-tdlib v0.7.6 does not support — causing "proxy = null".
     git clone https://github.com/tdlib/td.git &&\
+    cd td && git checkout 6e15f5bb5070 && cd / &&\
     awk '/^void PollManager::on_update_poll_timeout\(PollId poll_id\) \{$/{print; print "  return;  // Disabled: prevents FLOOD_WAIT from messages.getPollResults"; next}1' \
         td/td/telegram/PollManager.cpp > /tmp/pm_patched.cpp &&\
     mv /tmp/pm_patched.cpp td/td/telegram/PollManager.cpp &&\
