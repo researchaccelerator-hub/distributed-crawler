@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -9,6 +10,9 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 )
+
+// ErrChannelExists is returned by DiscoveredChannels.Add when the channel is already in the set.
+var ErrChannelExists = errors.New("channel already exists")
 
 // StateManager extends StateManagementInterface with additional methods
 // needed for the new crawler architecture
@@ -139,7 +143,7 @@ func (d *DiscoveredChannels) Add(item string) error {
 			Msg("random-walk-channel: Added new channel to discovered channels")
 		return nil
 	}
-	return fmt.Errorf("%s already exists", item)
+	return fmt.Errorf("%s: %w", item, ErrChannelExists)
 }
 
 func (d *DiscoveredChannels) Contains(item string) bool {

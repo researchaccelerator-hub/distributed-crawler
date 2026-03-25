@@ -3307,8 +3307,7 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 		log.Info().Int("count", len(discoveredChannels)).Str("log_tag", "rw_init").Msg("Found previously discovered channels")
 		for _, row := range discoveredChannels {
 			for _, channel := range row {
-				err := dsm.BaseStateManager.AddDiscoveredChannel(channel)
-				if err != nil {
+				if err := dsm.BaseStateManager.AddDiscoveredChannel(channel); err != nil && !errors.Is(err, ErrChannelExists) {
 					log.Warn().Err(err).Str("channel", channel).Str("log_tag", "rw_init").Msg("Error adding discovered channel")
 				}
 			}
