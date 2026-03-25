@@ -49,7 +49,7 @@ func (e *ValidationHTTPError) Unwrap() error { return e.Wrapped }
 // ChannelValidationResult holds the outcome of an HTTP-based channel validation.
 type ChannelValidationResult struct {
 	Status string // "valid" | "not_channel" | "invalid"
-	Reason string // "" | "not_supergroup" | "not_found"
+	Reason string // "" | "not_supergroup" | "bot" | "not_found"
 }
 
 // ValidateChannelHTTP checks whether a Telegram username belongs to a public
@@ -61,6 +61,7 @@ type ChannelValidationResult struct {
 //	Title contains "Telegram: View @"    → valid channel/supergroup
 //	Title contains "Telegram: Contact @" AND no robots noindex → not a supergroup (user/bot/group)
 //	Title contains "Telegram: Contact @" AND robots noindex    → username not found / not occupied
+//	Title contains "Telegram: Launch @"  → bot mini-app (not a channel)
 func ValidateChannelHTTP(username string, httpClient *http.Client) (ChannelValidationResult, error) {
 	url := fmt.Sprintf("https://t.me/%s", username)
 
@@ -141,6 +142,12 @@ func ParseChannelHTML(html string) (ChannelValidationResult, error) {
 			return ChannelValidationResult{Status: "invalid", Reason: "not_found"}, nil
 		}
 		return ChannelValidationResult{Status: "not_channel", Reason: "not_supergroup"}, nil
+	}
+
+	// "Telegram: Launch @<bot>" is used for bot mini-app pages (e.g. @wallet).
+	// These are not channels/supergroups.
+	if strings.Contains(title, "Telegram: Launch @") {
+		return ChannelValidationResult{Status: "not_channel", Reason: "bot"}, nil
 	}
 
 	// t.me/<reserved-path> (e.g. "addlist", "joinchat") redirects to telegram.org

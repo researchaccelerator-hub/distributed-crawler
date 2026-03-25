@@ -64,7 +64,7 @@ CREATE TABLE pending_edges (
     validation_status   VARCHAR(16)  NOT NULL DEFAULT 'pending',
     -- 'pending' | 'validating' | 'valid' | 'not_channel' | 'invalid' | 'duplicate'
     validation_reason   VARCHAR(64)  NOT NULL DEFAULT '',
-    -- '' | 'not_supergroup' | 'not_found'
+    -- '' | 'not_supergroup' | 'bot' | 'not_found'
     validated_at        TIMESTAMP
 );
 
