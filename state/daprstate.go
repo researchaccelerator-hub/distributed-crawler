@@ -3420,7 +3420,7 @@ func (dsm *DaprStateManager) IsSeedChannel(username string) bool {
 func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, error) {
 	dsm.databaseBinding = databaseStorageBinding
 
-	query := "SELECT last_crawled_at FROM seed_channels WHERE channel_username = $1;"
+	query := "SELECT COALESCE(last_message_date, last_crawled_at) FROM seed_channels WHERE channel_username = $1;"
 	paramsJSON, err := json.Marshal([]any{username})
 	if err != nil {
 		return time.Time{}, fmt.Errorf("random-walk-seed: failed to marshal params: %w", err)
@@ -3467,14 +3467,19 @@ func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, 
 }
 
 // MarkChannelCrawled upserts the channel into seed_channels, setting last_crawled_at
-// to NOW() and caching the resolved chatID for future SearchPublicChat avoidance.
-func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64) error {
+// to NOW(), last_message_date to the most recent message timestamp, and caching
+// the resolved chatID for future SearchPublicChat avoidance.
+func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64, lastMessageDate time.Time) error {
 	dsm.chatIDCacheMu.Lock()
 	dsm.chatIDCache[username] = chatID
 	dsm.chatIDCacheMu.Unlock()
 
-	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at) VALUES ($1, $2, NOW()) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
-	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at, last_message_date) VALUES ($1, $2, NOW(), $3) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW(), last_message_date = EXCLUDED.last_message_date;`
+	var msgDate interface{} = nil
+	if !lastMessageDate.IsZero() {
+		msgDate = lastMessageDate
+	}
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID, msgDate})
 }
 
 // MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row

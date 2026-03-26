@@ -281,7 +281,7 @@ func TestMarkChannelCrawled_UpdatesCacheAndCallsDB(t *testing.T) {
 	mc := &mockDaprClient{}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
-	if err := dsm.MarkChannelCrawled("crawled1", 777); err != nil {
+	if err := dsm.MarkChannelCrawled("crawled1", 777, time.Now()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -294,6 +294,91 @@ func TestMarkChannelCrawled_UpdatesCacheAndCallsDB(t *testing.T) {
 	}
 	if !strings.Contains(mc.bindingCalls[0].Metadata["sql"], "seed_channels") {
 		t.Fatalf("expected SQL to reference seed_channels")
+	}
+}
+
+func TestMarkChannelCrawled_StoresLastMessageDate(t *testing.T) {
+	mc := &mockDaprClient{}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	msgDate := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
+	if err := dsm.MarkChannelCrawled("chan1", 111, msgDate); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mc.bindingCalls) == 0 {
+		t.Fatal("expected DB binding call")
+	}
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	if !strings.Contains(sql, "last_message_date") {
+		t.Fatalf("expected SQL to reference last_message_date, got: %s", sql)
+	}
+	params := mc.bindingCalls[0].Metadata["params"]
+	if !strings.Contains(params, "2026-03-26") {
+		t.Fatalf("expected params to contain message date, got: %s", params)
+	}
+}
+
+func TestMarkChannelCrawled_ZeroTimePassesNilForMessageDate(t *testing.T) {
+	mc := &mockDaprClient{}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	if err := dsm.MarkChannelCrawled("chan2", 222, time.Time{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(mc.bindingCalls) == 0 {
+		t.Fatal("expected DB binding call")
+	}
+	params := mc.bindingCalls[0].Metadata["params"]
+	// Zero time should produce a null param (JSON null) rather than a timestamp.
+	if strings.Contains(params, "0001-01-01") {
+		t.Fatalf("expected nil/null for zero time, got: %s", params)
+	}
+}
+
+func TestGetChannelLastCrawled_CoalescesPrefersMessageDate(t *testing.T) {
+	// The SQL should use COALESCE(last_message_date, last_crawled_at) so that
+	// the more precise message date is returned when available.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			sql := in.Metadata["sql"]
+			if !strings.Contains(sql, "COALESCE(last_message_date, last_crawled_at)") {
+				t.Errorf("expected COALESCE(last_message_date, last_crawled_at) in SQL, got: %s", sql)
+			}
+			rows, _ := json.Marshal([][]interface{}{{"2026-03-26T12:00:00Z"}})
+			return &daprc.BindingEvent{Data: rows}, nil
+		},
+	}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	got, err := dsm.GetChannelLastCrawled("chan1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
+	if !got.Equal(expected) {
+		t.Fatalf("expected %v, got %v", expected, got)
+	}
+}
+
+func TestGetChannelLastCrawled_FallsBackToLastCrawledAt(t *testing.T) {
+	// When last_message_date is NULL, COALESCE falls back to last_crawled_at.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			rows, _ := json.Marshal([][]interface{}{{"2026-03-20T10:00:00Z"}})
+			return &daprc.BindingEvent{Data: rows}, nil
+		},
+	}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	got, err := dsm.GetChannelLastCrawled("chan2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC)
+	if !got.Equal(expected) {
+		t.Fatalf("expected %v, got %v", expected, got)
 	}
 }
 
@@ -938,7 +1023,7 @@ func TestRecoverStalePageClaims_SQLStructure(t *testing.T) {
 		"claimed_by = ''",
 		"claimed_by != ''",
 		"INTERVAL '10 minutes'",
-		"RETURNING page_id",
+		"RETURNING pb.page_id, stale.url, stale.claimed_by",
 		"crawl-rw-123",
 	} {
 		if !strings.Contains(sql, want) {

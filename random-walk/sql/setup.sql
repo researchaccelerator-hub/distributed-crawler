@@ -29,6 +29,13 @@
 
 
 -- =============================================================================
+-- TIMEZONE
+-- Ensure all TIMESTAMPTZ values are stored and compared in UTC.
+-- =============================================================================
+SET timezone = 'UTC';
+
+
+-- =============================================================================
 -- IDENTITY CONFIGURATION
 -- Set these to the display names of your Azure Entra ID managed identities
 -- (exactly as they appear in the Azure portal).  Override at runtime with -v:
@@ -138,7 +145,7 @@ CREATE TABLE IF NOT EXISTS edge_records (
     source_channel      VARCHAR(64)  NOT NULL,
     walkback            BOOLEAN      NOT NULL,
     skipped             BOOLEAN      NOT NULL,
-    discovery_time      TIMESTAMP    NOT NULL,
+    discovery_time      TIMESTAMPTZ  NOT NULL,
     crawl_id            VARCHAR(64)  NOT NULL,
     sequence_id         VARCHAR(36)  NOT NULL DEFAULT ''
     -- sequence_id: UUID shared across all edges in one uninterrupted forward
@@ -190,7 +197,7 @@ CREATE TABLE IF NOT EXISTS page_buffer (
     crawl_id    VARCHAR(64)  NOT NULL,
     sequence_id VARCHAR(36)  NOT NULL DEFAULT '',
     claimed_by  VARCHAR(128) NOT NULL DEFAULT '',   -- pod name; empty = unclaimed
-    claimed_at  TIMESTAMP                           -- NULL when unclaimed
+    claimed_at  TIMESTAMPTZ                          -- NULL when unclaimed
 );
 
 -- All runtime queries filter on crawl_id
@@ -219,10 +226,11 @@ GRANT SELECT ON TABLE page_buffer                              TO crawler_readon
 CREATE TABLE IF NOT EXISTS seed_channels (
     channel_username  VARCHAR(64)  PRIMARY KEY,
     chat_id           BIGINT,                   -- cached TDLib chat ID; NULL = not yet resolved
-    last_crawled_at   TIMESTAMP,                -- NULL = never crawled; set by MarkChannelCrawled()
-    invalidated_at    TIMESTAMP,                -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
+    last_crawled_at   TIMESTAMPTZ,              -- NULL = never crawled; set by MarkChannelCrawled()
+    last_message_date TIMESTAMPTZ,              -- date of the most recent message fetched; used as delta-fetch low-water mark
+    invalidated_at    TIMESTAMPTZ,              -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
     member_count      INTEGER,
-    inserted_at       TIMESTAMP    NOT NULL DEFAULT NOW()
+    inserted_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 -- Seed selection: quickly find channels never crawled (NULL first)
@@ -251,7 +259,7 @@ GRANT SELECT ON TABLE seed_channels                             TO crawler_reado
 CREATE TABLE IF NOT EXISTS invalid_channels (
     channel_username  VARCHAR(64)  PRIMARY KEY,
     reason            VARCHAR(64)  NOT NULL DEFAULT '',   -- e.g. "not_found", "not_supergroup"
-    invalidated_at    TIMESTAMP    NOT NULL DEFAULT NOW()
+    invalidated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 -- TTL query: load only non-expired rows on startup

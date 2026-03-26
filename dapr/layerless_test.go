@@ -53,7 +53,7 @@ func (n *noopStateManager) ExecuteDatabaseOperation(_ string, _ []any) error    
 func (n *noopStateManager) AddPageToPageBuffer(_ *state.Page) error                       { return nil }
 func (n *noopStateManager) DeletePageBufferPages(_ []string, _ []string) error             { return nil }
 func (n *noopStateManager) GetChannelLastCrawled(_ string) (time.Time, error)             { return time.Time{}, nil }
-func (n *noopStateManager) MarkChannelCrawled(_ string, _ int64) error                    { return nil }
+func (n *noopStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error       { return nil }
 func (n *noopStateManager) LoadInvalidChannels() error                                    { return nil }
 func (n *noopStateManager) IsInvalidChannel(_ string) bool                                { return false }
 func (n *noopStateManager) MarkChannelInvalid(_ string, _ string) error                   { return nil }

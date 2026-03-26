@@ -566,6 +566,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	// In random-walk mode, use the cached chat ID (from seed_channels) to skip
 	// the expensive SearchPublicChat RPC when we already know the ID.
 	var cachedChatID int64
+	originalMinPostDate := cfg.MinPostDate
 	if cfg.SamplingMethod == "random-walk" {
 		if id, ok := sm.GetCachedChatID(p.URL); ok {
 			cachedChatID = id
@@ -652,12 +653,35 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	// In random-walk mode, record that this channel has been crawled so future
 	// runs can skip already-seen messages and avoid SearchPublicChat.
 	if cfg.SamplingMethod == "random-walk" {
-		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id); markErr != nil {
+		// Only store last_message_date when the crawl was unfiltered (no
+		// MinPostDate configured). A filtered crawl only sees a window of
+		// messages, so storing the newest date would cause future unfiltered
+		// crawls to skip older messages that were never actually fetched.
+		var lastMsgDate time.Time
+		if originalMinPostDate.IsZero() {
+			lastMsgDate = maxMessageDate(messages)
+		}
+		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id, lastMsgDate); markErr != nil {
 			log.Warn().Err(markErr).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to mark channel as crawled")
 		}
 	}
 
 	return discoveredChannels, nil
+}
+
+// maxMessageDate returns the newest message date from a slice of TDLib messages.
+// Returns zero time if the slice is empty or contains no valid dates.
+func maxMessageDate(messages []*client.Message) time.Time {
+	var max time.Time
+	for _, msg := range messages {
+		if msg != nil && msg.Date > 0 {
+			t := time.Unix(int64(msg.Date), 0).UTC()
+			if t.After(max) {
+				max = t
+			}
+		}
+	}
+	return max
 }
 
 // getLatestMessageTime retrieves the timestamp of the most recent message in a chat.

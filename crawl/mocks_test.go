@@ -387,7 +387,7 @@ func (m *MockStateManager) IsSeedChannel(username string) bool {
 	return args.Bool(0)
 }
 func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)         { return time.Time{}, nil }
-func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error                { return nil }
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error   { return nil }
 func (m *MockStateManager) LoadInvalidChannels() error {
 	args := m.Called()
 	return args.Error(0)

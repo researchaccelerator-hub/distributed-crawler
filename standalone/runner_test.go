@@ -202,7 +202,7 @@ func (m *MockDaprStateManager) UpsertSeedChannelChatID(_ string, _ int64) error 
 func (m *MockDaprStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
 func (m *MockDaprStateManager) IsSeedChannel(_ string) bool                          { return false }
 func (m *MockDaprStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
-func (m *MockDaprStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
+func (m *MockDaprStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error { return nil }
 func (m *MockDaprStateManager) LoadInvalidChannels() error                           { return nil }
 func (m *MockDaprStateManager) IsInvalidChannel(_ string) bool                       { return false }
 func (m *MockDaprStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
@@ -362,7 +362,7 @@ func (m *MockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error     
 func (m *MockStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
 func (m *MockStateManager) IsSeedChannel(_ string) bool                          { return false }
 func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
-func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error           { return nil }
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error { return nil }
 func (m *MockStateManager) LoadInvalidChannels() error                           { return nil }
 func (m *MockStateManager) IsInvalidChannel(_ string) bool                       { return false }
 func (m *MockStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }

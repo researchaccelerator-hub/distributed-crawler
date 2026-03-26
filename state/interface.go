@@ -121,8 +121,9 @@ type StateManagementInterface interface {
 	// for the given username. Returns zero time if the channel has never been crawled.
 	GetChannelLastCrawled(username string) (time.Time, error)
 	// MarkChannelCrawled upserts the channel into seed_channels, recording the
-	// current time as last_crawled_at and caching the resolved chatID.
-	MarkChannelCrawled(username string, chatID int64) error
+	// current time as last_crawled_at, the most recent message date, and caching
+	// the resolved chatID.
+	MarkChannelCrawled(username string, chatID int64, lastMessageDate time.Time) error
 	// MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row
 	// for the given username, if the row exists.  No-ops for channels not in the
 	// seed table.  The 30-day TTL is enforced in LoadSeedChannels and
