@@ -129,9 +129,11 @@ func newManager(cfg common.CrawlerConfig, api ContainerGroupsAPI) *ACIProxyManag
 }
 
 // containerGroupName generates a DNS-safe name for the ACI container group.
-// Format: proxy-{crawlID}-{ordinal}, truncated to 63 characters.
-func containerGroupName(crawlID string, ordinal int) string {
-	name := fmt.Sprintf("proxy-%s-%d", strings.ToLower(crawlID), ordinal)
+// Format: proxy-{podName}-{ordinal}, truncated to 63 characters.
+// Using podName (rather than crawlID) ensures each pod in a statefulset
+// gets its own proxy without colliding with other pods' proxies.
+func containerGroupName(podName string, ordinal int) string {
+	name := fmt.Sprintf("proxy-%s-%d", strings.ToLower(podName), ordinal)
 	if len(name) > 63 {
 		name = name[:63]
 	}
@@ -203,7 +205,7 @@ func (m *ACIProxyManager) CreateProxies(ctx context.Context) ([]string, error) {
 	results := make(chan result, m.proxyCount)
 	for i := 0; i < m.proxyCount; i++ {
 		go func(ordinal int) {
-			name := containerGroupName(m.crawlID, ordinal)
+			name := containerGroupName(m.podName, ordinal)
 			cg := m.buildContainerGroup(name)
 
 			log.Info().Str("name", name).Str("location", m.location).Msg("Creating ACI proxy")
@@ -239,7 +241,7 @@ func (m *ACIProxyManager) CreateProxies(ctx context.Context) ([]string, error) {
 			continue
 		}
 		addrs[r.ordinal] = r.addr
-		names = append(names, containerGroupName(m.crawlID, r.ordinal))
+		names = append(names, containerGroupName(m.podName, r.ordinal))
 	}
 
 	if len(errs) > 0 {
@@ -325,9 +327,9 @@ func (m *ACIProxyManager) DestroyProxies(ctx context.Context) error {
 }
 
 // CleanupOrphanedProxies finds and deletes any ACI container groups tagged with
-// managed_by=telegram-scraper and the given crawlID. This recovers from crashes
-// where DestroyProxies was never called.
-func (m *ACIProxyManager) CleanupOrphanedProxies(ctx context.Context, crawlID string) error {
+// managed_by=telegram-scraper and this pod's name. This recovers from crashes
+// where DestroyProxies was never called, without touching other pods' proxies.
+func (m *ACIProxyManager) CleanupOrphanedProxies(ctx context.Context) error {
 	groups, err := m.client.ListByResourceGroup(ctx, m.resourceGroup)
 	if err != nil {
 		return fmt.Errorf("list container groups: %w", err)
@@ -338,9 +340,9 @@ func (m *ACIProxyManager) CleanupOrphanedProxies(ctx context.Context, crawlID st
 		if g.Tags == nil || g.Name == nil {
 			continue
 		}
-		managedBy, ok1 := g.Tags["managed_by"]
-		cid, ok2 := g.Tags["crawl_id"]
-		if ok1 && ok2 && managedBy != nil && cid != nil && *managedBy == "telegram-scraper" && *cid == crawlID {
+		managedBy := g.Tags["managed_by"]
+		pn := g.Tags["pod_name"]
+		if managedBy != nil && pn != nil && *managedBy == "telegram-scraper" && *pn == m.podName {
 			orphans = append(orphans, *g.Name)
 		}
 	}

@@ -70,7 +70,7 @@ func StartStandaloneMode(urlList []string, urlFile string, crawlerCfg common.Cra
 		if err != nil {
 			log.Fatal().Err(err).Msg("Failed to initialize ACI proxy manager")
 		}
-		if cleanupErr := proxyManager.CleanupOrphanedProxies(context.Background(), crawlerCfg.CrawlID); cleanupErr != nil {
+		if cleanupErr := proxyManager.CleanupOrphanedProxies(context.Background()); cleanupErr != nil {
 			log.Warn().Err(cleanupErr).Msg("Failed to clean up orphaned proxy ACIs")
 		}
 		addrs, err := proxyManager.CreateProxies(context.Background())

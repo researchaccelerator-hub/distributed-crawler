@@ -159,17 +159,17 @@ func TestCreateProxies_NoIPAddress(t *testing.T) {
 
 func TestContainerGroupName_Formatting(t *testing.T) {
 	tests := []struct {
-		crawlID  string
+		podName  string
 		ordinal  int
 		expected string
 	}{
-		{"20260325120000", 0, "proxy-20260325120000-0"},
-		{"20260325120000", 5, "proxy-20260325120000-5"},
+		{"crawler-0", 0, "proxy-crawler-0-0"},
+		{"crawler-0", 5, "proxy-crawler-0-5"},
 		{"UPPERCASE", 0, "proxy-uppercase-0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
-			got := containerGroupName(tt.crawlID, tt.ordinal)
+			got := containerGroupName(tt.podName, tt.ordinal)
 			assert.Equal(t, tt.expected, got)
 			assert.LessOrEqual(t, len(got), 63)
 		})
@@ -177,8 +177,8 @@ func TestContainerGroupName_Formatting(t *testing.T) {
 }
 
 func TestContainerGroupName_TruncatesAt63(t *testing.T) {
-	longID := strings.Repeat("a", 80)
-	name := containerGroupName(longID, 0)
+	longName := strings.Repeat("a", 80)
+	name := containerGroupName(longName, 0)
 	assert.LessOrEqual(t, len(name), 63)
 }
 
@@ -234,17 +234,17 @@ func TestCleanupOrphanedProxies_FindsTagged(t *testing.T) {
 		listFunc: func(ctx context.Context, rg string) ([]*armcontainerinstance.ContainerGroup, error) {
 			return []*armcontainerinstance.ContainerGroup{
 				{
-					Name: to.Ptr("proxy-20260325-0"),
+					Name: to.Ptr("proxy-crawler-0-0"),
 					Tags: map[string]*string{
 						"managed_by": to.Ptr("telegram-scraper"),
-						"crawl_id":   to.Ptr("20260325120000"),
+						"pod_name":   to.Ptr("crawler-0"),
 					},
 				},
 				{
-					Name: to.Ptr("proxy-20260325-1"),
+					Name: to.Ptr("proxy-crawler-0-1"),
 					Tags: map[string]*string{
 						"managed_by": to.Ptr("telegram-scraper"),
-						"crawl_id":   to.Ptr("20260325120000"),
+						"pod_name":   to.Ptr("crawler-0"),
 					},
 				},
 				{
@@ -254,10 +254,10 @@ func TestCleanupOrphanedProxies_FindsTagged(t *testing.T) {
 					},
 				},
 				{
-					Name: to.Ptr("proxy-different-crawl"),
+					Name: to.Ptr("proxy-crawler-1-0"),
 					Tags: map[string]*string{
 						"managed_by": to.Ptr("telegram-scraper"),
-						"crawl_id":   to.Ptr("99999999999999"),
+						"pod_name":   to.Ptr("crawler-1"),
 					},
 				},
 			}, nil
@@ -268,13 +268,13 @@ func TestCleanupOrphanedProxies_FindsTagged(t *testing.T) {
 		},
 	}
 
-	mgr := newManager(baseCfg(), mock)
-	err := mgr.CleanupOrphanedProxies(context.Background(), "20260325120000")
+	mgr := newManager(baseCfg(), mock) // baseCfg has PodName "crawler-0"
+	err := mgr.CleanupOrphanedProxies(context.Background())
 
 	require.NoError(t, err)
 	assert.Len(t, deleted, 2)
-	assert.Contains(t, deleted, "proxy-20260325-0")
-	assert.Contains(t, deleted, "proxy-20260325-1")
+	assert.Contains(t, deleted, "proxy-crawler-0-0")
+	assert.Contains(t, deleted, "proxy-crawler-0-1")
 }
 
 func TestCleanupOrphanedProxies_NoOrphans(t *testing.T) {
@@ -285,7 +285,7 @@ func TestCleanupOrphanedProxies_NoOrphans(t *testing.T) {
 	}
 
 	mgr := newManager(baseCfg(), mock)
-	err := mgr.CleanupOrphanedProxies(context.Background(), "20260325120000")
+	err := mgr.CleanupOrphanedProxies(context.Background())
 
 	require.NoError(t, err)
 }
