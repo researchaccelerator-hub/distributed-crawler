@@ -290,26 +290,13 @@ func TestCleanupOrphanedProxies_NoOrphans(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestBuildContainerGroup_SubnetInjection(t *testing.T) {
-	cfg := baseCfg()
-	cfg.ProxySubnetID = "/subscriptions/abc/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/proxy-subnet"
-	mgr := newManager(cfg, &mockContainerGroupsAPI{})
-
-	cg := mgr.buildContainerGroup("proxy-test-0")
-
-	require.NotNil(t, cg.Properties.SubnetIDs)
-	assert.Len(t, cg.Properties.SubnetIDs, 1)
-	assert.Equal(t, cfg.ProxySubnetID, *cg.Properties.SubnetIDs[0].ID)
-}
-
-func TestBuildContainerGroup_NoSubnet(t *testing.T) {
-	cfg := baseCfg()
-	cfg.ProxySubnetID = ""
-	mgr := newManager(cfg, &mockContainerGroupsAPI{})
-
+func TestBuildContainerGroup_PublicIP(t *testing.T) {
+	mgr := newManager(baseCfg(), &mockContainerGroupsAPI{})
 	cg := mgr.buildContainerGroup("proxy-test-0")
 
 	assert.Nil(t, cg.Properties.SubnetIDs)
+	require.NotNil(t, cg.Properties.IPAddress)
+	assert.Equal(t, armcontainerinstance.ContainerGroupIPAddressTypePublic, *cg.Properties.IPAddress.Type)
 }
 
 func TestBuildContainerGroup_CommandLine(t *testing.T) {

@@ -108,7 +108,6 @@ type CrawlerConfig struct {
 	ManagedProxies     bool    // Create/destroy ACI SOCKS5 proxy containers for this crawl
 	ProxyResourceGroup string  // Azure resource group for ACI containers
 	ProxyImage         string  // Container image for microsocks (e.g. "myregistry.azurecr.io/microsocks:latest")
-	ProxySubnetID      string  // Azure subnet resource ID for private VNet injection (optional)
 	ProxyLocation      string  // Azure region (e.g. "eastus2")
 	ProxyCPU           float64 // CPU cores per proxy container (default: 0.5)
 	ProxyMemoryGB      float64 // Memory in GB per proxy container (default: 0.5)

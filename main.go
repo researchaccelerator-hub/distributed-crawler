@@ -845,7 +845,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyResourceGroup, "proxy-resource-group", "", "Azure resource group for managed proxy ACIs")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxySubscriptionID, "proxy-subscription-id", "", "Azure subscription ID for managed proxy ACIs")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyImage, "proxy-image", "", "Container image for microsocks proxy (e.g. myregistry.azurecr.io/microsocks:latest)")
-	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxySubnetID, "proxy-subnet-id", "", "Azure subnet resource ID for ACI VNet injection (optional)")
 	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyLocation, "proxy-location", "eastus2", "Azure region for proxy ACIs")
 	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyCPU, "proxy-cpu", 0.5, "CPU cores per managed proxy ACI")
 	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyMemoryGB, "proxy-memory-gb", 0.5, "Memory in GB per managed proxy ACI")

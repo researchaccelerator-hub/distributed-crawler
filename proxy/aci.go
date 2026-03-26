@@ -78,7 +78,6 @@ type ACIProxyManager struct {
 	resourceGroup string
 	location      string
 	image         string
-	subnetID      string
 	cpu           float64
 	memoryGB      float64
 	port          int
@@ -118,7 +117,6 @@ func newManager(cfg common.CrawlerConfig, api ContainerGroupsAPI) *ACIProxyManag
 		resourceGroup: cfg.ProxyResourceGroup,
 		location:      cfg.ProxyLocation,
 		image:         cfg.ProxyImage,
-		subnetID:      cfg.ProxySubnetID,
 		cpu:           cfg.ProxyCPU,
 		memoryGB:      cfg.ProxyMemoryGB,
 		port:          cfg.ProxyPort,
@@ -181,7 +179,6 @@ func (m *ACIProxyManager) buildContainerGroup(name string) armcontainerinstance.
 				},
 			},
 			IPAddress: &armcontainerinstance.IPAddress{
-				Type: to.Ptr(armcontainerinstance.ContainerGroupIPAddressTypePrivate),
 				Ports: []*armcontainerinstance.Port{
 					{Port: to.Ptr(int32(m.port)), Protocol: to.Ptr(armcontainerinstance.ContainerGroupNetworkProtocolTCP)},
 				},
@@ -189,12 +186,7 @@ func (m *ACIProxyManager) buildContainerGroup(name string) armcontainerinstance.
 		},
 	}
 
-	// VNet injection via subnet profile
-	if m.subnetID != "" {
-		cg.Properties.SubnetIDs = []*armcontainerinstance.ContainerGroupSubnetID{
-			{ID: to.Ptr(m.subnetID)},
-		}
-	}
+	cg.Properties.IPAddress.Type = to.Ptr(armcontainerinstance.ContainerGroupIPAddressTypePublic)
 
 	return cg
 }
