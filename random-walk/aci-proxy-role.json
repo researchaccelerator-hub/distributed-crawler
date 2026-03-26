@@ -1,0 +1,16 @@
+{
+  "Name": "ACI Proxy Manager",
+  "Description": "Allows the crawler managed identity to create, monitor, and destroy Azure Container Instances used as SOCKS5 proxies during random-walk crawls.",
+  "Actions": [
+    "Microsoft.ContainerInstance/containerGroups/read",
+    "Microsoft.ContainerInstance/containerGroups/write",
+    "Microsoft.ContainerInstance/containerGroups/delete",
+    "Microsoft.ContainerInstance/containerGroups/stop/action"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<PROXY_RESOURCE_GROUP>"
+  ]
+}

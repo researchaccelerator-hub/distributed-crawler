@@ -19,6 +19,7 @@ import (
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
+	"github.com/researchaccelerator-hub/telegram-scraper/proxy"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	crawlercommon "github.com/researchaccelerator-hub/telegram-scraper/crawler/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler/youtube"
@@ -162,6 +163,50 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		os.Exit(0)
 	}
 
+	// --- Managed ACI proxy creation ---
+	var proxyManager *proxy.ACIProxyManager
+	if crawlerCfg.ManagedProxies {
+		var err error
+		proxyManager, err = proxy.NewACIProxyManager(crawlerCfg, crawlerCfg.ProxySubscriptionID)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to initialize ACI proxy manager")
+		}
+		// Clean up orphaned proxies from a prior crash
+		if cleanupErr := proxyManager.CleanupOrphanedProxies(context.Background(), crawlerCfg.CrawlID); cleanupErr != nil {
+			log.Warn().Err(cleanupErr).Msg("Failed to clean up orphaned proxy ACIs")
+		}
+		addrs, err := proxyManager.CreateProxies(context.Background())
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to create managed proxy ACIs")
+		}
+		if err := proxyManager.WaitForReady(context.Background(), addrs, 2*time.Minute); err != nil {
+			// Best-effort cleanup before aborting
+			_ = proxyManager.DestroyProxies(context.Background())
+			log.Fatal().Err(err).Msg("Managed proxy ACIs not ready in time")
+		}
+		// Inject the first proxy address so the rest of the pipeline uses it transparently.
+		// For multi-proxy, populate ProxyAddrs for pod-ordinal selection.
+		if len(addrs) == 1 {
+			crawlerCfg.ProxyAddr = addrs[0]
+		} else {
+			crawlerCfg.ProxyAddrs = addrs
+			addr, err := common.PodProxyAddr(crawlerCfg.PodName, addrs, crawlerCfg.ProxyOrdinal)
+			if err != nil {
+				_ = proxyManager.DestroyProxies(context.Background())
+				log.Fatal().Err(err).Msg("Managed proxy ordinal resolution failed")
+			}
+			crawlerCfg.ProxyAddr = addr
+		}
+		log.Info().Str("proxy_addr", crawlerCfg.ProxyAddr).Int("proxy_count", len(addrs)).Msg("Managed ACI proxies ready")
+	}
+	defer func() {
+		if proxyManager != nil {
+			if err := proxyManager.DestroyProxies(context.Background()); err != nil {
+				log.Warn().Err(err).Msg("Failed to destroy managed proxy ACIs on exit")
+			}
+		}
+	}()
+
 	// Platform-specific initialization
 	if crawlerCfg.Platform == "youtube" {
 		// For YouTube platform, we need to validate the API key
@@ -230,6 +275,11 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 
 	if crawlerCfg.ExitOnComplete {
 		log.Info().Msg("Crawl complete, exiting with code 0 (--exit-on-complete)")
+		if proxyManager != nil {
+			if err := proxyManager.DestroyProxies(context.Background()); err != nil {
+				log.Warn().Err(err).Msg("Failed to destroy managed proxy ACIs on exit")
+			}
+		}
 		shutdownDaprSidecar()
 		os.Exit(0)
 	}

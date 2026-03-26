@@ -377,6 +377,31 @@ Examples:
 		crawlerCfg.ProxyUser = os.Getenv("PROXY_USER")
 		crawlerCfg.ProxyPass = os.Getenv("PROXY_PASS")
 
+		if crawlerCfg.ManagedProxies && len(crawlerCfg.ProxyAddrs) > 0 {
+			return fmt.Errorf("--managed-proxies and --proxy-addrs are mutually exclusive")
+		}
+
+		if crawlerCfg.ManagedProxies {
+			if crawlerCfg.ProxyResourceGroup == "" {
+				return fmt.Errorf("--proxy-resource-group is required when --managed-proxies is set")
+			}
+			if crawlerCfg.ProxySubscriptionID == "" {
+				return fmt.Errorf("--proxy-subscription-id is required when --managed-proxies is set")
+			}
+			if crawlerCfg.ProxyImage == "" {
+				return fmt.Errorf("--proxy-image is required when --managed-proxies is set")
+			}
+			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
+				return fmt.Errorf("PROXY_USER and PROXY_PASS env vars are required when --managed-proxies is set")
+			}
+			log.Info().
+				Str("resource_group", crawlerCfg.ProxyResourceGroup).
+				Str("image", crawlerCfg.ProxyImage).
+				Str("location", crawlerCfg.ProxyLocation).
+				Int("count", crawlerCfg.ProxyCount).
+				Msg("Managed ACI proxies enabled — will create at crawl start")
+		}
+
 		if len(crawlerCfg.ProxyAddrs) > 0 {
 			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
 				return fmt.Errorf("proxy configured but PROXY_USER and/or PROXY_PASS env vars are not set")
@@ -803,6 +828,18 @@ func init() {
 	// SOCKS5 proxy flags
 	rootCmd.PersistentFlags().StringSliceVar(&crawlerCfg.ProxyAddrs, "proxy-addrs", []string{}, "Comma-separated SOCKS5 proxy addresses (ip:port), one per pod ordinal; empty = no proxy")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyOrdinal, "proxy-ordinal", -1, "Override proxy ordinal for local dev (-1 = derive from POD_NAME)")
+
+	// Managed ACI proxy flags — mutually exclusive with --proxy-addrs
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.ManagedProxies, "managed-proxies", false, "Create and destroy ACI SOCKS5 proxy containers for this crawl")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyResourceGroup, "proxy-resource-group", "", "Azure resource group for managed proxy ACIs")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxySubscriptionID, "proxy-subscription-id", "", "Azure subscription ID for managed proxy ACIs")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyImage, "proxy-image", "", "Container image for microsocks proxy (e.g. myregistry.azurecr.io/microsocks:latest)")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxySubnetID, "proxy-subnet-id", "", "Azure subnet resource ID for ACI VNet injection (optional)")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyLocation, "proxy-location", "eastus2", "Azure region for proxy ACIs")
+	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyCPU, "proxy-cpu", 0.5, "CPU cores per managed proxy ACI")
+	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyMemoryGB, "proxy-memory-gb", 0.5, "Memory in GB per managed proxy ACI")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyPort, "proxy-port", 1080, "SOCKS5 listen port inside managed proxy container")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyCount, "proxy-count", 1, "Number of managed proxy ACIs to create")
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
