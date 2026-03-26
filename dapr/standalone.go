@@ -223,11 +223,17 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
+
+	// Tear down TDLib clients now that the crawl is finished.  The deferred
+	// CloseConnectionPool will no-op since we nil the pool here.
+	crawl.CloseConnectionPool()
+
 	if crawlerCfg.ExitOnComplete {
 		log.Info().Msg("Crawl complete, exiting with code 0 (--exit-on-complete)")
 		shutdownDaprSidecar()
 		os.Exit(0)
 	}
+	// Keep the pod alive so the StatefulSet doesn't restart it.
 	select {}
 }
 
