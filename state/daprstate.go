@@ -3816,19 +3816,26 @@ func (dsm *DaprStateManager) RecoverStalePageClaims(staleThreshold time.Duration
 	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
 
 	sqlQuery := fmt.Sprintf(
-		`UPDATE page_buffer SET claimed_by = '', claimed_at = NULL WHERE crawl_id = '%s' AND claimed_by != '' AND claimed_at < NOW() - INTERVAL '%d minutes' RETURNING page_id;`,
+		`UPDATE page_buffer pb SET claimed_by = '', claimed_at = NULL FROM (SELECT page_id, url, claimed_by FROM page_buffer WHERE crawl_id = '%s' AND claimed_by != '' AND claimed_at < NOW() - INTERVAL '%d minutes') AS stale WHERE pb.page_id = stale.page_id RETURNING pb.page_id, stale.url, stale.claimed_by;`,
 		safeCrawlID, minutes)
 
 	rows, err := dsm.queryDatabase(sqlQuery)
 	if err != nil {
 		return 0, fmt.Errorf("recover-stale-claims: %w", err)
 	}
-	count := len(rows)
-	if count > 0 {
-		log.Warn().Int("recovered", count).Int("stale_minutes", minutes).
-			Str("log_tag", "rw_page_buffer").Msg("Recovered stale page claims")
+	for _, row := range rows {
+		url, claimedBy := "", ""
+		if len(row) > 1 {
+			url, _ = row[1].(string)
+		}
+		if len(row) > 2 {
+			claimedBy, _ = row[2].(string)
+		}
+		log.Warn().Str("url", url).Str("previously_claimed_by", claimedBy).
+			Int("stale_minutes", minutes).Str("log_tag", "rw_page_buffer").
+			Msg("Recovered stale page claim")
 	}
-	return count, nil
+	return len(rows), nil
 }
 
 // TODO: alot of shared code between StorePost. Generalize a solution that both functions can use
