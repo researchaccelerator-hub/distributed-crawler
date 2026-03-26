@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/signal"
@@ -391,8 +393,17 @@ Examples:
 			if crawlerCfg.ProxyImage == "" {
 				return fmt.Errorf("--proxy-image is required when --managed-proxies is set")
 			}
+			// Auto-generate SOCKS5 credentials for managed proxies when not
+			// explicitly provided. The same credentials are passed to the
+			// microsocks container at creation time, so they only need to match.
 			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
-				return fmt.Errorf("PROXY_USER and PROXY_PASS env vars are required when --managed-proxies is set")
+				var buf [16]byte
+				if _, err := rand.Read(buf[:]); err != nil {
+					return fmt.Errorf("generating proxy credentials: %w", err)
+				}
+				crawlerCfg.ProxyUser = "proxy"
+				crawlerCfg.ProxyPass = hex.EncodeToString(buf[:])
+				log.Info().Msg("Auto-generated SOCKS5 credentials for managed proxies")
 			}
 			log.Info().
 				Str("resource_group", crawlerCfg.ProxyResourceGroup).
