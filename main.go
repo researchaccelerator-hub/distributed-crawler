@@ -361,6 +361,16 @@ Examples:
 			Bool("skip_media_download", crawlerCfg.SkipMediaDownload).
 			Msg("Crawler limits configured")
 
+		// Pod identity — used for page claiming and proxy resolution.
+		podName := os.Getenv("POD_NAME")
+		if podName == "" {
+			podName, _ = os.Hostname()
+			if podName == "" {
+				podName = "pod-0"
+			}
+		}
+		crawlerCfg.PodName = podName
+
 		// Resolve SOCKS5 proxy address from CLI flags + env vars.
 		// ProxyAddrs is CLI-only (different crawl types share the same manifest).
 		// Credentials come from env only (secrets should not appear in process args).
@@ -371,7 +381,6 @@ Examples:
 			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
 				return fmt.Errorf("proxy configured but PROXY_USER and/or PROXY_PASS env vars are not set")
 			}
-			podName := os.Getenv("POD_NAME")
 			addr, err := common.PodProxyAddr(podName, crawlerCfg.ProxyAddrs, crawlerCfg.ProxyOrdinal)
 			if err != nil {
 				return fmt.Errorf("proxy resolution failed: %w", err)

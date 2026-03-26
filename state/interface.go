@@ -100,6 +100,14 @@ type StateManagementInterface interface {
 	// random-walk database
 	SaveEdgeRecords(edges []*EdgeRecord) error
 	GetPagesFromPageBuffer(limit int) ([]Page, error)
+	// ClaimPages atomically claims up to limit unclaimed pages from the page
+	// buffer for this pod using UPDATE ... FOR UPDATE SKIP LOCKED ... RETURNING.
+	ClaimPages(limit int) ([]Page, error)
+	// UnclaimPages releases previously claimed pages back to the queue.
+	UnclaimPages(pageIDs []string) error
+	// RecoverStalePageClaims resets pages claimed longer than staleThreshold
+	// ago, making them available for re-processing by any pod.
+	RecoverStalePageClaims(staleThreshold time.Duration) (int, error)
 	ExecuteDatabaseOperation(sqlQuery string, params []any) error
 	AddPageToPageBuffer(page *Page) error
 	// DeletePageBufferPages removes specific pages by ID from the page buffer.
@@ -292,6 +300,10 @@ type Config struct {
 	CombineWatchDir string
 	// Directory to write crawl data to (reduces number of file events)
 	CombineTempDir string
+
+	// PodName identifies this pod in a multi-pod deployment (from POD_NAME env var).
+	// Used as the claimed_by value when claiming pages from the shared page_buffer.
+	PodName string
 }
 
 // AzureConfig contains Azure Blob Storage-specific configuration options

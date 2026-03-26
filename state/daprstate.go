@@ -3616,7 +3616,7 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 
 // TODO: generalize the process of inserting records to function that takes in query and params
 func (dsm *DaprStateManager) AddPageToPageBuffer(page *Page) error {
-	sqlQuery := `INSERT INTO page_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6);`
+	sqlQuery := `INSERT INTO page_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (crawl_id, url) DO NOTHING;`
 
 	crawlID := page.CrawlID
 	if crawlID == "" {
@@ -3700,7 +3700,7 @@ func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 	log.Debug().Str("log_tag", "rw_page_buffer").Msg("Getting pages from page buffer")
 	pages := make([]Page, 0)
 
-	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = $1 LIMIT %d;", limit)
+	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = $1 AND claimed_by = '' LIMIT %d;", limit)
 	pageResults, err := dsm.queryDatabase(query, dsm.config.CrawlID)
 	if err != nil {
 		return pages, fmt.Errorf("random-walk-layer: failed to pull page buffer pages: %w", err)
@@ -3727,6 +3727,97 @@ func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 		log.Error().Str("log_tag", "rw_page_buffer").Msg("No pages found in page buffer")
 	}
 	return pages, nil
+}
+
+// ClaimPages atomically claims up to `limit` unclaimed pages from the page
+// buffer for this pod.  Uses UPDATE ... FOR UPDATE SKIP LOCKED ... RETURNING
+// so that concurrent pods (or workers) never receive the same page.
+func (dsm *DaprStateManager) ClaimPages(limit int) ([]Page, error) {
+	podName := dsm.config.PodName
+	if podName == "" {
+		podName = "unknown"
+	}
+	safePodName := strings.ReplaceAll(podName, "'", "''")
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+
+	sqlQuery := fmt.Sprintf(
+		`UPDATE page_buffer SET claimed_by = '%s', claimed_at = NOW() WHERE page_id IN ( SELECT page_id FROM page_buffer WHERE crawl_id = '%s' AND claimed_by = '' ORDER BY depth, page_id LIMIT %d FOR UPDATE SKIP LOCKED ) RETURNING page_id, parent_id, depth, url, crawl_id, sequence_id;`,
+		safePodName, safeCrawlID, limit)
+
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("claim-pages: failed to claim pages: %w", err)
+	}
+
+	pages := make([]Page, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 6 {
+			continue
+		}
+		seqID := ""
+		if row[5] != nil {
+			seqID, _ = row[5].(string)
+		}
+		pages = append(pages, Page{
+			ID:         row[0].(string),
+			ParentID:   row[1].(string),
+			Depth:      int(row[2].(float64)),
+			URL:        row[3].(string),
+			Status:     "claimed",
+			Timestamp:  time.Now(),
+			SequenceID: seqID,
+		})
+	}
+
+	if len(pages) > 0 {
+		log.Debug().Int("count", len(pages)).Str("pod", podName).
+			Str("log_tag", "rw_page_buffer").Msg("Claimed pages from page buffer")
+	}
+	return pages, nil
+}
+
+// UnclaimPages releases previously claimed pages back to the queue so they
+// can be picked up by any pod.  Used when processing fails with a retryable
+// error (e.g. walkback exhausted, flood-wait retire).
+func (dsm *DaprStateManager) UnclaimPages(pageIDs []string) error {
+	if len(pageIDs) == 0 {
+		return nil
+	}
+	escaped := make([]string, len(pageIDs))
+	for i, pid := range pageIDs {
+		escaped[i] = "'" + strings.ReplaceAll(pid, "'", "''") + "'"
+	}
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+	sqlQuery := fmt.Sprintf(
+		"UPDATE page_buffer SET claimed_by = '', claimed_at = NULL WHERE crawl_id = '%s' AND page_id IN (%s);",
+		safeCrawlID, strings.Join(escaped, ","))
+	return dsm.ExecuteDatabaseOperation(sqlQuery, nil)
+}
+
+// RecoverStalePageClaims resets pages that have been claimed longer than
+// staleThreshold, making them available for re-processing.  Returns the
+// number of recovered pages.
+func (dsm *DaprStateManager) RecoverStalePageClaims(staleThreshold time.Duration) (int, error) {
+	minutes := int(staleThreshold.Minutes())
+	if minutes < 1 {
+		minutes = 1
+	}
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+
+	sqlQuery := fmt.Sprintf(
+		`UPDATE page_buffer SET claimed_by = '', claimed_at = NULL WHERE crawl_id = '%s' AND claimed_by != '' AND claimed_at < NOW() - INTERVAL '%d minutes' RETURNING page_id;`,
+		safeCrawlID, minutes)
+
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return 0, fmt.Errorf("recover-stale-claims: %w", err)
+	}
+	count := len(rows)
+	if count > 0 {
+		log.Warn().Int("recovered", count).Int("stale_minutes", minutes).
+			Str("log_tag", "rw_page_buffer").Msg("Recovered stale page claims")
+	}
+	return count, nil
 }
 
 // TODO: alot of shared code between StorePost. Generalize a solution that both functions can use

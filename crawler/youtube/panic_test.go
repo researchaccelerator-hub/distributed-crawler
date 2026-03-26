@@ -109,6 +109,9 @@ func (m *MockStateManager) UploadCombinedFile(filename string) error { return ni
 func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return []state.Page{}, nil
 }
+func (m *MockStateManager) ClaimPages(_ int) ([]state.Page, error)              { return nil, nil }
+func (m *MockStateManager) UnclaimPages(_ []string) error                       { return nil }
+func (m *MockStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) { return 0, nil }
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
 func (m *MockStateManager) AddPageToPageBuffer(page *state.Page) error                  { return nil }
 func (m *MockStateManager) DeletePageBufferPages(_ []string, _ []string) error          { return nil }

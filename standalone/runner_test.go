@@ -216,6 +216,9 @@ func (m *MockDaprStateManager) SaveEdgeRecords(edges []*state.EdgeRecord) error 
 func (m *MockDaprStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return []state.Page{}, nil
 }
+func (m *MockDaprStateManager) ClaimPages(_ int) ([]state.Page, error)              { return nil, nil }
+func (m *MockDaprStateManager) UnclaimPages(_ []string) error                       { return nil }
+func (m *MockDaprStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) { return 0, nil }
 func (m *MockDaprStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
 	return nil
 }

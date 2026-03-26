@@ -416,6 +416,20 @@ func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return args.Get(0).([]state.Page), args.Error(1)
 }
 
+func (m *MockStateManager) ClaimPages(_ int) ([]state.Page, error) {
+	args := m.Called()
+	return args.Get(0).([]state.Page), args.Error(1)
+}
+
+func (m *MockStateManager) UnclaimPages(_ []string) error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) {
+	args := m.Called()
+	return args.Int(0), args.Error(1)
+}
 
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	args := m.Called(sqlQuery, params)

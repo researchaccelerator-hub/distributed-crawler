@@ -721,3 +721,289 @@ func TestInitializeRandomWalkLayer_NoDuplicateSeeds(t *testing.T) {
 		seen[url] = true
 	}
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// ClaimPages
+// ────────────────────────────────────────────────────────────────────────────
+
+func TestClaimPages_SQLStructure(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			data, _ := json.Marshal([][]interface{}{})
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.PodName = "crawler-0"
+	dsm := newTestDSMRW(mc, cfg)
+
+	_, err := dsm.ClaimPages(3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mc.bindingCalls) == 0 {
+		t.Fatal("expected a DB binding call")
+	}
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	for _, want := range []string{
+		"UPDATE page_buffer SET claimed_by",
+		"FOR UPDATE SKIP LOCKED",
+		"RETURNING",
+		"crawl-rw-123",
+		"claimed_by = ''",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("SQL missing %q, got: %s", want, sql)
+		}
+	}
+}
+
+func TestClaimPages_PodNameInSQL(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			data, _ := json.Marshal([][]interface{}{})
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.PodName = "my-pod-7"
+	dsm := newTestDSMRW(mc, cfg)
+
+	_, _ = dsm.ClaimPages(1)
+
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	if !strings.Contains(sql, "my-pod-7") {
+		t.Errorf("expected pod name in SQL, got: %s", sql)
+	}
+}
+
+func TestClaimPages_ParsesRows(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			rows := [][]interface{}{
+				{"pid-1", "par-0", float64(1), "chan1", "crawl-rw-123", "seq-111"},
+				{"pid-2", "par-1", float64(2), "chan2", "crawl-rw-123", nil},
+			}
+			data, _ := json.Marshal(rows)
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.PodName = "pod-0"
+	dsm := newTestDSMRW(mc, cfg)
+
+	pages, err := dsm.ClaimPages(5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pages) != 2 {
+		t.Fatalf("expected 2 pages, got %d", len(pages))
+	}
+	if pages[0].ID != "pid-1" || pages[0].Depth != 1 || pages[0].SequenceID != "seq-111" {
+		t.Errorf("page[0] mismatch: %+v", pages[0])
+	}
+	if pages[1].SequenceID != "" {
+		t.Errorf("page[1].SequenceID: want empty, got %q", pages[1].SequenceID)
+	}
+	if pages[0].Status != "claimed" {
+		t.Errorf("page[0].Status: want claimed, got %q", pages[0].Status)
+	}
+}
+
+func TestClaimPages_EmptyResult(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			data, _ := json.Marshal([][]interface{}{})
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.PodName = "pod-0"
+	dsm := newTestDSMRW(mc, cfg)
+
+	pages, err := dsm.ClaimPages(10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pages) != 0 {
+		t.Fatalf("expected 0 pages, got %d", len(pages))
+	}
+}
+
+func TestClaimPages_DBError(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			return nil, errors.New("db timeout")
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.PodName = "pod-0"
+	dsm := newTestDSMRW(mc, cfg)
+
+	_, err := dsm.ClaimPages(5)
+	if err == nil {
+		t.Fatal("expected error from binding failure")
+	}
+	if !strings.Contains(err.Error(), "claim-pages") {
+		t.Errorf("expected wrapped error context, got: %v", err)
+	}
+}
+
+func TestClaimPages_SQLInjectionSafety(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			data, _ := json.Marshal([][]interface{}{})
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.PodName = "x'y"
+	dsm := newTestDSMRW(mc, cfg)
+
+	_, _ = dsm.ClaimPages(1)
+
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	// The single quote in "x'y" must be escaped to "x''y"
+	if !strings.Contains(sql, "x''y") {
+		t.Errorf("expected escaped single quote in SQL, got: %s", sql)
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// UnclaimPages
+// ────────────────────────────────────────────────────────────────────────────
+
+func TestUnclaimPages_SQLStructure(t *testing.T) {
+	mc := &mockDaprClient{}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	err := dsm.UnclaimPages([]string{"pid-1", "pid-2"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mc.bindingCalls) == 0 {
+		t.Fatal("expected a DB binding call")
+	}
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	for _, want := range []string{
+		"UPDATE page_buffer",
+		"claimed_by = ''",
+		"claimed_at = NULL",
+		"crawl-rw-123",
+		"'pid-1'",
+		"'pid-2'",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("SQL missing %q, got: %s", want, sql)
+		}
+	}
+}
+
+func TestUnclaimPages_EmptyList(t *testing.T) {
+	mc := &mockDaprClient{}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	err := dsm.UnclaimPages([]string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mc.bindingCalls) != 0 {
+		t.Errorf("expected no DB calls for empty list, got %d", len(mc.bindingCalls))
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// RecoverStalePageClaims
+// ────────────────────────────────────────────────────────────────────────────
+
+func TestRecoverStalePageClaims_SQLStructure(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			data, _ := json.Marshal([][]interface{}{})
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	_, err := dsm.RecoverStalePageClaims(10 * time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mc.bindingCalls) == 0 {
+		t.Fatal("expected a DB binding call")
+	}
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	for _, want := range []string{
+		"UPDATE page_buffer",
+		"claimed_by = ''",
+		"claimed_by != ''",
+		"INTERVAL '10 minutes'",
+		"RETURNING page_id",
+		"crawl-rw-123",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("SQL missing %q, got: %s", want, sql)
+		}
+	}
+}
+
+func TestRecoverStalePageClaims_ReturnsCount(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			rows := [][]interface{}{
+				{"pid-1"},
+				{"pid-2"},
+				{"pid-3"},
+			}
+			data, _ := json.Marshal(rows)
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	count, err := dsm.RecoverStalePageClaims(10 * time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 recovered, got %d", count)
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AddPageToPageBuffer — ON CONFLICT
+// ────────────────────────────────────────────────────────────────────────────
+
+func TestAddPageToPageBuffer_OnConflict(t *testing.T) {
+	mc := &mockDaprClient{}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	page := &Page{ID: "pg-oc", ParentID: "p-0", Depth: 0, URL: "t.me/oc", SequenceID: "s"}
+	_ = dsm.AddPageToPageBuffer(page)
+
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	if !strings.Contains(sql, "ON CONFLICT (crawl_id, url) DO NOTHING") {
+		t.Errorf("expected ON CONFLICT clause, got: %s", sql)
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// GetPagesFromPageBuffer — excludes claimed
+// ────────────────────────────────────────────────────────────────────────────
+
+func TestGetPagesFromPageBuffer_ExcludesClaimed(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			data, _ := json.Marshal([][]interface{}{})
+			return &daprc.BindingEvent{Data: data}, nil
+		},
+	}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	_, _ = dsm.GetPagesFromPageBuffer(10)
+
+	sql := mc.bindingCalls[0].Metadata["sql"]
+	if !strings.Contains(sql, "claimed_by = ''") {
+		t.Errorf("expected claimed_by filter in SELECT, got: %s", sql)
+	}
+}

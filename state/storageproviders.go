@@ -153,6 +153,17 @@ func (lsm *LocalStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) 
 	return []Page{}, fmt.Errorf("GetPagesFromPageBuffer not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) ClaimPages(_ int) ([]Page, error) {
+	return nil, fmt.Errorf("ClaimPages not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) UnclaimPages(_ []string) error {
+	return fmt.Errorf("UnclaimPages not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) {
+	return 0, fmt.Errorf("RecoverStalePageClaims not implemented for local state manager")
+}
 
 func (lsm *LocalStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return fmt.Errorf("ExecuteDatabaseOperation not implemented for local state manager")

@@ -177,9 +177,9 @@ GRANT SELECT ON TABLE edge_records                              TO crawler_reado
 
 -- =============================================================================
 -- TABLE: page_buffer
--- Transient queue of pages to process in the next BFS/random-walk layer.
--- Scoped per pod via crawl_id — each pod only reads/writes its own rows.
--- Rows are deleted after a layer completes; this table should stay small.
+-- Shared work queue for random-walk crawling.  Multiple pods with the same
+-- crawl_id claim pages atomically via UPDATE ... FOR UPDATE SKIP LOCKED.
+-- Rows are deleted after processing; stale claims are recovered periodically.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS page_buffer (
@@ -188,12 +188,22 @@ CREATE TABLE IF NOT EXISTS page_buffer (
     depth       INTEGER      NOT NULL,
     url         VARCHAR(64)  NOT NULL,        -- channel username
     crawl_id    VARCHAR(64)  NOT NULL,
-    sequence_id VARCHAR(36)  NOT NULL DEFAULT ''
+    sequence_id VARCHAR(36)  NOT NULL DEFAULT '',
+    claimed_by  VARCHAR(128) NOT NULL DEFAULT '',   -- pod name; empty = unclaimed
+    claimed_at  TIMESTAMP                           -- NULL when unclaimed
 );
 
--- All runtime queries filter on crawl_id (pod isolation)
+-- All runtime queries filter on crawl_id
 CREATE INDEX IF NOT EXISTS idx_page_buffer_crawl_id
     ON page_buffer (crawl_id);
+
+-- Idempotent seeding: multiple pods can insert the same URL without conflict
+CREATE UNIQUE INDEX IF NOT EXISTS idx_page_buffer_crawl_url
+    ON page_buffer (crawl_id, url);
+
+-- Fast path for ClaimPages: find unclaimed rows ordered by depth
+CREATE INDEX IF NOT EXISTS idx_page_buffer_claimable
+    ON page_buffer (crawl_id, depth) WHERE claimed_by = '';
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE page_buffer      TO crawler_app;
 GRANT SELECT ON TABLE page_buffer                              TO crawler_readonly;

@@ -45,6 +45,9 @@ func (n *noopStateManager) AddDiscoveredChannel(_ string) error                 
 func (n *noopStateManager) StoreChannelData(_ string, _ *model.ChannelData) error         { return nil }
 func (n *noopStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error                   { return nil }
 func (n *noopStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)            { return nil, nil }
+func (n *noopStateManager) ClaimPages(_ int) ([]state.Page, error)                       { return nil, nil }
+func (n *noopStateManager) UnclaimPages(_ []string) error                                { return nil }
+func (n *noopStateManager) RecoverStalePageClaims(_ time.Duration) (int, error)          { return 0, nil }
 func (n *noopStateManager) ExecuteDatabaseOperation(_ string, _ []any) error              { return nil }
 func (n *noopStateManager) AddPageToPageBuffer(_ *state.Page) error                       { return nil }
 func (n *noopStateManager) DeletePageBufferPages(_ []string, _ []string) error             { return nil }
@@ -85,7 +88,7 @@ type blockedValidatorSM struct {
 	incompleteBatches int
 }
 
-func (b *blockedValidatorSM) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
+func (b *blockedValidatorSM) ClaimPages(_ int) ([]state.Page, error) {
 	return nil, nil
 }
 
@@ -220,4 +223,78 @@ func TestRunRandomWalkLayerless_CircuitBreaker_Disabled(t *testing.T) {
 	err := RunRandomWalkLayerless(sm, cfg)
 	// Should exit cleanly via MaxCrawlDuration, not via circuit breaker error.
 	assert.NoError(t, err)
+}
+
+// ---------------------------------------------------------------------------
+// ClaimPages integration tests
+// ---------------------------------------------------------------------------
+
+// claimTrackingSM tracks ClaimPages calls and limits.
+type claimTrackingSM struct {
+	noopStateManager
+	claimCalls  []int    // recorded limit args
+	unclaimIDs  []string // recorded unclaim page IDs
+}
+
+func (c *claimTrackingSM) ClaimPages(limit int) ([]state.Page, error) {
+	c.claimCalls = append(c.claimCalls, limit)
+	return nil, nil // empty = no pages, loop will sleep then hit MaxCrawlDuration
+}
+
+func (c *claimTrackingSM) UnclaimPages(pageIDs []string) error {
+	c.unclaimIDs = append(c.unclaimIDs, pageIDs...)
+	return nil
+}
+
+func TestRunRandomWalkLayerless_UsesClaimPages(t *testing.T) {
+	orig := layerlessPollInterval
+	layerlessPollInterval = 10 * time.Millisecond
+	defer func() { layerlessPollInterval = orig }()
+
+	sm := &claimTrackingSM{}
+	cfg := common.CrawlerConfig{
+		MaxCrawlDuration: 100 * time.Millisecond,
+		Concurrency:      2,
+		CrawlID:          "test-crawl",
+	}
+
+	err := RunRandomWalkLayerless(sm, cfg)
+	assert.NoError(t, err)
+	// ClaimPages must have been called at least once (not GetPagesFromPageBuffer).
+	assert.NotEmpty(t, sm.claimCalls, "expected ClaimPages to be called")
+}
+
+func TestRunRandomWalkLayerless_ClaimsOnlyAvailableSlots(t *testing.T) {
+	orig := layerlessPollInterval
+	layerlessPollInterval = 10 * time.Millisecond
+	defer func() { layerlessPollInterval = orig }()
+
+	sm := &claimTrackingSM{}
+	cfg := common.CrawlerConfig{
+		MaxCrawlDuration: 100 * time.Millisecond,
+		Concurrency:      3,
+		CrawlID:          "test-crawl",
+	}
+
+	err := RunRandomWalkLayerless(sm, cfg)
+	assert.NoError(t, err)
+	// With 0 in-flight workers, the first call should request all 3 slots.
+	require.NotEmpty(t, sm.claimCalls)
+	assert.Equal(t, 3, sm.claimCalls[0], "first claim should request all available slots")
+}
+
+func TestSeedPageBuffer_MultiPodIdempotent(t *testing.T) {
+	sm := &seedTrackingSM{}
+	cfg := common.CrawlerConfig{CrawlID: "c1"}
+
+	// Simulate two pods calling seedPageBufferIfNeeded with the same URLs.
+	err1 := seedPageBufferIfNeeded(sm, cfg, []string{"chan_a", "chan_b"})
+	require.NoError(t, err1)
+	err2 := seedPageBufferIfNeeded(sm, cfg, []string{"chan_a", "chan_b"})
+	// Second call sees pages from first call? No — seedTrackingSM.GetPagesFromPageBuffer
+	// returns empty, so it re-seeds. That's fine: ON CONFLICT DO NOTHING at the DB
+	// level prevents actual duplicates. We just verify AddPageToPageBuffer is called.
+	require.NoError(t, err2)
+	assert.Equal(t, []string{"chan_a", "chan_b", "chan_a", "chan_b"}, sm.seededURLs,
+		"both calls should invoke AddPageToPageBuffer; DB dedup is ON CONFLICT")
 }

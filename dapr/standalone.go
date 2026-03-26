@@ -700,6 +700,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CombineFiles:    crawlCfg.CombineFiles,
 			CombineTempDir:  crawlCfg.CombineTempDir,
 			CombineWatchDir: crawlCfg.CombineWatchDir,
+			PodName:         crawlCfg.PodName,
 		}
 	} else {
 		cfg = state.Config{
@@ -713,6 +714,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CombineFiles:     crawlCfg.CombineFiles,
 			CombineTempDir:   crawlCfg.CombineTempDir,
 			CombineWatchDir:  crawlCfg.CombineWatchDir,
+			PodName:          crawlCfg.PodName,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
 				MaxPages: crawlCfg.MaxPages,
@@ -834,7 +836,8 @@ func seedPageBufferIfNeeded(sm state.StateManagementInterface, crawlCfg common.C
 //   - Tandem mode works naturally: the validator writes to page_buffer and this
 //     loop picks up the results without any special batching logic
 func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	crawlStart := time.Now()
 	var shouldStop atomic.Bool
 
@@ -848,10 +851,28 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 
 	var (
 		wg                 sync.WaitGroup
-		inFlight           sync.Map
 		inFlightCount      atomic.Int32
 		validatorWaitSince time.Time // non-zero when crawler is fully blocked waiting for validator
 	)
+
+	// Periodically recover pages claimed by crashed pods.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				recovered, recErr := sm.RecoverStalePageClaims(10 * time.Minute)
+				if recErr != nil {
+					log.Error().Err(recErr).Msg("random-walk-layerless: failed to recover stale page claims")
+				} else if recovered > 0 {
+					log.Info().Int("recovered", recovered).Msg("random-walk-layerless: recovered stale page claims")
+				}
+			}
+		}
+	}()
 
 	for !shouldStop.Load() {
 		if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
@@ -862,17 +883,19 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			break
 		}
 
-		// Don't poll the DB when all worker slots are occupied — any pages
-		// returned would be deduplicated by inFlight and wasted round-trips.
-		// Wait until at least one worker finishes and frees capacity.
-		if int(inFlightCount.Load()) >= maxWorkers {
+		// Only claim as many pages as we have available worker slots.
+		// This prevents the convoy problem: we never claim more pages than
+		// we can immediately dispatch, so no claimed page sits idle while
+		// a slow worker blocks the dispatch loop.
+		available := maxWorkers - int(inFlightCount.Load())
+		if available <= 0 {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
-		pages, err := sm.GetPagesFromPageBuffer(maxWorkers)
+		pages, err := sm.ClaimPages(available)
 		if err != nil {
-			log.Error().Err(err).Msg("random-walk-layerless: failed to get pages from page buffer")
+			log.Error().Err(err).Msg("random-walk-layerless: failed to claim pages from page buffer")
 			time.Sleep(layerlessPollInterval)
 			continue
 		}
@@ -918,37 +941,34 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 
 		validatorWaitSince = time.Time{} // pages found — no longer waiting
 
-		dispatched := 0
 		for _, page := range pages {
-			// Skip pages already being processed by another goroutine.
-			if _, loaded := inFlight.LoadOrStore(page.ID, true); loaded {
-				continue
-			}
-
-			// Acquire a worker slot.  Blocks until a running worker finishes
-			// and releases its slot, so the producer naturally back-pressures
-			// when all maxWorkers slots are taken.
+			// Acquire a worker slot. Should not block since we only claimed
+			// as many pages as there are available slots.
 			sem <- struct{}{}
 
 			inFlightCount.Add(1)
 			wg.Add(1)
-			dispatched++
 
 			go func(p state.Page) {
 				defer wg.Done()
 				defer func() {
-					inFlight.Delete(p.ID)
 					inFlightCount.Add(-1)
 					<-sem
 				}()
 
 				_, procErr := crawl.RunForChannelWithPool(ctx, &p, crawlCfg.StorageRoot, sm, crawlCfg)
 				if errors.Is(procErr, crawl.ErrWalkbackExhausted) {
-					// Leave page in buffer — will be re-processed on restart.
-					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: walkback exhausted, page left in buffer for restart")
+					// Unclaim so another pod (or this pod on restart) can retry.
+					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: walkback exhausted, unclaiming page")
+					if ucErr := sm.UnclaimPages([]string{p.ID}); ucErr != nil {
+						log.Error().Err(ucErr).Str("url", p.URL).Msg("random-walk-layerless: failed to unclaim walkback-exhausted page")
+					}
 				} else if errors.Is(procErr, crawl.ErrFloodWaitRetire) {
-					// Connection was retired; leave page in buffer for retry by a remaining connection.
-					log.Warn().Str("url", p.URL).Msg("random-walk-layerless: connection retired due to FLOOD_WAIT, page left in buffer")
+					// Connection was retired; unclaim so a remaining connection can pick it up.
+					log.Warn().Str("url", p.URL).Msg("random-walk-layerless: connection retired due to FLOOD_WAIT, unclaiming page")
+					if ucErr := sm.UnclaimPages([]string{p.ID}); ucErr != nil {
+						log.Error().Err(ucErr).Str("url", p.URL).Msg("random-walk-layerless: failed to unclaim flood-wait page")
+					}
 					if crawl.ConnectionPoolTotalSize() == 0 {
 						log.Error().Msg("random-walk-layerless: all connections retired due to FLOOD_WAIT, aborting crawl")
 						shouldStop.Store(true)
@@ -976,11 +996,6 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 					shouldStop.Store(true)
 				}
 			}(page)
-		}
-
-		if dispatched == 0 {
-			// All fetched pages are already in-flight; wait briefly before re-polling.
-			time.Sleep(500 * time.Millisecond)
 		}
 	}
 

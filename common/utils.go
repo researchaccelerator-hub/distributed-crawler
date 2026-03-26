@@ -103,6 +103,9 @@ type CrawlerConfig struct {
 	ProxyPass    string   // SOCKS5 auth password (from env PROXY_PASS)
 	ProxyOrdinal int      // Override ordinal for local dev (-1 = derive from POD_NAME)
 	ProxyAddr    string   // Resolved proxy address for this pod (set at startup)
+
+	// Pod identity for multi-pod page claiming (from POD_NAME env var)
+	PodName string
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.
