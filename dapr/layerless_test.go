@@ -47,6 +47,7 @@ func (n *noopStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error         
 func (n *noopStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)            { return nil, nil }
 func (n *noopStateManager) ClaimPages(_ int) ([]state.Page, error)                       { return nil, nil }
 func (n *noopStateManager) UnclaimPages(_ []string) error                                { return nil }
+func (n *noopStateManager) RefreshPageClaim(_ string) error                              { return nil }
 func (n *noopStateManager) RecoverStalePageClaims(_ time.Duration) (int, error)          { return 0, nil }
 func (n *noopStateManager) ExecuteDatabaseOperation(_ string, _ []any) error              { return nil }
 func (n *noopStateManager) AddPageToPageBuffer(_ *state.Page) error                       { return nil }
@@ -245,6 +246,7 @@ func (c *claimTrackingSM) UnclaimPages(pageIDs []string) error {
 	c.unclaimIDs = append(c.unclaimIDs, pageIDs...)
 	return nil
 }
+func (c *claimTrackingSM) RefreshPageClaim(_ string) error { return nil }
 
 func TestRunRandomWalkLayerless_UsesClaimPages(t *testing.T) {
 	orig := layerlessPollInterval

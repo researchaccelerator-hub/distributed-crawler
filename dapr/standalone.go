@@ -914,7 +914,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				recovered, recErr := sm.RecoverStalePageClaims(10 * time.Minute)
+				recovered, recErr := sm.RecoverStalePageClaims(30 * time.Minute)
 				if recErr != nil {
 					log.Error().Err(recErr).Msg("random-walk-layerless: failed to recover stale page claims")
 				} else if recovered > 0 {
@@ -1051,6 +1051,26 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 				defer func() {
 					inFlightCount.Add(-1)
 					<-sem
+				}()
+
+				// Heartbeat: refresh claimed_at while the worker is active so
+				// RecoverStalePageClaims does not reclaim this page.
+				hbCtx, hbCancel := context.WithCancel(ctx)
+				defer hbCancel()
+				go func() {
+					ticker := time.NewTicker(3 * time.Minute)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-hbCtx.Done():
+							return
+						case <-ticker.C:
+							if err := sm.RefreshPageClaim(p.ID); err != nil {
+								log.Warn().Err(err).Str("page_id", p.ID).Str("url", p.URL).
+									Msg("random-walk-layerless: failed to refresh page claim heartbeat")
+							}
+						}
+					}
 				}()
 
 				_, procErr := crawl.RunForChannelWithPool(ctx, &p, crawlCfg.StorageRoot, sm, crawlCfg)

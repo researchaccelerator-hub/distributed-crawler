@@ -3794,6 +3794,17 @@ func (dsm *DaprStateManager) UnclaimPages(pageIDs []string) error {
 	return dsm.ExecuteDatabaseOperation(sqlQuery, nil)
 }
 
+// RefreshPageClaim bumps claimed_at to NOW() for a page that is still being
+// actively processed, preventing RecoverStalePageClaims from reclaiming it.
+func (dsm *DaprStateManager) RefreshPageClaim(pageID string) error {
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+	safePageID := strings.ReplaceAll(pageID, "'", "''")
+	sqlQuery := fmt.Sprintf(
+		"UPDATE page_buffer SET claimed_at = NOW() WHERE crawl_id = '%s' AND page_id = '%s' AND claimed_by != '';",
+		safeCrawlID, safePageID)
+	return dsm.ExecuteDatabaseOperation(sqlQuery, nil)
+}
+
 // RecoverStalePageClaims resets pages that have been claimed longer than
 // staleThreshold, making them available for re-processing.  Returns the
 // number of recovered pages.

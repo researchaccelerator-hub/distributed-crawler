@@ -161,6 +161,10 @@ func (lsm *LocalStateManager) UnclaimPages(_ []string) error {
 	return fmt.Errorf("UnclaimPages not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) RefreshPageClaim(_ string) error {
+	return fmt.Errorf("RefreshPageClaim not implemented for local state manager")
+}
+
 func (lsm *LocalStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) {
 	return 0, fmt.Errorf("RecoverStalePageClaims not implemented for local state manager")
 }

@@ -426,6 +426,10 @@ func (m *MockStateManager) UnclaimPages(_ []string) error {
 	return args.Error(0)
 }
 
+func (m *MockStateManager) RefreshPageClaim(_ string) error {
+	return nil
+}
+
 func (m *MockStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) {
 	args := m.Called()
 	return args.Int(0), args.Error(1)

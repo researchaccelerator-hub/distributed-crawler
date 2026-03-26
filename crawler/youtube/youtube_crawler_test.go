@@ -107,6 +107,7 @@ func (m *MockYouTubeStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, e
 }
 func (m *MockYouTubeStateManager) ClaimPages(_ int) ([]state.Page, error)              { return nil, nil }
 func (m *MockYouTubeStateManager) UnclaimPages(_ []string) error                       { return nil }
+func (m *MockYouTubeStateManager) RefreshPageClaim(_ string) error                     { return nil }
 func (m *MockYouTubeStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) { return 0, nil }
 func (m *MockYouTubeStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return nil

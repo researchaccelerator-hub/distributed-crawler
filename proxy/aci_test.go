@@ -159,17 +159,19 @@ func TestCreateProxies_NoIPAddress(t *testing.T) {
 
 func TestContainerGroupName_Formatting(t *testing.T) {
 	tests := []struct {
-		podName  string
-		ordinal  int
-		expected string
+		podName    string
+		ordinal    int
+		proxyCount int
+		expected   string
 	}{
-		{"crawler-0", 0, "proxy-crawler-0-0"},
-		{"crawler-0", 5, "proxy-crawler-0-5"},
-		{"UPPERCASE", 0, "proxy-uppercase-0"},
+		{"crawler-0", 0, 1, "proxy-crawler-0"},
+		{"crawler-0", 0, 3, "proxy-crawler-0-0"},
+		{"crawler-0", 2, 3, "proxy-crawler-0-2"},
+		{"UPPERCASE", 0, 1, "proxy-uppercase"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
-			got := containerGroupName(tt.podName, tt.ordinal)
+			got := containerGroupName(tt.podName, tt.ordinal, tt.proxyCount)
 			assert.Equal(t, tt.expected, got)
 			assert.LessOrEqual(t, len(got), 63)
 		})
@@ -178,7 +180,7 @@ func TestContainerGroupName_Formatting(t *testing.T) {
 
 func TestContainerGroupName_TruncatesAt63(t *testing.T) {
 	longName := strings.Repeat("a", 80)
-	name := containerGroupName(longName, 0)
+	name := containerGroupName(longName, 0, 1)
 	assert.LessOrEqual(t, len(name), 63)
 }
 

@@ -129,11 +129,16 @@ func newManager(cfg common.CrawlerConfig, api ContainerGroupsAPI) *ACIProxyManag
 }
 
 // containerGroupName generates a DNS-safe name for the ACI container group.
-// Format: proxy-{podName}-{ordinal}, truncated to 63 characters.
-// Using podName (rather than crawlID) ensures each pod in a statefulset
+// Format: proxy-{podName} (or proxy-{podName}-{ordinal} when proxyCount > 1),
+// truncated to 63 characters. Using podName ensures each pod in a statefulset
 // gets its own proxy without colliding with other pods' proxies.
-func containerGroupName(podName string, ordinal int) string {
-	name := fmt.Sprintf("proxy-%s-%d", strings.ToLower(podName), ordinal)
+func containerGroupName(podName string, ordinal, proxyCount int) string {
+	var name string
+	if proxyCount > 1 {
+		name = fmt.Sprintf("proxy-%s-%d", strings.ToLower(podName), ordinal)
+	} else {
+		name = fmt.Sprintf("proxy-%s", strings.ToLower(podName))
+	}
 	if len(name) > 63 {
 		name = name[:63]
 	}
@@ -205,7 +210,7 @@ func (m *ACIProxyManager) CreateProxies(ctx context.Context) ([]string, error) {
 	results := make(chan result, m.proxyCount)
 	for i := 0; i < m.proxyCount; i++ {
 		go func(ordinal int) {
-			name := containerGroupName(m.podName, ordinal)
+			name := containerGroupName(m.podName, ordinal, m.proxyCount)
 			cg := m.buildContainerGroup(name)
 
 			log.Info().Str("name", name).Str("location", m.location).Msg("Creating ACI proxy")
@@ -241,7 +246,7 @@ func (m *ACIProxyManager) CreateProxies(ctx context.Context) ([]string, error) {
 			continue
 		}
 		addrs[r.ordinal] = r.addr
-		names = append(names, containerGroupName(m.podName, r.ordinal))
+		names = append(names, containerGroupName(m.podName, r.ordinal, m.proxyCount))
 	}
 
 	if len(errs) > 0 {

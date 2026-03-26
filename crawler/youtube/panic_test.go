@@ -111,6 +111,7 @@ func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 }
 func (m *MockStateManager) ClaimPages(_ int) ([]state.Page, error)              { return nil, nil }
 func (m *MockStateManager) UnclaimPages(_ []string) error                       { return nil }
+func (m *MockStateManager) RefreshPageClaim(_ string) error                     { return nil }
 func (m *MockStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) { return 0, nil }
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error { return nil }
 func (m *MockStateManager) AddPageToPageBuffer(page *state.Page) error                  { return nil }

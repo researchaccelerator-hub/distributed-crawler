@@ -65,6 +65,7 @@ func (m *mockStateManager) SaveEdgeRecords(_ []*state.EdgeRecord) error         
 func (m *mockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error)                    { return nil, nil }
 func (m *mockStateManager) ClaimPages(_ int) ([]state.Page, error)                               { return nil, nil }
 func (m *mockStateManager) UnclaimPages(_ []string) error                                        { return nil }
+func (m *mockStateManager) RefreshPageClaim(_ string) error                                      { return nil }
 func (m *mockStateManager) RecoverStalePageClaims(_ time.Duration) (int, error)                  { return 0, nil }
 func (m *mockStateManager) ExecuteDatabaseOperation(_ string, _ []any) error                   { return nil }
 func (m *mockStateManager) AddPageToPageBuffer(_ *state.Page) error                           { return nil }

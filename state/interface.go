@@ -105,6 +105,9 @@ type StateManagementInterface interface {
 	ClaimPages(limit int) ([]Page, error)
 	// UnclaimPages releases previously claimed pages back to the queue.
 	UnclaimPages(pageIDs []string) error
+	// RefreshPageClaim updates claimed_at to NOW() for an actively-processed
+	// page so that RecoverStalePageClaims does not reclaim it.
+	RefreshPageClaim(pageID string) error
 	// RecoverStalePageClaims resets pages claimed longer than staleThreshold
 	// ago, making them available for re-processing by any pod.
 	RecoverStalePageClaims(staleThreshold time.Duration) (int, error)

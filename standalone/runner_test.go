@@ -218,6 +218,7 @@ func (m *MockDaprStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, erro
 }
 func (m *MockDaprStateManager) ClaimPages(_ int) ([]state.Page, error)              { return nil, nil }
 func (m *MockDaprStateManager) UnclaimPages(_ []string) error                       { return nil }
+func (m *MockDaprStateManager) RefreshPageClaim(_ string) error                     { return nil }
 func (m *MockDaprStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) { return 0, nil }
 func (m *MockDaprStateManager) StoreChannelData(channelID string, channelData *model.ChannelData) error {
 	return nil
