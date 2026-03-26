@@ -927,7 +927,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 	// Periodic stats emitter for Grafana dashboard.
 	var totalChannelsCrawled atomic.Int64
 	go func() {
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for {
 			select {
@@ -959,14 +959,6 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 					Int("pending_batches", pendingBatches).
 					Dur("elapsed", time.Since(crawlStart)).
 					Msg("random-walk-stats: periodic")
-
-				log.Info().
-					Str("log_tag", "rw_pool_stats").
-					Int("active", poolStats["inUse"]).
-					Int("available", poolStats["available"]).
-					Int("retired", poolStats["maxSize"]-poolStats["inUse"]-poolStats["available"]).
-					Int("total", poolStats["maxSize"]).
-					Msg("random-walk-pool: status")
 			}
 		}
 	}()
