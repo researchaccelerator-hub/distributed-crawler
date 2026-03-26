@@ -924,6 +924,53 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 		}
 	}()
 
+	// Periodic stats emitter for Grafana dashboard.
+	var totalChannelsCrawled atomic.Int64
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				poolStats := crawl.GetConnectionPoolStats()
+
+				// Unclaimed page count (best-effort — ignore errors).
+				// GetPagesFromPageBuffer returns only unclaimed pages; pass a high
+				// limit to approximate the full queue depth.
+				unclaimedPages, _ := sm.GetPagesFromPageBuffer(10000)
+
+				pendingBatches := 0
+				if crawlCfg.TandemCrawl {
+					pendingBatches, _ = sm.CountIncompleteBatches(crawlCfg.CrawlID)
+				}
+
+				log.Info().
+					Str("log_tag", "rw_stats").
+					Str("crawl_id", crawlCfg.CrawlID).
+					Int("pages_in_buffer", len(unclaimedPages)+int(inFlightCount.Load())).
+					Int("pages_unclaimed", len(unclaimedPages)).
+					Int("in_flight", int(inFlightCount.Load())).
+					Int64("total_channels_crawled", totalChannelsCrawled.Load()).
+					Int("pool_active", poolStats["inUse"]).
+					Int("pool_available", poolStats["available"]).
+					Int("pool_max", poolStats["maxSize"]).
+					Int("pending_batches", pendingBatches).
+					Dur("elapsed", time.Since(crawlStart)).
+					Msg("random-walk-stats: periodic")
+
+				log.Info().
+					Str("log_tag", "rw_pool_stats").
+					Int("active", poolStats["inUse"]).
+					Int("available", poolStats["available"]).
+					Int("retired", poolStats["maxSize"]-poolStats["inUse"]-poolStats["available"]).
+					Int("total", poolStats["maxSize"]).
+					Msg("random-walk-pool: status")
+			}
+		}
+	}()
+
 	for !shouldStop.Load() {
 		if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
 			log.Info().
@@ -1036,6 +1083,8 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 				} else {
 					if procErr != nil {
 						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")
+					} else {
+						totalChannelsCrawled.Add(1)
 					}
 					if delErr := sm.DeletePageBufferPages([]string{p.ID}, []string{p.URL}); delErr != nil {
 						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete page from buffer")

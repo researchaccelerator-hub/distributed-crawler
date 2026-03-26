@@ -1130,6 +1130,12 @@ func processAllMessagesWithProcessor(
 	var tandemBatch *state.PendingEdgeBatch
 	seenInBatch := make(map[string]struct{})
 
+	// Grafana dashboard summary fields — set during walkback decision.
+	channelStart := time.Now()
+	var channelWalkback bool
+	var channelNextURL string
+	var newChannelCount int
+
 	// Process messages
 	for _, message := range messages {
 		m := state.Message{
@@ -1423,14 +1429,17 @@ func processAllMessagesWithProcessor(
 				}
 				log.Info().Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
 					Msg("random-walk-tandem: Batch closed, validator will handle walkback")
+				newChannelCount = len(seenInBatch)
 				// Do NOT write edge_records, page_buffer, or make walkback decision.
 			} else {
 				// No edges found — crawler handles forced walkback itself.
 				log.Info().Str("source_channel", owner.URL).Msg("random-walk-tandem: No edges found, performing forced walkback")
+				channelWalkback = true
 				walkbackURL, walkErr := pickWalkbackChannel(sm, owner.URL, nil)
 				if walkErr != nil {
 					return nil, walkErr
 				}
+				channelNextURL = walkbackURL
 				page := &state.Page{
 					ID:         uuid.New().String(),
 					ParentID:   owner.ID,
@@ -1472,7 +1481,7 @@ func processAllMessagesWithProcessor(
 
 			walkback := false
 			rndNum := -1
-			newChannelCount := len(newChannels)
+			newChannelCount = len(newChannels)
 			if newChannelCount == 0 {
 				walkback = true
 			} else {
@@ -1505,6 +1514,8 @@ func processAllMessagesWithProcessor(
 				page.SequenceID = owner.SequenceID
 			}
 			linkToFollow.DestinationChannel = page.URL
+			channelWalkback = linkToFollow.Walkback
+			channelNextURL = page.URL
 			log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
 				Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
 				Msg("random-walk-edge: Adding edge to follow in next layer")
@@ -1540,6 +1551,25 @@ func processAllMessagesWithProcessor(
 				return nil, err
 			}
 		}
+	}
+
+	// Emit a single structured log line
+	if cfg.SamplingMethod == "random-walk" {
+		log.Info().
+			Str("log_tag", "rw_channel_summary").
+			Str("crawl_id", cfg.CrawlID).
+			Str("channel", owner.URL).
+			Str("sequence_id", owner.SequenceID).
+			Int("depth", owner.Depth).
+			Int("messages_processed", processed).
+			Int("messages_fetched", fetched).
+			Int("edges_discovered", discoveredCount).
+			Int("new_channels", newChannelCount).
+			Bool("walkback", channelWalkback).
+			Str("next_channel", channelNextURL).
+			Dur("duration", time.Since(channelStart)).
+			Int("member_count", int(info.memberCount)).
+			Msg("random-walk-channel-complete")
 	}
 
 	owner.Status = "fetched"
@@ -1809,4 +1839,3 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 
 	return post.Outlinks, nil
 }
-
