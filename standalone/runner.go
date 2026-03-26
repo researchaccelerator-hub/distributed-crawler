@@ -385,13 +385,13 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	if crawlCfg.SamplingMethod == "random-walk" {
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
+			log.Warn().Str("log_tag", "rw_init").Err(seedErr).Msg("Failed to load seed channels (continuing)")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
-			log.Warn().Err(invalidErr).Msg("random-walk-init: failed to load invalid channels (continuing)")
+			log.Warn().Str("log_tag", "rw_init").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")
 		}
 		if discErr := sm.InitializeDiscoveredChannels(); discErr != nil {
-			log.Fatal().Err(discErr).Msg("random-walk-init: failed to pull discovered channels")
+			log.Fatal().Str("log_tag", "rw_init").Err(discErr).Msg("Failed to pull discovered channels")
 		}
 		if len(stringList) == 0 {
 			sm.InitializeRandomWalkLayer()

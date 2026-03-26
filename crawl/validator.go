@@ -82,7 +82,7 @@ func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, c
 		Float64("request_rate_per_min", requestRate).
 		Int("jitter_ms", jitterMs).
 		Int("claim_batch_size", claimSize).
-		Msg("validator: starting validation loop")
+		Str("log_tag", "val_edge").Msg("Starting validation loop")
 
 	g, ctx := errgroup.WithContext(ctx)
 
@@ -128,12 +128,12 @@ func runEdgeValidation(
 			blocked.lastProbeAt = time.Now()
 			_, probeErr := validateFn(probeChannel, httpClient)
 			if probeErr == nil {
-				log.Info().Msg("validator-edge: probe succeeded, resuming validation")
+				log.Info().Str("log_tag", "val_edge").Msg("Probe succeeded, resuming validation")
 				blocked.active = false
 				blocked.consecutiveCount = 0
 				continue // immediately resume claiming — no sleep needed
 			}
-			log.Warn().Err(probeErr).Msg("validator-edge: probe failed, still blocked")
+			log.Warn().Str("log_tag", "val_edge").Err(probeErr).Msg("Probe failed, still blocked")
 			sleepCtx(ctx, edgePollInterval)
 			continue
 		}
@@ -141,7 +141,7 @@ func runEdgeValidation(
 		// --- Normal: claim and validate edges ---
 		edges, err := sm.ClaimPendingEdges(claimSize)
 		if err != nil {
-			log.Warn().Err(err).Msg("validator-edge: failed to claim pending edges")
+			log.Warn().Str("log_tag", "val_edge").Err(err).Msg("Failed to claim pending edges")
 			sleepCtx(ctx, edgePollInterval)
 			continue
 		}
@@ -165,16 +165,16 @@ func runEdgeValidation(
 				blocked.consecutiveCount++
 				log.Warn().Str("channel", edge.DestinationChannel).
 					Int("consecutive_blocked", blocked.consecutiveCount).
-					Msg("validator-edge: access blocked, edge left pending")
+					Str("log_tag", "val_edge").Msg("Access blocked, edge left pending")
 				if !blocked.active && blocked.consecutiveCount >= blockedThreshold {
 					blocked.active = true
 					// Leave lastProbeAt at zero so the first probe fires
 					// immediately — confirm the block rather than waiting
 					// a full probeInterval before checking.
-					log.Warn().Int("threshold", blockedThreshold).
-						Msg("validator-edge: entering blocked state")
+					log.Warn().Str("log_tag", "val_edge").Int("threshold", blockedThreshold).
+						Msg("Entering blocked state")
 					if eventErr := sm.InsertAccessEvent("ip_blocked"); eventErr != nil {
-						log.Warn().Err(eventErr).Msg("validator-edge: failed to insert access event")
+						log.Warn().Str("log_tag", "val_edge").Err(eventErr).Msg("Failed to insert access event")
 					}
 				}
 			case outcomeTransient:
@@ -187,7 +187,7 @@ func runEdgeValidation(
 
 			if updateErr := sm.UpdatePendingEdge(update); updateErr != nil {
 				log.Warn().Err(updateErr).Int("pending_id", edge.PendingID).
-					Msg("validator-edge: failed to update edge status")
+					Str("log_tag", "val_edge").Msg("Failed to update edge status")
 			}
 		}
 	}
@@ -214,7 +214,7 @@ func validateSingleEdge(
 
 	// Check invalid channel cache (in-memory, fast)
 	if sm.IsInvalidChannel(channel) {
-		log.Debug().Str("channel", channel).Msg("validator-edge: already invalid, skipping HTTP")
+		log.Debug().Str("log_tag", "val_edge").Str("channel", channel).Msg("Already invalid, skipping HTTP")
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
 			ValidationStatus: "invalid",
@@ -225,10 +225,10 @@ func validateSingleEdge(
 	// Check if already discovered by any crawl (DB check, no INSERT)
 	discovered, err := sm.IsChannelDiscovered(channel)
 	if err != nil {
-		log.Warn().Err(err).Str("channel", channel).Msg("validator-edge: IsChannelDiscovered check failed")
+		log.Warn().Str("log_tag", "val_edge").Err(err).Str("channel", channel).Msg("IsChannelDiscovered check failed")
 		// Fall through to HTTP validation
 	} else if discovered {
-		log.Debug().Str("channel", channel).Msg("validator-edge: already discovered, skipping HTTP")
+		log.Debug().Str("log_tag", "val_edge").Str("channel", channel).Msg("Already discovered, skipping HTTP")
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
 			ValidationStatus: "duplicate",
@@ -249,13 +249,13 @@ func validateSingleEdge(
 	if httpErr != nil {
 		var validErr *telegramhelper.ValidationHTTPError
 		if errors.As(httpErr, &validErr) && validErr.Kind == telegramhelper.ErrBlocked {
-			log.Warn().Err(httpErr).Str("channel", channel).Msg("validator-edge: access blocked, edge left pending")
+			log.Warn().Str("log_tag", "val_edge").Err(httpErr).Str("channel", channel).Msg("Access blocked, edge left pending")
 			return state.PendingEdgeUpdate{
 				PendingID:        edge.PendingID,
 				ValidationStatus: "pending",
 			}, outcomeBlocked
 		}
-		log.Warn().Err(httpErr).Str("channel", channel).Msg("validator-edge: transient HTTP error, edge left pending")
+		log.Warn().Str("log_tag", "val_edge").Err(httpErr).Str("channel", channel).Msg("Transient HTTP error, edge left pending")
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
 			ValidationStatus: "pending",
@@ -264,7 +264,7 @@ func validateSingleEdge(
 
 	log.Info().Str("channel", channel).Str("source_channel", edge.SourceChannel).
 		Str("status", result.Status).Str("reason", result.Reason).
-		Str("source_type", edge.SourceType).Msg("validator-edge: validation result")
+		Str("source_type", edge.SourceType).Str("log_tag", "val_edge").Msg("Validation result")
 
 	// Apply side effects based on result
 	switch result.Status {
@@ -272,7 +272,7 @@ func validateSingleEdge(
 		// Claim first-discovery
 		claimed, claimErr := sm.ClaimDiscoveredChannel(channel, edge.CrawlID)
 		if claimErr != nil {
-			log.Warn().Err(claimErr).Str("channel", channel).Msg("validator-edge: ClaimDiscoveredChannel failed")
+			log.Warn().Str("log_tag", "val_edge").Err(claimErr).Str("channel", channel).Msg("ClaimDiscoveredChannel failed")
 		}
 		if !claimed {
 			// Another validator already claimed this channel
@@ -283,7 +283,7 @@ func validateSingleEdge(
 		}
 		// Cache the channel so future lookups can skip SearchPublicChat
 		if upsertErr := sm.UpsertSeedChannelChatID(channel, 0); upsertErr != nil {
-			log.Warn().Err(upsertErr).Str("channel", channel).Msg("validator-edge: failed to cache channel")
+			log.Warn().Str("log_tag", "val_edge").Err(upsertErr).Str("channel", channel).Msg("Failed to cache channel")
 		}
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
@@ -292,7 +292,7 @@ func validateSingleEdge(
 
 	case "not_channel":
 		if invalidErr := sm.MarkChannelInvalid(channel, result.Reason); invalidErr != nil {
-			log.Warn().Err(invalidErr).Str("channel", channel).Msg("validator-edge: failed to mark channel invalid")
+			log.Warn().Str("log_tag", "val_edge").Err(invalidErr).Str("channel", channel).Msg("Failed to mark channel invalid")
 		}
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
@@ -302,7 +302,7 @@ func validateSingleEdge(
 
 	case "invalid":
 		if invalidErr := sm.MarkChannelInvalid(channel, result.Reason); invalidErr != nil {
-			log.Warn().Err(invalidErr).Str("channel", channel).Msg("validator-edge: failed to mark channel invalid")
+			log.Warn().Str("log_tag", "val_edge").Err(invalidErr).Str("channel", channel).Msg("Failed to mark channel invalid")
 		}
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
@@ -336,21 +336,21 @@ func runWalkbackProcessor(
 			return ctx.Err()
 		case <-staleTicker.C:
 			if n, recErr := sm.RecoverStaleBatchClaims(staleBatchRecoveryThreshold); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-walkback: failed to recover stale batch claims")
+				log.Warn().Str("log_tag", "val_walkback").Err(recErr).Msg("Failed to recover stale batch claims")
 			} else if n > 0 {
-				log.Info().Int("recovered", n).Msg("validator-walkback: recovered stale batch claims")
+				log.Info().Str("log_tag", "val_walkback").Int("recovered", n).Msg("Recovered stale batch claims")
 			}
 			if n, recErr := sm.RecoverStaleValidatingEdges(staleBatchRecoveryThreshold); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-walkback: failed to recover stale validating edges")
+				log.Warn().Str("log_tag", "val_walkback").Err(recErr).Msg("Failed to recover stale validating edges")
 			} else if n > 0 {
-				log.Info().Int("recovered", n).Msg("validator-walkback: recovered stale validating edges")
+				log.Info().Str("log_tag", "val_walkback").Int("recovered", n).Msg("Recovered stale validating edges")
 			}
 		default:
 		}
 
 		batch, edges, err := sm.ClaimWalkbackBatch()
 		if err != nil {
-			log.Warn().Err(err).Msg("validator-walkback: failed to claim walkback batch")
+			log.Warn().Str("log_tag", "val_walkback").Err(err).Msg("Failed to claim walkback batch")
 			sleepCtx(ctx, walkbackPollInterval)
 			continue
 		}
@@ -360,12 +360,12 @@ func runWalkbackProcessor(
 			continue
 		}
 
-		log.Info().Str("batch_id", batch.BatchID).Str("source_channel", batch.SourceChannel).
-			Int("edge_count", len(edges)).Msg("validator-walkback: processing batch")
+		log.Info().Str("log_tag", "val_walkback").Str("batch_id", batch.BatchID).Str("source_channel", batch.SourceChannel).
+			Int("edge_count", len(edges)).Msg("Processing batch")
 
 		if processErr := processWalkbackBatch(ctx, sm, cfg, batch, edges); processErr != nil {
 			log.Error().Err(processErr).Str("batch_id", batch.BatchID).
-				Msg("validator-walkback: failed to process batch")
+				Str("log_tag", "val_walkback").Msg("Failed to process batch")
 			// Don't return error — continue processing other batches
 		}
 	}
@@ -407,7 +407,7 @@ func processWalkbackBatch(
 	log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).
 		Bool("walkback", walkback).Int("valid_channels", newChannelCount).
 		Str("source_channel", batch.SourceChannel).Str("batch_id", batch.BatchID).
-		Msg("random-walk-walkback: Walkback decision data (validator)")
+		Str("log_tag", "rw_walkback").Msg("Walkback decision data (validator)")
 
 	var pageSequenceID string
 	if walkback {
@@ -494,7 +494,7 @@ func processWalkbackBatch(
 
 	// Flush stats and delete pending_edges (best-effort; orphans cleaned at startup)
 	if err := sm.FlushBatchStats(batch.BatchID, batch.CrawlID, allEdges); err != nil {
-		log.Warn().Err(err).Str("batch_id", batch.BatchID).Msg("validator-walkback: FlushBatchStats failed; orphan edges will be cleaned at next startup")
+		log.Warn().Str("log_tag", "val_walkback").Err(err).Str("batch_id", batch.BatchID).Msg("FlushBatchStats failed; orphan edges will be cleaned at next startup")
 	}
 
 	// Tally validation outcomes for the batch summary.
@@ -513,7 +513,7 @@ func processWalkbackBatch(
 			validatingCount++
 		default:
 			log.Warn().Str("batch_id", batch.BatchID).Str("status", e.ValidationStatus).
-				Str("channel", e.DestinationChannel).Msg("validator-walkback: unexpected edge validation status")
+				Str("channel", e.DestinationChannel).Str("log_tag", "val_walkback").Msg("Unexpected edge validation status")
 			unknownCount++
 		}
 	}
@@ -524,7 +524,7 @@ func processWalkbackBatch(
 		Int("pending", pendingCount).Int("validating", validatingCount).Int("unknown", unknownCount).
 		Int("edge_records", len(edgeRecords)).
 		Str("next_url", nextURL).Bool("walkback", walkback).
-		Msg("validator-walkback: batch completed")
+		Str("log_tag", "val_walkback").Msg("Batch completed")
 
 	return nil
 }

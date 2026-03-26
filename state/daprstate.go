@@ -357,7 +357,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 				} else {
 					log.Info().Int("pageCount", len(layerZeroPages)).Msg("Loaded layer 0 pages from previous execution")
 					if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-						log.Info().Msg("random-walk-seed: Adding seed urls for in progress crawl")
+						log.Info().Str("log_tag", "rw_seed").Msg("Adding seed urls for in progress crawl")
 						for _, url := range seedURLs {
 							dsm.BaseStateManager.AddDiscoveredChannel(url)
 						}
@@ -460,7 +460,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 			} else {
 				log.Info().Int("pageCount", len(layerZeroPages)).Msg("Successfully loaded layer 0 pages")
 				if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-					log.Info().Msg("random-walk-seed: Adding seed urls for in progress crawl")
+					log.Info().Str("log_tag", "rw_seed").Msg("Adding seed urls for in progress crawl")
 					for _, url := range seedURLs {
 						dsm.BaseStateManager.AddDiscoveredChannel(url)
 					}
@@ -488,7 +488,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	uniqueSeedURLs := make([]string, 0)
 	for _, url := range seedURLs {
 		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-			log.Info().Str("url", url).Msg("random-walk-seed: Adding seed url in Dapr Initialize")
+			log.Info().Str("log_tag", "rw_seed").Str("url", url).Msg("Adding seed url in Dapr Initialize")
 			dsm.BaseStateManager.AddDiscoveredChannel(url)
 		}
 		if _, exists := dsm.urlCache[url]; !exists {
@@ -4279,7 +4279,7 @@ func (dsm *DaprStateManager) FlushBatchStats(batchID, crawlID string, edges []*P
 
 	for st, c := range agg {
 		if err := dsm.ExecuteDatabaseOperation(upsertSQL, []any{crawlID, st, c.total, c.valid, c.notChannel, c.invalid, c.alreadyDiscovered}); err != nil {
-			log.Warn().Err(err).Str("source_type", st).Msg("validator-db: failed to upsert source_type_stats")
+			log.Warn().Str("log_tag", "val_db").Err(err).Str("source_type", st).Msg("Failed to upsert source_type_stats")
 		}
 	}
 
@@ -4400,8 +4400,8 @@ func (dsm *DaprStateManager) RecoverStaleEdgeClaims(staleThreshold time.Duration
 		if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
 			return 0, fmt.Errorf("validator-db: failed to recover stale edge claims: %w", err)
 		}
-		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
-			Msg("validator-db: recovered stale edge claims")
+		log.Info().Str("log_tag", "val_db").Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("Recovered stale edge claims")
 	}
 	return staleCount, nil
 }
@@ -4434,8 +4434,8 @@ func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duratio
 		if v, ok := row[2].(float64); ok {
 			attempts = int(v)
 		}
-		log.Error().Str("batch_id", batchID).Str("source_channel", srcChan).Int("attempt_count", attempts).
-			Msg("validator-db: poison batch detected — stuck in processing after max attempts, manual intervention required")
+		log.Error().Str("log_tag", "val_db").Str("batch_id", batchID).Str("source_channel", srcChan).Int("attempt_count", attempts).
+			Msg("Poison batch detected — stuck in processing after max attempts, manual intervention required")
 	}
 
 	// Recover stale batches that haven't yet reached the attempt limit.
@@ -4460,8 +4460,8 @@ func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duratio
 		if err := dsm.ExecuteDatabaseOperation(recoverSQL, nil); err != nil {
 			return 0, fmt.Errorf("validator-db: failed to recover stale batch claims: %w", err)
 		}
-		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
-			Msg("validator-db: recovered stale batch claims")
+		log.Info().Str("log_tag", "val_db").Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("Recovered stale batch claims")
 	}
 	return staleCount, nil
 }
@@ -4496,8 +4496,8 @@ func (dsm *DaprStateManager) RecoverStaleValidatingEdges(staleThreshold time.Dur
 		if err := dsm.ExecuteDatabaseOperation(recoverSQL, nil); err != nil {
 			return 0, fmt.Errorf("validator-db: failed to recover stale validating edges: %w", err)
 		}
-		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
-			Msg("validator-db: recovered stale validating edges")
+		log.Info().Str("log_tag", "val_db").Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("Recovered stale validating edges")
 	}
 	return staleCount, nil
 }
@@ -4523,7 +4523,7 @@ func (dsm *DaprStateManager) RecoverOrphanEdges() (int, error) {
 		if err := dsm.ExecuteDatabaseOperation(deleteSQL, nil); err != nil {
 			return 0, fmt.Errorf("validator-db: failed to delete orphan edges: %w", err)
 		}
-		log.Info().Int("deleted", orphanCount).Msg("validator-db: deleted orphan edges from completed batches")
+		log.Info().Str("log_tag", "val_db").Int("deleted", orphanCount).Msg("Deleted orphan edges from completed batches")
 	}
 	return orphanCount, nil
 }

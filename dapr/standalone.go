@@ -340,46 +340,46 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	// Validator-only mode: run the validation loop and exit.
 	if crawlCfg.ValidateOnly {
-		log.Info().Msg("validator-mode: starting validation-only loop")
+		log.Info().Str("log_tag", "val_mode").Msg("Starting validation-only loop")
 		// Load shared caches used by the validator (same order as random-walk init).
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Err(seedErr).Msg("validator-mode: failed to load seed channels (continuing)")
+			log.Warn().Str("log_tag", "val_mode").Err(seedErr).Msg("Failed to load seed channels (continuing)")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
-			log.Warn().Err(invalidErr).Msg("validator-mode: failed to load invalid channels (continuing)")
+			log.Warn().Str("log_tag", "val_mode").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")
 		}
 		if discErr := sm.InitializeDiscoveredChannels(); discErr != nil {
-			log.Fatal().Err(discErr).Msg("validator-mode: failed to initialize discovered channels")
+			log.Fatal().Str("log_tag", "val_mode").Err(discErr).Msg("Failed to initialize discovered channels")
 		}
 		// Recover edges/batches stuck in intermediate states from prior crashes.
 		const staleThreshold = 10 * time.Minute
 		if dsm, ok := sm.(*state.DaprStateManager); ok {
 			if n, recErr := dsm.RecoverStaleEdgeClaims(staleThreshold); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale edge claims")
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover stale edge claims")
 			} else if n > 0 {
-				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale edge claims")
+				log.Info().Str("log_tag", "val_mode").Int("recovered", n).Msg("Recovered stale edge claims")
 			}
 			if n, recErr := sm.RecoverStaleBatchClaims(staleThreshold); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale batch claims")
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover stale batch claims")
 			} else if n > 0 {
-				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale batch claims")
+				log.Info().Str("log_tag", "val_mode").Int("recovered", n).Msg("Recovered stale batch claims")
 			}
 			if n, recErr := sm.RecoverStaleValidatingEdges(staleThreshold); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale validating edges")
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover stale validating edges")
 			} else if n > 0 {
-				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale validating edges")
+				log.Info().Str("log_tag", "val_mode").Int("recovered", n).Msg("Recovered stale validating edges")
 			}
 			if n, recErr := dsm.RecoverOrphanEdges(); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-mode: failed to recover orphan edges")
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover orphan edges")
 			} else if n > 0 {
-				log.Info().Int("deleted", n).Msg("validator-mode: recovered orphan edges")
+				log.Info().Str("log_tag", "val_mode").Int("deleted", n).Msg("Recovered orphan edges")
 			}
 		}
 		if err := crawl.RunValidationLoop(context.Background(), sm, crawlCfg); err != nil {
-			log.Error().Err(err).Msg("validator-mode: validation loop exited with error")
+			log.Error().Str("log_tag", "val_mode").Err(err).Msg("Validation loop exited with error")
 		}
 		if closeErr := sm.Close(); closeErr != nil {
-			log.Error().Err(closeErr).Msg("validator-mode: failed to close state manager")
+			log.Error().Str("log_tag", "val_mode").Err(closeErr).Msg("Failed to close state manager")
 		}
 		return
 	}
@@ -403,25 +403,25 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		// Initialize with an empty seed list so the state manager sets up its DB
 		// binding without creating a layer-map entry for the seed URLs.
 		if err = sm.Initialize([]string{}); err != nil {
-			log.Error().Err(err).Msg("random-walk-init: failed to initialize state manager")
+			log.Error().Str("log_tag", "rw_init").Err(err).Msg("Failed to initialize state manager")
 			return
 		}
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
+			log.Warn().Str("log_tag", "rw_init").Err(seedErr).Msg("Failed to load seed channels (continuing)")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
-			log.Warn().Err(invalidErr).Msg("random-walk-init: failed to load invalid channels (continuing)")
+			log.Warn().Str("log_tag", "rw_init").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")
 		}
 		if err = sm.InitializeDiscoveredChannels(); err != nil {
-			log.Fatal().Err(err).Msg("random-walk-init: failed to pull discovered channels")
+			log.Fatal().Str("log_tag", "rw_init").Err(err).Msg("Failed to pull discovered channels")
 		}
 
 		if err := seedPageBufferIfNeeded(sm, crawlCfg, stringList); err != nil {
-			log.Fatal().Err(err).Msg("random-walk-init: failed to seed page buffer")
+			log.Fatal().Str("log_tag", "rw_init").Err(err).Msg("Failed to seed page buffer")
 		}
 
 		if err := RunRandomWalkLayerless(sm, crawlCfg); err != nil {
-			log.Error().Err(err).Msg("random-walk-layerless: crawl aborted")
+			log.Error().Str("log_tag", "rw_layerless").Err(err).Msg("Crawl aborted")
 		}
 	} else {
 		// All other modes (snowball, channel, youtube-channel, etc.)
@@ -843,7 +843,7 @@ var layerlessPollInterval = 5 * time.Second
 func seedPageBufferIfNeeded(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, seedURLs []string) error {
 	existingPages, _ := sm.GetPagesFromPageBuffer(1)
 	if len(existingPages) > 0 {
-		log.Info().Int("count", len(existingPages)).Msg("random-walk-init: resuming from existing page buffer")
+		log.Info().Str("log_tag", "rw_init").Int("count", len(existingPages)).Msg("Resuming from existing page buffer")
 		return nil
 	}
 
@@ -852,18 +852,18 @@ func seedPageBufferIfNeeded(sm state.StateManagementInterface, crawlCfg common.C
 	if crawlCfg.TandemCrawl {
 		pendingBatches, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
 		if countErr != nil {
-			log.Warn().Err(countErr).Msg("random-walk-init: could not check incomplete batches")
+			log.Warn().Str("log_tag", "rw_init").Err(countErr).Msg("Could not check incomplete batches")
 		}
 		if countErr == nil && pendingBatches > 0 {
-			log.Info().Int("incomplete_batches", pendingBatches).
-				Msg("random-walk-init: page buffer empty but pending edges exist, resuming without re-seeding")
+			log.Info().Str("log_tag", "rw_init").Int("incomplete_batches", pendingBatches).
+				Msg("Page buffer empty but pending edges exist, resuming without re-seeding")
 			return nil
 		}
 	}
 
 	// Fresh start — seed from CLI URLs or discovered channels.
 	if len(seedURLs) > 0 {
-		log.Info().Int("count", len(seedURLs)).Msg("random-walk-init: seeding page buffer from URL list")
+		log.Info().Str("log_tag", "rw_init").Int("count", len(seedURLs)).Msg("Seeding page buffer from URL list")
 		for _, url := range seedURLs {
 			page := &state.Page{
 				ID:         uuid.New().String(),
@@ -874,7 +874,7 @@ func seedPageBufferIfNeeded(sm state.StateManagementInterface, crawlCfg common.C
 				SequenceID: uuid.New().String(),
 			}
 			if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
-				log.Error().Err(bufErr).Str("url", url).Msg("random-walk-init: failed to seed URL into page buffer")
+				log.Error().Str("log_tag", "rw_init").Err(bufErr).Str("url", url).Msg("Failed to seed URL into page buffer")
 			}
 		}
 		return nil
@@ -916,9 +916,9 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			case <-ticker.C:
 				recovered, recErr := sm.RecoverStalePageClaims(30 * time.Minute)
 				if recErr != nil {
-					log.Error().Err(recErr).Msg("random-walk-layerless: failed to recover stale page claims")
+					log.Error().Str("log_tag", "rw_layerless").Err(recErr).Msg("Failed to recover stale page claims")
 				} else if recovered > 0 {
-					log.Info().Int("recovered", recovered).Msg("random-walk-layerless: recovered stale page claims")
+					log.Info().Str("log_tag", "rw_layerless").Int("recovered", recovered).Msg("Recovered stale page claims")
 				}
 			}
 		}
@@ -958,17 +958,17 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 					Int("pool_max", poolStats["maxSize"]).
 					Int("pending_batches", pendingBatches).
 					Dur("elapsed", time.Since(crawlStart)).
-					Msg("random-walk-stats: periodic")
+					Msg("Periodic stats")
 			}
 		}
 	}()
 
 	for !shouldStop.Load() {
 		if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
-			log.Info().
+			log.Info().Str("log_tag", "rw_layerless").
 				Dur("elapsed", time.Since(crawlStart)).
 				Dur("max_crawl_duration", crawlCfg.MaxCrawlDuration).
-				Msg("random-walk-layerless: max crawl duration reached, stopping")
+				Msg("Max crawl duration reached, stopping")
 			break
 		}
 
@@ -984,7 +984,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 
 		pages, err := sm.ClaimPages(available)
 		if err != nil {
-			log.Error().Err(err).Msg("random-walk-layerless: failed to claim pages from page buffer")
+			log.Error().Str("log_tag", "rw_layerless").Err(err).Msg("Failed to claim pages from page buffer")
 			time.Sleep(layerlessPollInterval)
 			continue
 		}
@@ -996,11 +996,11 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 				if inFlightCount.Load() == 0 {
 					pending, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
 					if countErr != nil {
-						log.Warn().Err(countErr).Msg("random-walk-layerless: tandem: could not check incomplete batches")
+						log.Warn().Str("log_tag", "rw_layerless").Err(countErr).Msg("Tandem: could not check incomplete batches")
 						validatorWaitSince = time.Time{} // reset on error — don't time out on DB errors
 					} else if pending == 0 {
-						log.Info().Str("crawl_id", crawlCfg.CrawlID).
-							Msg("random-walk-layerless: tandem: buffer empty and no pending batches, crawl complete")
+						log.Info().Str("log_tag", "rw_layerless").Str("crawl_id", crawlCfg.CrawlID).
+							Msg("Tandem: buffer empty and no pending batches, crawl complete")
 						break
 					} else {
 						// Crawler is fully blocked: no pages, no in-flight workers, validator has outstanding batches.
@@ -1013,16 +1013,16 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 									waited.Round(time.Second), pending)
 							}
 						}
-						log.Info().Int("incomplete_batches", pending).
+						log.Info().Str("log_tag", "rw_layerless").Int("incomplete_batches", pending).
 							Dur("waiting_for", time.Since(validatorWaitSince).Round(time.Second)).
-							Msg("random-walk-layerless: tandem: buffer empty, waiting for validator")
+							Msg("Tandem: buffer empty, waiting for validator")
 					}
 				} else {
 					// Workers still in-flight — not fully blocked yet, reset the timer.
 					validatorWaitSince = time.Time{}
 				}
 			} else {
-				log.Debug().Msg("random-walk-layerless: buffer empty, waiting")
+				log.Debug().Str("log_tag", "rw_layerless").Msg("Buffer empty, waiting")
 			}
 			time.Sleep(layerlessPollInterval)
 			continue
@@ -1058,8 +1058,8 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 							return
 						case <-ticker.C:
 							if err := sm.RefreshPageClaim(p.ID); err != nil {
-								log.Warn().Err(err).Str("page_id", p.ID).Str("url", p.URL).
-									Msg("random-walk-layerless: failed to refresh page claim heartbeat")
+								log.Warn().Str("log_tag", "rw_layerless").Err(err).Str("page_id", p.ID).Str("url", p.URL).
+									Msg("Failed to refresh page claim heartbeat")
 							}
 						}
 					}
@@ -1068,38 +1068,38 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 				_, procErr := crawl.RunForChannelWithPool(ctx, &p, crawlCfg.StorageRoot, sm, crawlCfg)
 				if errors.Is(procErr, crawl.ErrWalkbackExhausted) {
 					// Unclaim so another pod (or this pod on restart) can retry.
-					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: walkback exhausted, unclaiming page")
+					log.Error().Str("log_tag", "rw_layerless").Err(procErr).Str("url", p.URL).Msg("Walkback exhausted, unclaiming page")
 					if ucErr := sm.UnclaimPages([]string{p.ID}); ucErr != nil {
-						log.Error().Err(ucErr).Str("url", p.URL).Msg("random-walk-layerless: failed to unclaim walkback-exhausted page")
+						log.Error().Str("log_tag", "rw_layerless").Err(ucErr).Str("url", p.URL).Msg("Failed to unclaim walkback-exhausted page")
 					}
 				} else if errors.Is(procErr, crawl.ErrFloodWaitRetire) {
 					// Connection was retired; unclaim so a remaining connection can pick it up.
-					log.Warn().Str("url", p.URL).Msg("random-walk-layerless: connection retired due to FLOOD_WAIT, unclaiming page")
+					log.Warn().Str("log_tag", "rw_layerless").Str("url", p.URL).Msg("Connection retired due to FLOOD_WAIT, unclaiming page")
 					if ucErr := sm.UnclaimPages([]string{p.ID}); ucErr != nil {
-						log.Error().Err(ucErr).Str("url", p.URL).Msg("random-walk-layerless: failed to unclaim flood-wait page")
+						log.Error().Str("log_tag", "rw_layerless").Err(ucErr).Str("url", p.URL).Msg("Failed to unclaim flood-wait page")
 					}
 					if crawl.ConnectionPoolTotalSize() == 0 {
-						log.Error().Msg("random-walk-layerless: all connections retired due to FLOOD_WAIT, aborting crawl")
+						log.Error().Str("log_tag", "rw_layerless").Msg("All connections retired due to FLOOD_WAIT, aborting crawl")
 						shouldStop.Store(true)
 					}
 				} else if errors.Is(procErr, crawl.ErrTDLib400) {
 					// Channel is permanently invalid — find a replacement edge, then
 					// remove the failed page from the buffer.
-					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: TDLib 400, finding replacement edge")
+					log.Error().Str("log_tag", "rw_layerless").Err(procErr).Str("url", p.URL).Msg("TDLib 400, finding replacement edge")
 					if replErr := crawl.Handle400Replacement(sm, &p, crawlCfg); replErr != nil {
-						log.Error().Err(replErr).Str("url", p.URL).Msg("random-walk-layerless: failed to find 400 replacement")
+						log.Error().Str("log_tag", "rw_layerless").Err(replErr).Str("url", p.URL).Msg("Failed to find 400 replacement")
 					}
 					if delErr := sm.DeletePageBufferPages([]string{p.ID}, []string{p.URL}); delErr != nil {
-						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete 400 page from buffer")
+						log.Error().Str("log_tag", "rw_layerless").Err(delErr).Str("url", p.URL).Msg("Failed to delete 400 page from buffer")
 					}
 				} else {
 					if procErr != nil {
-						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")
+						log.Error().Str("log_tag", "rw_layerless").Err(procErr).Str("url", p.URL).Msg("Error processing channel")
 					} else {
 						totalChannelsCrawled.Add(1)
 					}
 					if delErr := sm.DeletePageBufferPages([]string{p.ID}, []string{p.URL}); delErr != nil {
-						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete page from buffer")
+						log.Error().Str("log_tag", "rw_layerless").Err(delErr).Str("url", p.URL).Msg("Failed to delete page from buffer")
 					}
 				}
 
