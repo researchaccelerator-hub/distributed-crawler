@@ -96,6 +96,7 @@ type CrawlerConfig struct {
 	ValidatorRequestJitterMs int     // Max jitter in ms for validator requests (default: 200)
 	ValidatorClaimBatchSize  int     // Edges to claim per DB round-trip (default: 10)
 	ValidatorTimeout         time.Duration // Abort crawl if blocked waiting for validator for this long (0 = disabled)
+	ValidatorIdleTimeout    time.Duration // Shut down validator pod after this long with no pending edges (0 = disabled, e.g. "10m")
 
 	// SOCKS5 proxy — all empty by default (direct connection)
 	ProxyAddrs   []string // Ordered list of proxy addresses (ip:port), one per pod ordinal

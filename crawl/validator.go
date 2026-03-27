@@ -159,6 +159,13 @@ func runEdgeValidation(
 					Int("empty_polls", edgeStarvedPolls).
 					Msg("Validator starved — no pending edges to claim")
 			}
+			if cfg.ValidatorIdleTimeout > 0 && time.Since(edgeStarvedSince) >= cfg.ValidatorIdleTimeout {
+				log.Info().Str("log_tag", "val_edge").
+					Dur("idle_timeout", cfg.ValidatorIdleTimeout).
+					Dur("starved_for", time.Since(edgeStarvedSince).Round(time.Second)).
+					Msg("Validator idle timeout reached, shutting down")
+				return nil
+			}
 			sleepCtx(ctx, edgePollInterval)
 			continue
 		}

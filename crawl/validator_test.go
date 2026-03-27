@@ -460,6 +460,77 @@ func TestRunEdgeValidation_EntersBlockedState(t *testing.T) {
 	}
 }
 
+// TestRunEdgeValidation_IdleTimeout verifies that the validator exits cleanly
+// after ValidatorIdleTimeout with no pending edges.
+func TestRunEdgeValidation_IdleTimeout(t *testing.T) {
+	sm := new(MockStateManager)
+	cfg := common.CrawlerConfig{
+		CrawlID:              "crawl-1",
+		ValidatorIdleTimeout: 100 * time.Millisecond,
+	}
+
+	// Always return no edges
+	sm.On("ClaimPendingEdges", 10).Return(([]*state.PendingEdge)(nil), nil)
+
+	neverCalledFn := func(_ string, _ *http.Client) (telegramhelper.ChannelValidationResult, error) {
+		t.Fatal("validate should never be called when there are no edges")
+		return telegramhelper.ChannelValidationResult{}, nil
+	}
+
+	ctx := context.Background()
+	err := runEdgeValidation(ctx, sm, cfg, &http.Client{},
+		telegramhelper.NewValidatorRateLimiter(0, 0), 10, neverCalledFn)
+
+	assert.NoError(t, err) // should exit cleanly, not via context cancellation
+}
+
+// TestRunEdgeValidation_IdleTimeoutResetsOnActivity verifies that the idle
+// timeout resets when edges become available.
+func TestRunEdgeValidation_IdleTimeoutResetsOnActivity(t *testing.T) {
+	sm := new(MockStateManager)
+	cfg := common.CrawlerConfig{
+		CrawlID:                 "crawl-1",
+		ValidatorIdleTimeout:    150 * time.Millisecond,
+		ValidatorRequestRate:    6000,
+		ValidatorRequestJitterMs: 0,
+	}
+
+	validEdge := &state.PendingEdge{
+		PendingID:          1,
+		CrawlID:            "crawl-1",
+		DestinationChannel: "testchan",
+		ValidationStatus:   "validating",
+	}
+
+	sm.On("IsInvalidChannel", "testchan").Return(false)
+	sm.On("IsChannelDiscovered", "testchan").Return(false, nil)
+	sm.On("ClaimDiscoveredChannel", "testchan", "crawl-1").Return(true, nil)
+	sm.On("InsertSeedChannelIfNew", "testchan").Return(nil)
+	sm.On("UpdatePendingEdge", mock.Anything).Return(nil)
+
+	callCount := 0
+	// Return empty, empty, one edge, then empty forever
+	sm.On("ClaimPendingEdges", 10).Return(([]*state.PendingEdge)(nil), nil).Run(func(args mock.Arguments) {
+		callCount++
+	}).Once() // call 1: empty
+	sm.On("ClaimPendingEdges", 10).Return(([]*state.PendingEdge)(nil), nil).Once() // call 2: empty
+	sm.On("ClaimPendingEdges", 10).Return([]*state.PendingEdge{validEdge}, nil).Once() // call 3: edge
+	sm.On("ClaimPendingEdges", 10).Return(([]*state.PendingEdge)(nil), nil) // call 4+: empty
+
+	validFn := func(_ string, _ *http.Client) (telegramhelper.ChannelValidationResult, error) {
+		return telegramhelper.ChannelValidationResult{Status: "valid"}, nil
+	}
+
+	start := time.Now()
+	ctx := context.Background()
+	err := runEdgeValidation(ctx, sm, cfg, &http.Client{},
+		telegramhelper.NewValidatorRateLimiter(0, 0), 10, validFn)
+
+	assert.NoError(t, err)
+	// Should have taken longer than 150ms because the timer reset after the edge at call 3
+	assert.Greater(t, time.Since(start), 150*time.Millisecond)
+}
+
 // TestRunEdgeValidation_ProbeResumesValidation verifies that after entering
 // blocked state a successful probe clears the state and edges are processed again.
 func TestRunEdgeValidation_ProbeResumesValidation(t *testing.T) {

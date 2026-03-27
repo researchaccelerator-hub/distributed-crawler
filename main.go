@@ -39,7 +39,8 @@ var (
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
-	maxCrawlDuration  string   // Max wall-clock duration for random-walk crawl (e.g., "48h")
+	maxCrawlDuration      string // Max wall-clock duration for random-walk crawl (e.g., "48h")
+	validatorIdleTimeout  string // Shut down validator after idle period (e.g., "10m")
 	dateBetween       string   // Date range in format "YYYY-MM-DD,YYYY-MM-DD"
 	sampleSize        int      // Number of posts to randomly sample when using date-between
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
@@ -526,6 +527,17 @@ Examples:
 			log.Info().Dur("max_crawl_duration", d).Msg("Max crawl duration configured")
 		}
 
+		// Parse validator-idle-timeout if provided
+		validatorIdleTimeoutStr := viper.GetString("crawler.validatoridletimeout")
+		if validatorIdleTimeoutStr != "" {
+			d, err := time.ParseDuration(validatorIdleTimeoutStr)
+			if err != nil {
+				return fmt.Errorf("invalid validator-idle-timeout format, must be a Go duration string (e.g., '10m', '1h'): %v", err)
+			}
+			crawlerCfg.ValidatorIdleTimeout = d
+			log.Info().Dur("validator_idle_timeout", d).Msg("Validator idle timeout configured")
+		}
+
 		// Parse sample-size parameter if provided
 		sampleSizeValue := viper.GetInt("crawler.samplesize")
 		if sampleSizeValue > 0 {
@@ -835,6 +847,7 @@ func init() {
 	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ValidatorRequestRate, "validator-request-rate", 6, "HTTP validation calls per minute (default: 6)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorRequestJitterMs, "validator-request-jitter-ms", 200, "Max jitter in ms between validator HTTP requests (default: 200)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorClaimBatchSize, "validator-claim-batch-size", 10, "Number of pending edges to claim per DB round-trip (default: 10)")
+	rootCmd.PersistentFlags().StringVar(&validatorIdleTimeout, "validator-idle-timeout", "", "Shut down validator after this long with no pending edges (e.g. '10m', '1h')")
 
 	// SOCKS5 proxy flags
 	rootCmd.PersistentFlags().StringSliceVar(&crawlerCfg.ProxyAddrs, "proxy-addrs", []string{}, "Comma-separated SOCKS5 proxy addresses (ip:port), one per pod ordinal; empty = no proxy")
@@ -882,6 +895,7 @@ func init() {
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("crawler.timeago", rootCmd.PersistentFlags().Lookup("time-ago"))
 	viper.BindPFlag("crawler.maxcrawlduration", rootCmd.PersistentFlags().Lookup("max-crawl-duration"))
+	viper.BindPFlag("crawler.validatoridletimeout", rootCmd.PersistentFlags().Lookup("validator-idle-timeout"))
 	viper.BindPFlag("crawler.datebetween", rootCmd.PersistentFlags().Lookup("date-between"))
 	viper.BindPFlag("crawler.samplesize", rootCmd.PersistentFlags().Lookup("sample-size"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))
