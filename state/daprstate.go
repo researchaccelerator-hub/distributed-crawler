@@ -4346,8 +4346,13 @@ func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (b
 }
 
 // IsChannelDiscovered checks whether a channel has been discovered by any crawl
-// in the crawler's history, without inserting.
+// in the crawler's history, without inserting.  Checks the in-memory
+// DiscoveredChannels set first (which includes seed channels loaded at startup)
+// before falling back to a DB query.
 func (dsm *DaprStateManager) IsChannelDiscovered(username string) (bool, error) {
+	if dsm.BaseStateManager.IsDiscoveredChannel(username) {
+		return true, nil
+	}
 	sqlQuery := `SELECT 1 FROM discovered_channels WHERE channel_username = $1 LIMIT 1;`
 	rows, err := dsm.queryDatabase(sqlQuery, username)
 	if err != nil {

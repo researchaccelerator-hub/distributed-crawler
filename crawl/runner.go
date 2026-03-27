@@ -1296,6 +1296,11 @@ func processAllMessagesWithProcessor(
 									continue
 								}
 
+								// Skip channels already known (seed channels are loaded into discovered set at startup)
+								if sm.IsDiscoveredChannel(o) {
+									continue
+								}
+
 								// Dedup: skip if already queued in this batch
 								if _, seen := seenInBatch[o]; seen {
 									log.Debug().Str("log_tag", "rw_tandem").Str("channel", o).Msg("Duplicate outlink in batch, skipping")

@@ -504,6 +504,41 @@ func TestIsChannelDiscovered_SQLInjectionSafe(t *testing.T) {
 	assert.NotContains(t, mc.bindingCalls[0].Metadata["sql"], "it's_a_test")
 }
 
+func TestIsChannelDiscovered_InMemoryHit(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			t.Fatal("DB should not be called when channel is in memory")
+			return nil, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	// Simulate seed channel loaded into in-memory discovered set
+	_ = dsm.BaseStateManager.AddDiscoveredChannel("seed_chan")
+
+	found, err := dsm.IsChannelDiscovered("seed_chan")
+	require.NoError(t, err)
+	assert.True(t, found)
+}
+
+func TestIsChannelDiscovered_InMemoryMiss_FallsBackToDB(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(1)}})}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	found, err := dsm.IsChannelDiscovered("db_only_chan")
+	require.NoError(t, err)
+	assert.True(t, found)
+
+	// Verify DB was actually called
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	assert.Len(t, mc.bindingCalls, 1)
+}
+
 // ---------------------------------------------------------------------------
 // CountIncompleteBatches
 // ---------------------------------------------------------------------------

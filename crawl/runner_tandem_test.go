@@ -64,6 +64,7 @@ func TestTandemMode_WithEdges(t *testing.T) {
 	sm.On("UpdateMessage", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	sm.On("UpdatePage", mock.Anything).Return(nil)
 	sm.On("IsInvalidChannel", mock.Anything).Return(false)
+	sm.On("IsDiscoveredChannel", mock.Anything).Return(false)
 	sm.On("CreatePendingBatch", mock.MatchedBy(func(b *state.PendingEdgeBatch) bool {
 		return b.CrawlID == "crawl-1" && b.SourceChannel == "source_channel" && b.Status == "open"
 	})).Return(nil).Once()
