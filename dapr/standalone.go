@@ -741,16 +741,17 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 	if crawlexecid == "" {
 		// Create a temporary state manager to check for incomplete crawls
 		cfg = state.Config{
-			StorageRoot:     crawlCfg.StorageRoot,
-			CrawlID:         crawlCfg.CrawlID,
-			CrawlLabel:      crawlCfg.CrawlLabel,
-			Platform:        crawlCfg.Platform, // Pass the platform information
-			SamplingMethod:  crawlCfg.SamplingMethod,
-			SeedSize:        crawlCfg.SeedSize,
-			CombineFiles:    crawlCfg.CombineFiles,
-			CombineTempDir:  crawlCfg.CombineTempDir,
-			CombineWatchDir: crawlCfg.CombineWatchDir,
-			PodName:         crawlCfg.PodName,
+			StorageRoot:      crawlCfg.StorageRoot,
+			CrawlID:          crawlCfg.CrawlID,
+			CrawlLabel:       crawlCfg.CrawlLabel,
+			Platform:         crawlCfg.Platform, // Pass the platform information
+			SamplingMethod:   crawlCfg.SamplingMethod,
+			SeedSize:         crawlCfg.SeedSize,
+			CombineFiles:     crawlCfg.CombineFiles,
+			CombineTempDir:   crawlCfg.CombineTempDir,
+			CombineWatchDir:  crawlCfg.CombineWatchDir,
+			PodName:          crawlCfg.PodName,
+			KeepPendingEdges: crawlCfg.KeepPendingEdges,
 		}
 	} else {
 		cfg = state.Config{
@@ -765,6 +766,7 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CombineTempDir:   crawlCfg.CombineTempDir,
 			CombineWatchDir:  crawlCfg.CombineWatchDir,
 			PodName:          crawlCfg.PodName,
+			KeepPendingEdges: crawlCfg.KeepPendingEdges,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
 				MaxPages: crawlCfg.MaxPages,

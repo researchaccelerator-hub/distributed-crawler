@@ -618,6 +618,31 @@ func TestClaimPendingEdges_DBError(t *testing.T) {
 	assert.Nil(t, edges)
 }
 
+// KeepPendingEdges skips the DELETE so rows are retained for analysis.
+func TestFlushBatchStats_KeepPendingEdges_SkipsDelete(t *testing.T) {
+	mc := &mockDaprClient{}
+	cfg := defaultRWConfig()
+	cfg.KeepPendingEdges = true
+	dsm := newTestDSMRW(mc, cfg)
+
+	edges := []*PendingEdge{
+		{SourceType: "mention", ValidationStatus: "valid"},
+		{SourceType: "mention", ValidationStatus: "duplicate"},
+	}
+
+	err := dsm.FlushBatchStats("batch-1", "crawl-1", edges)
+	require.NoError(t, err)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	// 1 upsert only — DELETE must not have been issued
+	require.Len(t, mc.bindingCalls, 1)
+	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "ON CONFLICT")
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "DELETE FROM pending_edges")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TC-2: FlushBatchStats partial failure
 // ---------------------------------------------------------------------------
@@ -988,4 +1013,35 @@ func TestRecoverOrphanEdges_CountQueryError_Propagated(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db connection lost")
 	assert.Equal(t, 0, n)
+}
+
+// KeepPendingEdges causes RecoverOrphanEdges to skip the DELETE even when
+// orphan rows exist.
+func TestRecoverOrphanEdges_KeepPendingEdges_SkipsDelete(t *testing.T) {
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			if strings.Contains(in.Metadata["sql"], "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(5)}})}, nil
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.KeepPendingEdges = true
+	dsm := newTestDSMRW(mc, cfg)
+
+	n, err := dsm.RecoverOrphanEdges()
+	require.NoError(t, err)
+	// Count is still returned so the caller can log it
+	assert.Equal(t, 5, n)
+	// Only the COUNT query — no DELETE
+	assert.Equal(t, 1, callCount)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "DELETE FROM pending_edges")
+	}
 }

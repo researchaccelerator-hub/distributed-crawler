@@ -4291,10 +4291,12 @@ func (dsm *DaprStateManager) FlushBatchStats(batchID, crawlID string, edges []*P
 		}
 	}
 
-	// Delete pending_edges for this batch
-	deleteSQL := `DELETE FROM pending_edges WHERE batch_id = $1;`
-	if err := dsm.ExecuteDatabaseOperation(deleteSQL, []any{batchID}); err != nil {
-		return fmt.Errorf("validator-db: failed to delete pending edges for batch %s: %w", batchID, err)
+	// Delete pending_edges for this batch (skipped in debug mode)
+	if !dsm.BaseStateManager.config.KeepPendingEdges {
+		deleteSQL := `DELETE FROM pending_edges WHERE batch_id = $1;`
+		if err := dsm.ExecuteDatabaseOperation(deleteSQL, []any{batchID}); err != nil {
+			return fmt.Errorf("validator-db: failed to delete pending edges for batch %s: %w", batchID, err)
+		}
 	}
 	return nil
 }
@@ -4532,11 +4534,15 @@ func (dsm *DaprStateManager) RecoverOrphanEdges() (int, error) {
 		}
 	}
 	if orphanCount > 0 {
-		deleteSQL := `DELETE FROM pending_edges WHERE batch_id IN (SELECT batch_id FROM pending_edge_batches WHERE status = 'completed');`
-		if err := dsm.ExecuteDatabaseOperation(deleteSQL, nil); err != nil {
-			return 0, fmt.Errorf("validator-db: failed to delete orphan edges: %w", err)
+		if dsm.BaseStateManager.config.KeepPendingEdges {
+			log.Info().Str("log_tag", "val_db").Int("count", orphanCount).Msg("Skipping orphan edge deletion (keep-pending-edges mode)")
+		} else {
+			deleteSQL := `DELETE FROM pending_edges WHERE batch_id IN (SELECT batch_id FROM pending_edge_batches WHERE status = 'completed');`
+			if err := dsm.ExecuteDatabaseOperation(deleteSQL, nil); err != nil {
+				return 0, fmt.Errorf("validator-db: failed to delete orphan edges: %w", err)
+			}
+			log.Info().Str("log_tag", "val_db").Int("deleted", orphanCount).Msg("Deleted orphan edges from completed batches")
 		}
-		log.Info().Str("log_tag", "val_db").Int("deleted", orphanCount).Msg("Deleted orphan edges from completed batches")
 	}
 	return orphanCount, nil
 }

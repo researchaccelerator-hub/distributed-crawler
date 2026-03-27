@@ -92,6 +92,7 @@ type CrawlerConfig struct {
 	// Validator / tandem-crawl mode
 	TandemCrawl              bool    // Crawler writes to pending_edges; no SearchPublicChat
 	ValidateOnly             bool    // Pod runs RunValidationLoop; no crawl loop
+	KeepPendingEdges         bool    // Debug: skip DELETE of pending_edges rows after batch completion
 	ValidatorRequestRate     float64 // HTTP calls per minute for validator (default: 120)
 	ValidatorRequestJitterMs int     // Max jitter in ms for validator requests (default: 200)
 	ValidatorClaimBatchSize  int     // Edges to claim per DB round-trip (default: 10)

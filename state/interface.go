@@ -311,6 +311,10 @@ type Config struct {
 	// PodName identifies this pod in a multi-pod deployment (from POD_NAME env var).
 	// Used as the claimed_by value when claiming pages from the shared page_buffer.
 	PodName string
+
+	// KeepPendingEdges skips the DELETE of pending_edges rows after batch completion.
+	// Enables post-hoc analysis of duplicate/invalid edges. Debug use only.
+	KeepPendingEdges bool
 }
 
 // AzureConfig contains Azure Blob Storage-specific configuration options
