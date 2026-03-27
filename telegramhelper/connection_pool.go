@@ -3,15 +3,40 @@ package telegramhelper
 import (
 	"context"
 	"fmt"
-	"github.com/researchaccelerator-hub/telegram-scraper/common"
-	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
-	"github.com/rs/zerolog/log"
 	"hash/fnv"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
+	"github.com/rs/zerolog/log"
 )
+
+// logConnectionIdentity calls GetMe on the client and logs the account identity.
+// It recovers from panics (e.g. testify mock unexpected calls) so it never crashes.
+func logConnectionIdentity(client crawler.TDLibClient, connID string, extra map[string]string, label string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Warn().Str("connectionID", connID).Interface("panic", r).Msg("Recovered from panic in GetMe identity check")
+		}
+	}()
+	me, err := client.GetMe()
+	if err != nil || me == nil {
+		log.Warn().Err(err).Str("connectionID", connID).Msgf("Failed to get account identity for %s", label)
+		return
+	}
+	evt := log.Info().
+		Str("connectionID", connID).
+		Int64("user_id", int64(me.Id)).
+		Str("first_name", me.FirstName).
+		Str("last_name", me.LastName)
+	for k, v := range extra {
+		evt = evt.Str(k, v)
+	}
+	evt.Msg(label)
+}
 
 // ConnectionPool manages a pool of Telegram client connections to enable
 // efficient concurrent processing of multiple Telegram channels.
@@ -146,18 +171,7 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 		// Store the mapping
 		p.connDirMap[connID] = dirName
 
-		// Log which Telegram account this connection authenticated as.
-		if me, meErr := client.GetMe(); meErr == nil {
-			log.Info().
-				Str("connectionID", connID).
-				Str("databaseURL", databaseURLs[i]).
-				Int64("user_id", int64(me.Id)).
-				Str("first_name", me.FirstName).
-				Str("last_name", me.LastName).
-				Msg("Connection identity")
-		} else {
-			log.Warn().Err(meErr).Str("connectionID", connID).Msg("Failed to get account identity for connection")
-		}
+		logConnectionIdentity(client, connID, map[string]string{"databaseURL": databaseURLs[i]}, "Connection identity")
 
 		// Add to available connections (wrapped with per-connection rate limiter)
 		p.availableConns[connID] = NewRateLimitedTDLibClient(client, p.rateLimitConfig)
@@ -245,17 +259,7 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 		p.connectionCount++
 		connID := dirName
 
-		// Log which Telegram account this connection authenticated as.
-		if me, meErr := client.GetMe(); meErr == nil {
-			log.Info().
-				Str("connectionID", connID).
-				Int64("user_id", int64(me.Id)).
-				Str("first_name", me.FirstName).
-				Str("last_name", me.LastName).
-				Msg("New connection identity")
-		} else {
-			log.Warn().Err(meErr).Str("connectionID", connID).Msg("Failed to get account identity for new connection")
-		}
+		logConnectionIdentity(client, connID, nil, "New connection identity")
 
 		// Store the mapping (wrapped with per-connection rate limiter)
 		wrapped := NewRateLimitedTDLibClient(client, p.rateLimitConfig)
@@ -435,17 +439,7 @@ func (p *ConnectionPool) HandleConnectionError(ctx context.Context, connID strin
 		return nil, "", fmt.Errorf("failed to create fresh connection after error: %w", err)
 	}
 
-	// Log which Telegram account this fresh connection authenticated as.
-	if me, meErr := newClient.GetMe(); meErr == nil {
-		log.Info().
-			Str("connectionID", connID).
-			Int64("user_id", int64(me.Id)).
-			Str("first_name", me.FirstName).
-			Str("last_name", me.LastName).
-			Msg("Fresh connection identity")
-	} else {
-		log.Warn().Err(meErr).Str("connectionID", connID).Msg("Failed to get account identity for fresh connection")
-	}
+	logConnectionIdentity(newClient, connID, nil, "Fresh connection identity")
 
 	// Put the new connection directly back into in-use (wrapped with per-connection rate limiter)
 	wrapped := NewRateLimitedTDLibClient(newClient, p.rateLimitConfig)

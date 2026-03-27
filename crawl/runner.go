@@ -532,6 +532,10 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 
 		p.ConnectionID = connID
 		log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Started connection")
+		if rl, ok := tdlibClient.(*telegramhelper.RateLimitedTDLibClient); ok {
+			rl.Stats.Reset()
+			defer rl.Stats.Log(p.URL)
+		}
 		pages, procErr := runForChannelFn(tdlibClient, p, storagePrefix, sm, cfg)
 		if errors.Is(procErr, ErrFloodWaitRetire) {
 			retire = true
@@ -1159,6 +1163,7 @@ func processAllMessagesWithProcessor(
 	var channelWalkback bool
 	var channelNextURL string
 	var newChannelCount int
+	var invalidSkipCount int
 
 	// Process messages
 	for _, message := range messages {
@@ -1277,7 +1282,7 @@ func processAllMessagesWithProcessor(
 						} else {
 							// check if channel already found as invalid and skip
 							if sm.IsInvalidChannel(o) {
-								log.Info().Str("log_tag", "rw_filter").Str("channel", o).Msg("Channel already identified as invalid. Skipping")
+								invalidSkipCount++
 								continue
 							}
 
@@ -1442,6 +1447,7 @@ func processAllMessagesWithProcessor(
 		Int("messages_deleted", deleted).
 		Int("messages_failed", failed).
 		Int("discovered_channels", discoveredCount).
+		Int("invalid_skipped", invalidSkipCount).
 		Str("page_url", owner.URL).
 		Str("page_id", owner.ID).
 		Msg("Message processing summary")

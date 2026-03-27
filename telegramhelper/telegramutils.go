@@ -869,7 +869,10 @@ func DetectCacheOrServer(start time.Time, endpoint string) bool {
 		cacheHit = false
 	}
 
-	if cacheHit {
+	if duration >= 2*time.Second {
+		log.Warn().Str("api_endpoint", endpoint).Dur("request_time", duration).
+			Msg("Telegram API call took >2s — likely absorbed FLOOD_WAIT")
+	} else if cacheHit {
 		log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
 	} else {
 		log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")

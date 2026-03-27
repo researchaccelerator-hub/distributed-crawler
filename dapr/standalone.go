@@ -927,6 +927,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 
 	// Periodic stats emitter for Grafana dashboard.
 	var totalChannelsCrawled atomic.Int64
+	podName, _ := os.Hostname()
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -950,16 +951,17 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 				log.Info().
 					Str("log_tag", "rw_stats").
 					Str("crawl_id", crawlCfg.CrawlID).
+					Str("pod", podName).
 					Int("pages_in_buffer", len(unclaimedPages)+int(inFlightCount.Load())).
 					Int("pages_unclaimed", len(unclaimedPages)).
 					Int("in_flight", int(inFlightCount.Load())).
-					Int64("total_channels_crawled", totalChannelsCrawled.Load()).
+					Int64("channels_crawled_this_pod", totalChannelsCrawled.Load()).
 					Int("pool_active", poolStats["inUse"]).
 					Int("pool_available", poolStats["available"]).
 					Int("pool_max", poolStats["maxSize"]).
 					Int("pending_batches", pendingBatches).
 					Dur("elapsed", time.Since(crawlStart)).
-					Msg("Periodic stats")
+					Msg("Crawler periodic stats")
 			}
 		}
 	}()
