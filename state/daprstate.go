@@ -528,7 +528,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 
 	// In case it's a random-walk without seed urls
 	if len(pages) == 0 && dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-		log.Info().Msg("No seed urls provided for url. Creating layer from discovered channels")
+		log.Info().Msg("No seed URLs provided; random-walk seed will be drawn from the page buffer at crawl start")
 		return nil
 	}
 
@@ -3162,8 +3162,8 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		log.Error().Err(baseErr).Str("log_tag", "rw_edge").Msg("Failed to add edge records")
 		return baseErr
 	}
-	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Str("source_channel", edges[0].SourceChannel).
-		Str("log_tag", "rw_edge").Msg("Adding new edges")
+	log.Info().Int("forced_walkback_edges", len(edges)).Str("source_channel", edges[0].SourceChannel).
+		Str("log_tag", "rw_edge").Msg("Saving forced-walkback edge records")
 
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
