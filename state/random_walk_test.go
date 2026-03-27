@@ -117,6 +117,46 @@ func TestUpsertSeedChannelChatID_CallsDB(t *testing.T) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// InsertSeedChannelIfNew
+// ────────────────────────────────────────────────────────────────────────────
+
+func TestInsertSeedChannelIfNew_CallsDB(t *testing.T) {
+	mc := &mockDaprClient{}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	_ = dsm.InsertSeedChannelIfNew("newchan")
+
+	if len(mc.bindingCalls) == 0 {
+		t.Fatal("expected a DB binding call")
+	}
+	call := mc.bindingCalls[0]
+	if !strings.Contains(call.Metadata["sql"], "seed_channels") {
+		t.Fatalf("expected SQL to reference seed_channels, got: %s", call.Metadata["sql"])
+	}
+	if !strings.Contains(call.Metadata["sql"], "DO NOTHING") {
+		t.Fatalf("expected SQL to use DO NOTHING (not overwrite chat_id), got: %s", call.Metadata["sql"])
+	}
+}
+
+func TestInsertSeedChannelIfNew_DoesNotUpdateCache(t *testing.T) {
+	mc := &mockDaprClient{}
+	dsm := newTestDSMRW(mc, defaultRWConfig())
+
+	// Pre-populate cache with a real chat ID
+	dsm.chatIDCacheMu.Lock()
+	dsm.chatIDCache["existchan"] = 12345
+	dsm.chatIDCacheMu.Unlock()
+
+	_ = dsm.InsertSeedChannelIfNew("existchan")
+
+	// Cache should be untouched
+	id, ok := dsm.GetCachedChatID("existchan")
+	if !ok || id != 12345 {
+		t.Fatalf("InsertSeedChannelIfNew should not modify cache, got id=%d ok=%v", id, ok)
+	}
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // IsInvalidChannel / MarkChannelInvalid
 // ────────────────────────────────────────────────────────────────────────────
 

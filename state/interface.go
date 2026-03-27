@@ -83,6 +83,9 @@ type StateManagementInterface interface {
 	// UpsertSeedChannelChatID caches the TDLib chat ID for a username in both
 	// memory and the seed_channels DB table.
 	UpsertSeedChannelChatID(username string, chatID int64) error
+	// InsertSeedChannelIfNew inserts the username into seed_channels if it does not
+	// already exist, without touching chat_id or other columns on an existing row.
+	InsertSeedChannelIfNew(username string) error
 	// GetCachedChatID returns the cached TDLib chat ID for username, if known.
 	GetCachedChatID(username string) (int64, bool)
 	// IsSeedChannel reports whether username was loaded from seed_channels at startup.

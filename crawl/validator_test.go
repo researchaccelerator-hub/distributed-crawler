@@ -32,7 +32,7 @@ func TestValidateSingleEdge_Valid(t *testing.T) {
 	sm.On("IsInvalidChannel", "testchan").Return(false)
 	sm.On("IsChannelDiscovered", "testchan").Return(false, nil)
 	sm.On("ClaimDiscoveredChannel", "testchan", "crawl-1").Return(true, nil)
-	sm.On("UpsertSeedChannelChatID", "testchan", int64(0)).Return(nil)
+	sm.On("InsertSeedChannelIfNew", "testchan").Return(nil)
 
 	edge := &state.PendingEdge{
 		PendingID:          1,
@@ -52,7 +52,7 @@ func TestValidateSingleEdge_Valid(t *testing.T) {
 	assert.Equal(t, 1, update.PendingID)
 	assert.Equal(t, "valid", update.ValidationStatus)
 	sm.AssertCalled(t, "ClaimDiscoveredChannel", "testchan", "crawl-1")
-	sm.AssertCalled(t, "UpsertSeedChannelChatID", "testchan", int64(0))
+	sm.AssertCalled(t, "InsertSeedChannelIfNew", "testchan")
 }
 
 func TestValidateSingleEdge_TransientError(t *testing.T) {
@@ -496,7 +496,7 @@ func TestRunEdgeValidation_ProbeResumesValidation(t *testing.T) {
 	sm.On("IsInvalidChannel", "goodchan").Return(false)
 	sm.On("IsChannelDiscovered", "goodchan").Return(false, nil)
 	sm.On("ClaimDiscoveredChannel", "goodchan", "crawl-1").Return(true, nil)
-	sm.On("UpsertSeedChannelChatID", "goodchan", int64(0)).Return(nil)
+	sm.On("InsertSeedChannelIfNew", "goodchan").Return(nil)
 	sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
 		PendingID:        100,
 		ValidationStatus: "valid",

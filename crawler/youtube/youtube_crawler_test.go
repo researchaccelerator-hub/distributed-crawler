@@ -80,6 +80,7 @@ func (m *MockYouTubeStateManager) Close() error                                 
 // Used for random-walk sampling
 func (m *MockYouTubeStateManager) LoadSeedChannels() error                               { return nil }
 func (m *MockYouTubeStateManager) UpsertSeedChannelChatID(_ string, _ int64) error      { return nil }
+func (m *MockYouTubeStateManager) InsertSeedChannelIfNew(_ string) error                     { return nil }
 func (m *MockYouTubeStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
 func (m *MockYouTubeStateManager) IsSeedChannel(_ string) bool                          { return false }
 func (m *MockYouTubeStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }

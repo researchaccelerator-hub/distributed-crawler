@@ -35,6 +35,7 @@ func (n *noopStateManager) HasProcessedMedia(_ string) (bool, error)            
 func (n *noopStateManager) MarkMediaAsProcessed(_ string) error                           { return nil }
 func (n *noopStateManager) LoadSeedChannels() error                                       { return nil }
 func (n *noopStateManager) UpsertSeedChannelChatID(_ string, _ int64) error               { return nil }
+func (n *noopStateManager) InsertSeedChannelIfNew(_ string) error                              { return nil }
 func (n *noopStateManager) GetCachedChatID(_ string) (int64, bool)                        { return 0, false }
 func (n *noopStateManager) IsSeedChannel(_ string) bool                                   { return false }
 func (n *noopStateManager) InitializeDiscoveredChannels() error                           { return nil }

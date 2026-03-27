@@ -47,6 +47,7 @@ func (m *mockStateManager) HasProcessedMedia(_ string) (bool, error)            
 func (m *mockStateManager) MarkMediaAsProcessed(_ string) error                                { return nil }
 func (m *mockStateManager) LoadSeedChannels() error                                                { return nil }
 func (m *mockStateManager) UpsertSeedChannelChatID(_ string, _ int64) error                        { return nil }
+func (m *mockStateManager) InsertSeedChannelIfNew(_ string) error                                       { return nil }
 func (m *mockStateManager) GetCachedChatID(_ string) (int64, bool)                                 { return 0, false }
 func (m *mockStateManager) IsSeedChannel(_ string) bool                                            { return false }
 func (m *mockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)                      { return time.Time{}, nil }

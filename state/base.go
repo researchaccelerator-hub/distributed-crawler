@@ -94,6 +94,7 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 
 func (bsm *BaseStateManager) LoadSeedChannels() error                                { return nil }
 func (bsm *BaseStateManager) UpsertSeedChannelChatID(_ string, _ int64) error       { return nil }
+func (bsm *BaseStateManager) InsertSeedChannelIfNew(_ string) error                     { return nil }
 func (bsm *BaseStateManager) GetCachedChatID(_ string) (int64, bool)                { return 0, false }
 func (bsm *BaseStateManager) IsSeedChannel(_ string) bool                           { return false }
 func (bsm *BaseStateManager) GetChannelLastCrawled(_ string) (time.Time, error)     { return time.Time{}, nil }

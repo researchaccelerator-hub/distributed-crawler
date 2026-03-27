@@ -3400,6 +3400,14 @@ func (dsm *DaprStateManager) UpsertSeedChannelChatID(username string, chatID int
 	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
 }
 
+// InsertSeedChannelIfNew inserts the username into seed_channels if it does not
+// already exist.  Unlike UpsertSeedChannelChatID this never overwrites
+// chat_id or other columns on an existing row.
+func (dsm *DaprStateManager) InsertSeedChannelIfNew(username string) error {
+	sqlQuery := `INSERT INTO seed_channels (channel_username) VALUES ($1) ON CONFLICT (channel_username) DO NOTHING;`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username})
+}
+
 // GetCachedChatID returns the TDLib chat ID for username if it is present in
 // the in-memory cache, along with a boolean indicating whether a value was found.
 func (dsm *DaprStateManager) GetCachedChatID(username string) (int64, bool) {

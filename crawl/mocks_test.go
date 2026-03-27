@@ -378,6 +378,10 @@ func (m *MockStateManager) UpsertSeedChannelChatID(username string, chatID int64
 	args := m.Called(username, chatID)
 	return args.Error(0)
 }
+func (m *MockStateManager) InsertSeedChannelIfNew(username string) error {
+	args := m.Called(username)
+	return args.Error(0)
+}
 func (m *MockStateManager) GetCachedChatID(username string) (int64, bool) {
 	args := m.Called(username)
 	return args.Get(0).(int64), args.Bool(1)

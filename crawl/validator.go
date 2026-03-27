@@ -281,9 +281,9 @@ func validateSingleEdge(
 				ValidationStatus: "duplicate",
 			}, outcomeDefinitive
 		}
-		// Cache the channel so future lookups can skip SearchPublicChat
-		if upsertErr := sm.UpsertSeedChannelChatID(channel, 0); upsertErr != nil {
-			log.Warn().Str("log_tag", "val_edge").Err(upsertErr).Str("channel", channel).Msg("Failed to cache channel")
+		// Ensure channel exists in seed_channels for future crawl runs
+		if upsertErr := sm.InsertSeedChannelIfNew(channel); upsertErr != nil {
+			log.Warn().Str("log_tag", "val_edge").Err(upsertErr).Str("channel", channel).Msg("Failed to ensure seed channel")
 		}
 		return state.PendingEdgeUpdate{
 			PendingID:        edge.PendingID,
