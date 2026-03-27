@@ -900,9 +900,10 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 	sem := make(chan struct{}, maxWorkers)
 
 	var (
-		wg                 sync.WaitGroup
-		inFlightCount      atomic.Int32
-		validatorWaitSince time.Time // non-zero when crawler is fully blocked waiting for validator
+		wg                  sync.WaitGroup
+		inFlightCount       atomic.Int32
+		validatorWaitSince  time.Time // non-zero when crawler is fully blocked waiting for validator
+		crawlerStarvedPolls int
 	)
 
 	// Periodically recover pages claimed by crashed pods.
@@ -990,6 +991,7 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 		}
 
 		if len(pages) == 0 {
+			crawlerStarvedPolls++
 			if crawlCfg.TandemCrawl {
 				// Only declare completion when no workers are in-flight either —
 				// a running worker may be about to write the next page.
@@ -1014,8 +1016,9 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 							}
 						}
 						log.Info().Str("log_tag", "rw_layerless").Int("incomplete_batches", pending).
-							Dur("waiting_for", time.Since(validatorWaitSince).Round(time.Second)).
-							Msg("Tandem: buffer empty, waiting for validator")
+							Int("empty_polls", crawlerStarvedPolls).
+							Dur("starved_for", time.Since(validatorWaitSince).Round(time.Second)).
+							Msg("Crawler starved — waiting for validator")
 					}
 				} else {
 					// Workers still in-flight — not fully blocked yet, reset the timer.
@@ -1026,6 +1029,16 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 			}
 			time.Sleep(layerlessPollInterval)
 			continue
+		}
+
+		// Reset crawler starvation tracking when pages are available
+		if crawlerStarvedPolls > 0 {
+			log.Info().Str("log_tag", "rw_layerless").
+				Int("empty_polls", crawlerStarvedPolls).
+				Int("claimed", len(pages)).
+				Msg("Crawler starvation ended — pages available")
+			crawlerStarvedPolls = 0
+			validatorWaitSince = time.Time{}
 		}
 
 		validatorWaitSince = time.Time{} // pages found — no longer waiting

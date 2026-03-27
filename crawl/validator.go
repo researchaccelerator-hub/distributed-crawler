@@ -111,6 +111,8 @@ func runEdgeValidation(
 	validateFn ValidateFunc,
 ) error {
 	var blocked validatorBlockedState
+	var edgeStarvedSince time.Time
+	var edgeStarvedPolls int
 
 	for {
 		select {
@@ -147,9 +149,33 @@ func runEdgeValidation(
 		}
 
 		if len(edges) == 0 {
+			if edgeStarvedSince.IsZero() {
+				edgeStarvedSince = time.Now()
+			}
+			edgeStarvedPolls++
+			if edgeStarvedPolls%10 == 0 {
+				log.Info().Str("log_tag", "val_edge").
+					Dur("starved_for", time.Since(edgeStarvedSince).Round(time.Second)).
+					Int("empty_polls", edgeStarvedPolls).
+					Msg("Validator starved — no pending edges to claim")
+			}
 			sleepCtx(ctx, edgePollInterval)
 			continue
 		}
+
+		// Reset starvation tracking when edges are available
+		if edgeStarvedPolls > 0 {
+			log.Info().Str("log_tag", "val_edge").
+				Dur("starved_for", time.Since(edgeStarvedSince).Round(time.Second)).
+				Int("empty_polls", edgeStarvedPolls).
+				Int("claimed", len(edges)).
+				Msg("Validator starvation ended — edges available")
+			edgeStarvedSince = time.Time{}
+			edgeStarvedPolls = 0
+		}
+
+		batchStart := time.Now()
+		var httpCount, skippedInvalid, skippedDuplicate, validCount, invalidCount, notChannelCount, blockedCount, transientCount int
 
 		for _, edge := range edges {
 			select {
@@ -159,6 +185,31 @@ func runEdgeValidation(
 			}
 
 			update, kind := validateSingleEdge(ctx, sm, cfg, httpClient, rateLimiter, edge, validateFn)
+
+			// Track stats by outcome
+			switch update.ValidationStatus {
+			case "invalid":
+				if update.ValidationReason == "cached_invalid" {
+					skippedInvalid++
+				} else {
+					invalidCount++
+					httpCount++
+				}
+			case "duplicate":
+				skippedDuplicate++
+			case "valid":
+				validCount++
+				httpCount++
+			case "not_channel":
+				notChannelCount++
+				httpCount++
+			case "pending":
+				if kind == outcomeBlocked {
+					blockedCount++
+				} else {
+					transientCount++
+				}
+			}
 
 			switch kind {
 			case outcomeBlocked:
@@ -190,6 +241,20 @@ func runEdgeValidation(
 					Str("log_tag", "val_edge").Msg("Failed to update edge status")
 			}
 		}
+
+		batchDuration := time.Since(batchStart)
+		log.Info().Str("log_tag", "val_edge").
+			Int("claimed", len(edges)).
+			Int("http_validated", httpCount).
+			Int("skipped_invalid", skippedInvalid).
+			Int("skipped_duplicate", skippedDuplicate).
+			Int("valid", validCount).
+			Int("invalid", invalidCount).
+			Int("not_channel", notChannelCount).
+			Int("blocked", blockedCount).
+			Int("transient", transientCount).
+			Dur("batch_duration_ms", batchDuration).
+			Msg("Edge validation batch complete")
 	}
 }
 
@@ -329,6 +394,8 @@ func runWalkbackProcessor(
 ) error {
 	staleTicker := time.NewTicker(staleBatchRecoveryInterval)
 	defer staleTicker.Stop()
+	var batchStarvedSince time.Time
+	var batchStarvedPolls int
 
 	for {
 		select {
@@ -356,8 +423,27 @@ func runWalkbackProcessor(
 		}
 
 		if batch == nil {
+			if batchStarvedSince.IsZero() {
+				batchStarvedSince = time.Now()
+			}
+			batchStarvedPolls++
+			if batchStarvedPolls%10 == 0 {
+				log.Info().Str("log_tag", "val_walkback").
+					Dur("starved_for", time.Since(batchStarvedSince).Round(time.Second)).
+					Int("empty_polls", batchStarvedPolls).
+					Msg("Walkback starved — no closed batches to claim")
+			}
 			sleepCtx(ctx, walkbackPollInterval)
 			continue
+		}
+
+		if batchStarvedPolls > 0 {
+			log.Info().Str("log_tag", "val_walkback").
+				Dur("starved_for", time.Since(batchStarvedSince).Round(time.Second)).
+				Int("empty_polls", batchStarvedPolls).
+				Msg("Walkback starvation ended — batch available")
+			batchStarvedSince = time.Time{}
+			batchStarvedPolls = 0
 		}
 
 		log.Info().Str("log_tag", "val_walkback").Str("batch_id", batch.BatchID).Str("source_channel", batch.SourceChannel).
