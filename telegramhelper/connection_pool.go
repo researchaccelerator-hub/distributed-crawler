@@ -146,6 +146,19 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 		// Store the mapping
 		p.connDirMap[connID] = dirName
 
+		// Log which Telegram account this connection authenticated as.
+		if me, meErr := client.GetMe(); meErr == nil {
+			log.Info().
+				Str("connectionID", connID).
+				Str("databaseURL", databaseURLs[i]).
+				Int64("user_id", int64(me.Id)).
+				Str("first_name", me.FirstName).
+				Str("last_name", me.LastName).
+				Msg("Connection identity")
+		} else {
+			log.Warn().Err(meErr).Str("connectionID", connID).Msg("Failed to get account identity for connection")
+		}
+
 		// Add to available connections (wrapped with per-connection rate limiter)
 		p.availableConns[connID] = NewRateLimitedTDLibClient(client, p.rateLimitConfig)
 		log.Info().Str("connectionID", connID).Str("databaseURL", databaseURLs[i]).Msg("Added connection to pool")
@@ -231,6 +244,18 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 		// Use the directory name as the connection ID for perfect matching
 		p.connectionCount++
 		connID := dirName
+
+		// Log which Telegram account this connection authenticated as.
+		if me, meErr := client.GetMe(); meErr == nil {
+			log.Info().
+				Str("connectionID", connID).
+				Int64("user_id", int64(me.Id)).
+				Str("first_name", me.FirstName).
+				Str("last_name", me.LastName).
+				Msg("New connection identity")
+		} else {
+			log.Warn().Err(meErr).Str("connectionID", connID).Msg("Failed to get account identity for new connection")
+		}
 
 		// Store the mapping (wrapped with per-connection rate limiter)
 		wrapped := NewRateLimitedTDLibClient(client, p.rateLimitConfig)
@@ -408,6 +433,18 @@ func (p *ConnectionPool) HandleConnectionError(ctx context.Context, connID strin
 	if err != nil {
 		log.Error().Err(err).Str("connectionID", connID).Msg("Failed to create fresh connection after error")
 		return nil, "", fmt.Errorf("failed to create fresh connection after error: %w", err)
+	}
+
+	// Log which Telegram account this fresh connection authenticated as.
+	if me, meErr := newClient.GetMe(); meErr == nil {
+		log.Info().
+			Str("connectionID", connID).
+			Int64("user_id", int64(me.Id)).
+			Str("first_name", me.FirstName).
+			Str("last_name", me.LastName).
+			Msg("Fresh connection identity")
+	} else {
+		log.Warn().Err(meErr).Str("connectionID", connID).Msg("Failed to get account identity for fresh connection")
 	}
 
 	// Put the new connection directly back into in-use (wrapped with per-connection rate limiter)
