@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/state"
 	"github.com/researchaccelerator-hub/telegram-scraper/telegramhelper"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 )
@@ -36,6 +38,11 @@ const (
 	blockedThreshold = 5              // consecutive ErrBlocked results before entering blocked state
 	probeInterval    = 5 * time.Minute
 	probeChannel     = "telegram"     // well-known canary channel for probe requests
+
+	// Dynamic scaler defaults.
+	scalerPollInterval    = 30 * time.Second
+	edgesPerWorker        = 100 // queue-depth / edgesPerWorker = desired worker count
+	scaleUpCooldown       = 1 * time.Minute
 )
 
 // validatorBlockedState tracks consecutive access-blocked outcomes so the
@@ -46,26 +53,264 @@ type validatorBlockedState struct {
 	lastProbeAt      time.Time
 }
 
-// RunValidationLoop runs two goroutines:
-//   - Edge validator: claims and HTTP-validates pending edges
-//   - Walkback processor: claims closed batches and makes walkback decisions
-//
-// Both goroutines exit when the context is cancelled.
-func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, cfg common.CrawlerConfig) error {
-	if err := common.VerifyOutboundIP(cfg.ProxyAddr, cfg.ProxyUser, cfg.ProxyPass); err != nil {
-		return fmt.Errorf("validator: proxy IP verification failed: %w", err)
+// ---------------------------------------------------------------------------
+// sharedIdleTracker — all workers must be idle before the pod shuts down
+// ---------------------------------------------------------------------------
+
+// CrawlActiveFunc returns true if the crawl is still active (e.g. crawler
+// pods are processing channels). When set on sharedIdleTracker, the idle
+// timeout only fires if the crawl is no longer active.
+type CrawlActiveFunc func() bool
+
+// sharedIdleTracker coordinates idle-timeout across multiple edge-validation
+// workers. The pod only shuts down when ALL workers have been starved for
+// longer than the configured timeout AND the crawl is no longer active.
+type sharedIdleTracker struct {
+	mu              sync.Mutex
+	workerCount     int
+	idleWorkers     map[int]time.Time // workerID → when it went idle
+	timeout         time.Duration
+	crawlActiveFunc CrawlActiveFunc // nil = no crawl-active check
+}
+
+func newSharedIdleTracker(workerCount int, timeout time.Duration, crawlActiveFn CrawlActiveFunc) *sharedIdleTracker {
+	return &sharedIdleTracker{
+		workerCount:     workerCount,
+		idleWorkers:     make(map[int]time.Time, workerCount),
+		timeout:         timeout,
+		crawlActiveFunc: crawlActiveFn,
+	}
+}
+
+// MarkIdle records that a worker has no edges to claim.
+func (t *sharedIdleTracker) MarkIdle(workerID int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, exists := t.idleWorkers[workerID]; !exists {
+		t.idleWorkers[workerID] = time.Now()
+	}
+}
+
+// MarkActive records that a worker found edges.
+func (t *sharedIdleTracker) MarkActive(workerID int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.idleWorkers, workerID)
+}
+
+// SetWorkerCount updates the expected number of workers (called by the scaler).
+func (t *sharedIdleTracker) SetWorkerCount(n int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.workerCount = n
+}
+
+// ShouldShutdown returns true when ALL workers have been idle for longer than
+// the configured timeout AND the crawl is no longer active (no claimed pages,
+// no incomplete batches). If crawlActiveFunc is nil, only the idle timeout is
+// checked.
+func (t *sharedIdleTracker) ShouldShutdown() bool {
+	if t.timeout <= 0 {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.idleWorkers) < t.workerCount {
+		return false
+	}
+	for _, since := range t.idleWorkers {
+		if time.Since(since) < t.timeout {
+			return false
+		}
+	}
+	// All workers have been idle past the timeout. Check if the crawl is
+	// still active — if so, keep worker 0 alive to process edges when
+	// they eventually arrive.
+	if t.crawlActiveFunc != nil && t.crawlActiveFunc() {
+		return false
+	}
+	return true
+}
+
+// ---------------------------------------------------------------------------
+// workerHandle — manages a single edge-validation goroutine
+// ---------------------------------------------------------------------------
+
+type workerHandle struct {
+	id     int
+	proxy  string
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// ---------------------------------------------------------------------------
+// workerManager — dynamic start/stop of edge-validation workers
+// ---------------------------------------------------------------------------
+
+// workerManager owns the set of active edge-validation workers and exposes
+// methods to start and stop individual workers by proxy index. When a
+// common.ProxyLifecycleManager is set, the manager creates/destroys proxy
+// infrastructure (e.g. ACI containers) alongside workers.
+type workerManager struct {
+	mu        sync.Mutex
+	workers   map[int]*workerHandle // proxyIndex → handle
+	parentCtx context.Context
+	sm        state.StateManagementInterface
+	cfg       common.CrawlerConfig
+	idle      *sharedIdleTracker
+	g         *errgroup.Group // collects worker goroutine errors
+	proxyLM   common.ProxyLifecycleManager // nil when using static proxy list
+
+	// Shared config derived once at startup.
+	requestRate float64
+	jitterMs    int
+	claimSize   int
+	validateFn  ValidateFunc
+}
+
+func newWorkerManager(
+	ctx context.Context,
+	g *errgroup.Group,
+	sm state.StateManagementInterface,
+	cfg common.CrawlerConfig,
+	idle *sharedIdleTracker,
+	requestRate float64,
+	jitterMs int,
+	claimSize int,
+	validateFn ValidateFunc,
+	proxyLM common.ProxyLifecycleManager,
+) *workerManager {
+	return &workerManager{
+		workers:     make(map[int]*workerHandle),
+		parentCtx:   ctx,
+		sm:          sm,
+		cfg:         cfg,
+		idle:        idle,
+		g:           g,
+		requestRate: requestRate,
+		jitterMs:    jitterMs,
+		claimSize:   claimSize,
+		validateFn:  validateFn,
+		proxyLM:     proxyLM,
+	}
+}
+
+// StartWorker launches an edge-validation goroutine for the given proxy index.
+// No-op if a worker with that index is already running.
+func (wm *workerManager) StartWorker(proxyIndex int, proxyAddr string) error {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+
+	if _, exists := wm.workers[proxyIndex]; exists {
+		return nil // already running
 	}
 
 	httpClient, err := telegramhelper.NewValidatorHTTPClientWithProxy(
-		cfg.ProxyAddr, cfg.ProxyUser, cfg.ProxyPass, 10*time.Second,
+		proxyAddr, wm.cfg.ProxyUser, wm.cfg.ProxyPass, 10*time.Second,
 	)
 	if err != nil {
-		return fmt.Errorf("validator: failed to create HTTP client: %w", err)
+		return fmt.Errorf("worker %d: failed to create HTTP client: %w", proxyIndex, err)
+	}
+
+	rateLimiter := telegramhelper.NewValidatorRateLimiter(wm.requestRate, wm.jitterMs)
+
+	workerCtx, cancel := context.WithCancel(wm.parentCtx)
+	done := make(chan struct{})
+
+	handle := &workerHandle{
+		id:     proxyIndex,
+		proxy:  proxyAddr,
+		cancel: cancel,
+		done:   done,
+	}
+	wm.workers[proxyIndex] = handle
+
+	wm.g.Go(func() error {
+		defer close(done)
+		err := runEdgeValidation(workerCtx, wm.sm, wm.cfg, httpClient, rateLimiter,
+			wm.claimSize, wm.validateFn, proxyIndex, wm.idle)
+		// Worker exiting — remove from map so the scaler can restart it if needed.
+		wm.mu.Lock()
+		delete(wm.workers, proxyIndex)
+		wm.mu.Unlock()
+		return err
+	})
+
+	log.Info().Int("worker_id", proxyIndex).Str("proxy", proxyAddr).
+		Str("log_tag", "val_scaler").Msg("Started edge-validation worker")
+
+	return nil
+}
+
+// StopWorker cancels the worker's context, waits for it to exit, and
+// destroys the proxy infrastructure if a common.ProxyLifecycleManager is set.
+func (wm *workerManager) StopWorker(proxyIndex int) {
+	wm.mu.Lock()
+	handle, exists := wm.workers[proxyIndex]
+	if !exists {
+		wm.mu.Unlock()
+		return
+	}
+	// Remove from map before releasing the lock so no one else tries to stop it.
+	delete(wm.workers, proxyIndex)
+	wm.mu.Unlock()
+
+	handle.cancel()
+	<-handle.done
+
+	wm.idle.MarkActive(proxyIndex) // clean up idle entry
+
+	log.Info().Int("worker_id", proxyIndex).Str("proxy", handle.proxy).
+		Str("log_tag", "val_scaler").Msg("Stopped edge-validation worker")
+}
+
+// ActiveCount returns the number of running workers.
+func (wm *workerManager) ActiveCount() int {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+	return len(wm.workers)
+}
+
+// ---------------------------------------------------------------------------
+// RunValidationLoop — multi-proxy with dynamic scaling
+// ---------------------------------------------------------------------------
+
+// RunValidationLoop runs edge-validation workers (one per proxy) plus a
+// walkback processor and a dynamic scaler. When multiple proxy addresses are
+// provided, each gets its own HTTP client, rate limiter, and blocked-state
+// tracker. A dynamic scaler goroutine monitors the pending_edges queue depth
+// and starts/stops workers to match demand.
+//
+// When cfg.ProxyLifecycle is non-nil, the scaler creates/destroys proxy
+// infrastructure (e.g. ACI containers) alongside workers. On exit,
+// DestroyAllProxies is called for final cleanup.
+func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, cfg common.CrawlerConfig) error {
+	proxyLM := cfg.ProxyLifecycle
+	proxyAddrs := cfg.ProxyAddrs
+	if len(proxyAddrs) == 0 && cfg.ProxyAddr != "" {
+		proxyAddrs = []string{cfg.ProxyAddr}
+	}
+	if len(proxyAddrs) == 0 {
+		proxyAddrs = []string{""} // direct connection, 1 worker
+	}
+
+	// When using managed proxies, the scaler creates them on demand.
+	// Only verify the first proxy up front (it's always running).
+	if proxyLM == nil {
+		for i, addr := range proxyAddrs {
+			if err := common.VerifyOutboundIP(addr, cfg.ProxyUser, cfg.ProxyPass); err != nil {
+				return fmt.Errorf("validator: proxy %d (%s) IP verification failed: %w", i, addr, err)
+			}
+		}
+	} else {
+		if err := common.VerifyOutboundIP(proxyAddrs[0], cfg.ProxyUser, cfg.ProxyPass); err != nil {
+			return fmt.Errorf("validator: initial proxy IP verification failed: %w", err)
+		}
 	}
 
 	requestRate := cfg.ValidatorRequestRate
 	if requestRate <= 0 {
-		requestRate = 6 // default: 6 calls/min = 10s interval, matching SearchPublicChat pace
+		requestRate = 6
 	}
 	jitterMs := cfg.ValidatorRequestJitterMs
 	if jitterMs <= 0 {
@@ -76,26 +321,178 @@ func RunValidationLoop(ctx context.Context, sm state.StateManagementInterface, c
 		claimSize = 10
 	}
 
-	rateLimiter := telegramhelper.NewValidatorRateLimiter(requestRate, jitterMs)
+	initialWorkers := 1
+
+	// Build crawl-active check: the validator stays alive as long as any
+	// crawler pod has claimed pages (actively processing a channel) or there
+	// are incomplete batches awaiting validation.
+	crawlActiveFn := func() bool {
+		claimedPages, err := sm.CountClaimedPages()
+		if err != nil {
+			log.Warn().Str("log_tag", "val_idle").Err(err).Msg("CountClaimedPages failed, assuming crawl active")
+			return true // err on the side of staying alive
+		}
+		incompleteBatches, err := sm.CountIncompleteBatches(cfg.CrawlID)
+		if err != nil {
+			log.Warn().Str("log_tag", "val_idle").Err(err).Msg("CountIncompleteBatches failed, assuming crawl active")
+			return true
+		}
+		active := claimedPages > 0 || incompleteBatches > 0
+		if active {
+			log.Info().Str("log_tag", "val_idle").
+				Int("claimed_pages", claimedPages).
+				Int("incomplete_batches", incompleteBatches).
+				Msg("Crawl still active — suppressing idle shutdown")
+		}
+		return active
+	}
+
+	idle := newSharedIdleTracker(initialWorkers, cfg.ValidatorIdleTimeout, crawlActiveFn)
 
 	log.Info().
-		Float64("request_rate_per_min", requestRate).
-		Int("jitter_ms", jitterMs).
+		Int("proxy_count", len(proxyAddrs)).
+		Int("initial_workers", initialWorkers).
+		Bool("managed_proxies", proxyLM != nil).
+		Float64("request_rate_per_min_per_worker", requestRate).
+		Float64("max_aggregate_rate_per_min", requestRate*float64(len(proxyAddrs))).
 		Int("claim_batch_size", claimSize).
-		Str("log_tag", "val_edge").Msg("Starting validation loop")
+		Str("log_tag", "val_edge").Msg("Starting multi-proxy validation loop")
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	g.Go(func() error {
-		return runEdgeValidation(ctx, sm, cfg, httpClient, rateLimiter, claimSize, telegramhelper.ValidateChannelHTTP)
-	})
+	wm := newWorkerManager(ctx, g, sm, cfg, idle, requestRate, jitterMs, claimSize, telegramhelper.ValidateChannelHTTP, proxyLM)
 
+	// Ensure all managed proxies are cleaned up on exit.
+	if proxyLM != nil {
+		defer func() {
+			log.Info().Str("log_tag", "val_scaler").Msg("Destroying all managed proxies on exit")
+			if err := proxyLM.DestroyAllProxies(context.Background()); err != nil {
+				log.Warn().Str("log_tag", "val_scaler").Err(err).Msg("Failed to destroy managed proxies on exit")
+			}
+		}()
+	}
+
+	// Launch initial worker (proxy index 0 is always pre-provisioned).
+	if err := wm.StartWorker(0, proxyAddrs[0]); err != nil {
+		return fmt.Errorf("validator: failed to start initial worker: %w", err)
+	}
+
+	// Dynamic scaler — only useful when there are multiple proxies available.
+	if len(proxyAddrs) > 1 || proxyLM != nil {
+		g.Go(func() error {
+			return runDynamicScaler(ctx, sm, wm, idle, proxyAddrs)
+		})
+	}
+
+	// Single walkback processor (DB-bound, not HTTP-bound).
 	g.Go(func() error {
 		return runWalkbackProcessor(ctx, sm, cfg)
 	})
 
 	return g.Wait()
 }
+
+// ---------------------------------------------------------------------------
+// runDynamicScaler — adjusts worker count based on pending_edges queue depth
+// ---------------------------------------------------------------------------
+
+// runDynamicScaler periodically checks the pending_edges queue depth and
+// starts additional edge-validation workers when demand increases. Workers
+// are never scaled down — once a proxy is created it stays alive until the
+// validator exits (idle timeout with crawl-active check). This avoids ACI
+// churn over long crawls.
+func runDynamicScaler(
+	ctx context.Context,
+	sm state.StateManagementInterface,
+	wm *workerManager,
+	idle *sharedIdleTracker,
+	proxyAddrs []string,
+) error {
+	ticker := time.NewTicker(scalerPollInterval)
+	defer ticker.Stop()
+
+	maxWorkers := len(proxyAddrs)
+	var lastScaleUp time.Time
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+
+		pendingCount, err := sm.CountPendingEdges()
+		if err != nil {
+			log.Warn().Str("log_tag", "val_scaler").Err(err).Msg("Failed to count pending edges")
+			continue
+		}
+
+		currentWorkers := wm.ActiveCount()
+		desired := pendingCount / edgesPerWorker
+		if desired < 1 {
+			desired = 1
+		}
+		if desired > maxWorkers {
+			desired = maxWorkers
+		}
+
+		log.Debug().Str("log_tag", "val_scaler").
+			Int("pending_edges", pendingCount).
+			Int("current_workers", currentWorkers).
+			Int("desired_workers", desired).
+			Int("max_workers", maxWorkers).
+			Msg("Scaler tick")
+
+		if desired > currentWorkers && time.Since(lastScaleUp) >= scaleUpCooldown {
+			// Scale up — start workers for available proxies.
+			toAdd := desired - currentWorkers
+			added := 0
+			for i := 0; i < maxWorkers && added < toAdd; i++ {
+				addr := proxyAddrs[i]
+				// Create managed proxy if needed.
+				if wm.proxyLM != nil && addr == "" {
+					var createErr error
+					addr, createErr = wm.proxyLM.CreateProxy(ctx, i)
+					if createErr != nil {
+						log.Warn().Str("log_tag", "val_scaler").Err(createErr).
+							Int("proxy_index", i).Msg("Failed to create managed proxy")
+						continue
+					}
+					// Update the address list so we don't re-create next tick.
+					proxyAddrs[i] = addr
+
+					// Wait for proxy to be reachable before starting the worker.
+					if tcpErr := common.CheckProxyTCP(addr, 30*time.Second); tcpErr != nil {
+						log.Warn().Str("log_tag", "val_scaler").Err(tcpErr).
+							Int("proxy_index", i).Str("addr", addr).Msg("Managed proxy not reachable, destroying")
+						_ = wm.proxyLM.DestroyProxy(ctx, i)
+						proxyAddrs[i] = ""
+						continue
+					}
+				}
+				if startErr := wm.StartWorker(i, addr); startErr != nil {
+					log.Warn().Str("log_tag", "val_scaler").Err(startErr).
+						Int("proxy_index", i).Msg("Failed to start worker")
+				} else {
+					added++
+				}
+			}
+			if added > 0 {
+				lastScaleUp = time.Now()
+				idle.SetWorkerCount(wm.ActiveCount())
+				log.Info().Str("log_tag", "val_scaler").
+					Int("added", added).
+					Int("active_workers", wm.ActiveCount()).
+					Int("pending_edges", pendingCount).
+					Msg("Scaled up workers")
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// runEdgeValidation — single worker loop (one per proxy)
+// ---------------------------------------------------------------------------
 
 // runEdgeValidation continuously claims and validates pending edges via HTTP.
 // When consecutive ErrBlocked responses reach blockedThreshold the loop enters
@@ -109,10 +506,14 @@ func runEdgeValidation(
 	rateLimiter *telegramhelper.ValidatorRateLimiter,
 	claimSize int,
 	validateFn ValidateFunc,
+	workerID int,
+	idle *sharedIdleTracker,
 ) error {
 	var blocked validatorBlockedState
 	var edgeStarvedSince time.Time
 	var edgeStarvedPolls int
+
+	wlog := log.With().Int("worker_id", workerID).Logger()
 
 	for {
 		select {
@@ -130,12 +531,12 @@ func runEdgeValidation(
 			blocked.lastProbeAt = time.Now()
 			_, probeErr := validateFn(probeChannel, httpClient)
 			if probeErr == nil {
-				log.Info().Str("log_tag", "val_edge").Msg("Probe succeeded, resuming validation")
+				wlog.Info().Str("log_tag", "val_edge").Msg("Probe succeeded, resuming validation")
 				blocked.active = false
 				blocked.consecutiveCount = 0
-				continue // immediately resume claiming — no sleep needed
+				continue
 			}
-			log.Warn().Str("log_tag", "val_edge").Err(probeErr).Msg("Probe failed, still blocked")
+			wlog.Warn().Str("log_tag", "val_edge").Err(probeErr).Msg("Probe failed, still blocked")
 			sleepCtx(ctx, edgePollInterval)
 			continue
 		}
@@ -143,27 +544,28 @@ func runEdgeValidation(
 		// --- Normal: claim and validate edges ---
 		edges, err := sm.ClaimPendingEdges(claimSize)
 		if err != nil {
-			log.Warn().Str("log_tag", "val_edge").Err(err).Msg("Failed to claim pending edges")
+			wlog.Warn().Str("log_tag", "val_edge").Err(err).Msg("Failed to claim pending edges")
 			sleepCtx(ctx, edgePollInterval)
 			continue
 		}
 
 		if len(edges) == 0 {
+			idle.MarkIdle(workerID)
 			if edgeStarvedSince.IsZero() {
 				edgeStarvedSince = time.Now()
 			}
 			edgeStarvedPolls++
 			if edgeStarvedPolls%10 == 0 {
-				log.Info().Str("log_tag", "val_edge").
+				wlog.Info().Str("log_tag", "val_edge").
 					Dur("starved_for", time.Since(edgeStarvedSince).Round(time.Second)).
 					Int("empty_polls", edgeStarvedPolls).
-					Msg("Validator starved — no pending edges to claim")
+					Msg("Worker starved — no pending edges to claim")
 			}
-			if cfg.ValidatorIdleTimeout > 0 && time.Since(edgeStarvedSince) >= cfg.ValidatorIdleTimeout {
-				log.Info().Str("log_tag", "val_edge").
+			if idle.ShouldShutdown() {
+				wlog.Info().Str("log_tag", "val_edge").
 					Dur("idle_timeout", cfg.ValidatorIdleTimeout).
 					Dur("starved_for", time.Since(edgeStarvedSince).Round(time.Second)).
-					Msg("Validator idle timeout reached, shutting down")
+					Msg("All workers idle — timeout reached, shutting down")
 				return nil
 			}
 			sleepCtx(ctx, edgePollInterval)
@@ -171,98 +573,111 @@ func runEdgeValidation(
 		}
 
 		// Reset starvation tracking when edges are available
+		idle.MarkActive(workerID)
 		if edgeStarvedPolls > 0 {
-			log.Info().Str("log_tag", "val_edge").
+			wlog.Info().Str("log_tag", "val_edge").
 				Dur("starved_for", time.Since(edgeStarvedSince).Round(time.Second)).
 				Int("empty_polls", edgeStarvedPolls).
 				Int("claimed", len(edges)).
-				Msg("Validator starvation ended — edges available")
+				Msg("Worker starvation ended — edges available")
 			edgeStarvedSince = time.Time{}
 			edgeStarvedPolls = 0
 		}
 
-		batchStart := time.Now()
-		var httpCount, skippedInvalid, skippedDuplicate, validCount, invalidCount, notChannelCount, blockedCount, transientCount int
+		processEdgeBatch(ctx, sm, cfg, httpClient, rateLimiter, edges, validateFn, &blocked, wlog)
+	}
+}
 
-		for _, edge := range edges {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+// processEdgeBatch validates a claimed batch of edges and updates their status.
+func processEdgeBatch(
+	ctx context.Context,
+	sm state.StateManagementInterface,
+	cfg common.CrawlerConfig,
+	httpClient *http.Client,
+	rateLimiter *telegramhelper.ValidatorRateLimiter,
+	edges []*state.PendingEdge,
+	validateFn ValidateFunc,
+	blocked *validatorBlockedState,
+	wlog zerolog.Logger,
+) {
+	batchStart := time.Now()
+	var httpCount, skippedInvalid, skippedDuplicate, validCount, invalidCount, notChannelCount, blockedCount, transientCount int
 
-			update, kind := validateSingleEdge(ctx, sm, cfg, httpClient, rateLimiter, edge, validateFn)
+	for _, edge := range edges {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 
-			// Track stats by outcome
-			switch update.ValidationStatus {
-			case "invalid":
-				if update.ValidationReason == "cached_invalid" {
-					skippedInvalid++
-				} else {
-					invalidCount++
-					httpCount++
-				}
-			case "duplicate":
-				skippedDuplicate++
-			case "valid":
-				validCount++
+		update, kind := validateSingleEdge(ctx, sm, cfg, httpClient, rateLimiter, edge, validateFn)
+
+		// Track stats by outcome
+		switch update.ValidationStatus {
+		case "invalid":
+			if update.ValidationReason == "cached_invalid" {
+				skippedInvalid++
+			} else {
+				invalidCount++
 				httpCount++
-			case "not_channel":
-				notChannelCount++
-				httpCount++
-			case "pending":
-				if kind == outcomeBlocked {
-					blockedCount++
-				} else {
-					transientCount++
-				}
 			}
-
-			switch kind {
-			case outcomeBlocked:
-				blocked.consecutiveCount++
-				log.Warn().Str("channel", edge.DestinationChannel).
-					Int("consecutive_blocked", blocked.consecutiveCount).
-					Str("log_tag", "val_edge").Msg("Access blocked, edge left pending")
-				if !blocked.active && blocked.consecutiveCount >= blockedThreshold {
-					blocked.active = true
-					// Leave lastProbeAt at zero so the first probe fires
-					// immediately — confirm the block rather than waiting
-					// a full probeInterval before checking.
-					log.Warn().Str("log_tag", "val_edge").Int("threshold", blockedThreshold).
-						Msg("Entering blocked state")
-					if eventErr := sm.InsertAccessEvent("ip_blocked"); eventErr != nil {
-						log.Warn().Str("log_tag", "val_edge").Err(eventErr).Msg("Failed to insert access event")
-					}
-				}
-			case outcomeTransient:
-				if blocked.consecutiveCount > 0 {
-					blocked.consecutiveCount--
-				}
-			default: // outcomeDefinitive
-				blocked.consecutiveCount = 0
-			}
-
-			if updateErr := sm.UpdatePendingEdge(update); updateErr != nil {
-				log.Warn().Err(updateErr).Int("pending_id", edge.PendingID).
-					Str("log_tag", "val_edge").Msg("Failed to update edge status")
+		case "duplicate":
+			skippedDuplicate++
+		case "valid":
+			validCount++
+			httpCount++
+		case "not_channel":
+			notChannelCount++
+			httpCount++
+		case "pending":
+			if kind == outcomeBlocked {
+				blockedCount++
+			} else {
+				transientCount++
 			}
 		}
 
-		batchDuration := time.Since(batchStart)
-		log.Info().Str("log_tag", "val_edge").
-			Int("claimed", len(edges)).
-			Int("http_validated", httpCount).
-			Int("skipped_invalid", skippedInvalid).
-			Int("skipped_duplicate", skippedDuplicate).
-			Int("valid", validCount).
-			Int("invalid", invalidCount).
-			Int("not_channel", notChannelCount).
-			Int("blocked", blockedCount).
-			Int("transient", transientCount).
-			Dur("batch_duration_ms", batchDuration).
-			Msg("Edge validation batch complete")
+		switch kind {
+		case outcomeBlocked:
+			blocked.consecutiveCount++
+			wlog.Warn().Str("channel", edge.DestinationChannel).
+				Int("consecutive_blocked", blocked.consecutiveCount).
+				Str("log_tag", "val_edge").Msg("Access blocked, edge left pending")
+			if !blocked.active && blocked.consecutiveCount >= blockedThreshold {
+				blocked.active = true
+				wlog.Warn().Str("log_tag", "val_edge").Int("threshold", blockedThreshold).
+					Msg("Entering blocked state")
+				if eventErr := sm.InsertAccessEvent("ip_blocked"); eventErr != nil {
+					wlog.Warn().Str("log_tag", "val_edge").Err(eventErr).Msg("Failed to insert access event")
+				}
+			}
+		case outcomeTransient:
+			if blocked.consecutiveCount > 0 {
+				blocked.consecutiveCount--
+			}
+		default: // outcomeDefinitive
+			blocked.consecutiveCount = 0
+		}
+
+		if updateErr := sm.UpdatePendingEdge(update); updateErr != nil {
+			wlog.Warn().Err(updateErr).Int("pending_id", edge.PendingID).
+				Str("log_tag", "val_edge").Msg("Failed to update edge status")
+		}
 	}
+
+	batchDuration := time.Since(batchStart)
+	wlog.Info().Str("log_tag", "val_edge").
+		Int("claimed", len(edges)).
+		Int("http_validated", httpCount).
+		Int("skipped_invalid", skippedInvalid).
+		Int("skipped_duplicate", skippedDuplicate).
+		Int("valid", validCount).
+		Int("invalid", invalidCount).
+		Int("not_channel", notChannelCount).
+		Int("blocked", blockedCount).
+		Int("transient", transientCount).
+		Dur("batch_duration_ms", batchDuration).
+		Msg("Edge validation batch complete")
 }
 
 // ValidateFunc is the signature for channel validation. Production code uses

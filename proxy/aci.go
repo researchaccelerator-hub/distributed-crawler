@@ -331,6 +331,78 @@ func (m *ACIProxyManager) DestroyProxies(ctx context.Context) error {
 	return nil
 }
 
+// CreateProxy creates a single ACI proxy container for the given ordinal and
+// returns its address (ip:port). The proxy is tracked for cleanup on exit.
+func (m *ACIProxyManager) CreateProxy(ctx context.Context, ordinal int) (string, error) {
+	name := containerGroupName(m.podName, ordinal, m.proxyCount)
+	cg := m.buildContainerGroup(name)
+
+	log.Info().Str("name", name).Int("ordinal", ordinal).Str("location", m.location).
+		Msg("Creating individual ACI proxy")
+
+	resp, err := m.client.BeginCreateOrUpdate(ctx, m.resourceGroup, name, cg, nil)
+	if err != nil {
+		return "", fmt.Errorf("create ACI %s: %w", name, err)
+	}
+
+	ip := ""
+	if resp.ContainerGroup.Properties != nil && resp.ContainerGroup.Properties.IPAddress != nil && resp.ContainerGroup.Properties.IPAddress.IP != nil {
+		ip = *resp.ContainerGroup.Properties.IPAddress.IP
+	}
+	if ip == "" {
+		return "", fmt.Errorf("ACI %s has no IP address after provisioning", name)
+	}
+
+	addr := fmt.Sprintf("%s:%d", ip, m.port)
+
+	m.mu.Lock()
+	m.containerNames = append(m.containerNames, name)
+	// Grow proxyAddrs slice if needed.
+	for len(m.proxyAddrs) <= ordinal {
+		m.proxyAddrs = append(m.proxyAddrs, "")
+	}
+	m.proxyAddrs[ordinal] = addr
+	m.mu.Unlock()
+
+	log.Info().Str("name", name).Str("addr", addr).Int("ordinal", ordinal).Msg("Individual ACI proxy provisioned")
+	return addr, nil
+}
+
+// DestroyProxy deletes the ACI container for the given ordinal and removes it
+// from the tracked set.
+func (m *ACIProxyManager) DestroyProxy(ctx context.Context, ordinal int) error {
+	name := containerGroupName(m.podName, ordinal, m.proxyCount)
+
+	log.Info().Str("name", name).Int("ordinal", ordinal).Msg("Deleting individual ACI proxy")
+
+	_, err := m.client.BeginDelete(ctx, m.resourceGroup, name, nil)
+
+	m.mu.Lock()
+	// Remove from containerNames
+	for i, n := range m.containerNames {
+		if n == name {
+			m.containerNames = append(m.containerNames[:i], m.containerNames[i+1:]...)
+			break
+		}
+	}
+	// Clear address
+	if ordinal < len(m.proxyAddrs) {
+		m.proxyAddrs[ordinal] = ""
+	}
+	m.mu.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("delete ACI %s: %w", name, err)
+	}
+	return nil
+}
+
+// DestroyAllProxies implements crawl.ProxyLifecycleManager by delegating to
+// DestroyProxies. This ensures all tracked ACI containers are cleaned up.
+func (m *ACIProxyManager) DestroyAllProxies(ctx context.Context) error {
+	return m.DestroyProxies(ctx)
+}
+
 // CleanupOrphanedProxies finds and deletes any ACI container groups tagged with
 // managed_by=telegram-scraper and this pod's name. This recovers from crashes
 // where DestroyProxies was never called, without touching other pods' proxies.

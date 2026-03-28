@@ -83,8 +83,12 @@ func (m *MockYouTubeStateManager) UpsertSeedChannelChatID(_ string, _ int64) err
 func (m *MockYouTubeStateManager) InsertSeedChannelIfNew(_ string) error                     { return nil }
 func (m *MockYouTubeStateManager) GetCachedChatID(_ string) (int64, bool)               { return 0, false }
 func (m *MockYouTubeStateManager) IsSeedChannel(_ string) bool                          { return false }
-func (m *MockYouTubeStateManager) GetChannelLastCrawled(_ string) (time.Time, error)    { return time.Time{}, nil }
-func (m *MockYouTubeStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error { return nil }
+func (m *MockYouTubeStateManager) GetChannelLastCrawled(_ string) (time.Time, int64, error) {
+	return time.Time{}, 0, nil
+}
+func (m *MockYouTubeStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time, _ int, _ int, _ int64) error {
+	return nil
+}
 func (m *MockYouTubeStateManager) LoadInvalidChannels() error                           { return nil }
 func (m *MockYouTubeStateManager) IsInvalidChannel(_ string) bool                       { return false }
 func (m *MockYouTubeStateManager) MarkChannelInvalid(_ string, _ string) error          { return nil }
@@ -129,6 +133,8 @@ func (m *MockYouTubeStateManager) GetRandomSeedChannel() (string, int, error)   
 func (m *MockYouTubeStateManager) ClaimDiscoveredChannel(_ string, _ string, _ string) (bool, error) { return false, nil }
 func (m *MockYouTubeStateManager) IsChannelDiscovered(_ string) (bool, error)                         { return false, nil }
 func (m *MockYouTubeStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
+func (m *MockYouTubeStateManager) CountPendingEdges() (int, error)                                    { return 0, nil }
+func (m *MockYouTubeStateManager) CountClaimedPages() (int, error)                                    { return 0, nil }
 func (m *MockYouTubeStateManager) InsertAccessEvent(_ string) error                                   { return nil }
 func (m *MockYouTubeStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)               { return nil, nil }
 func (m *MockYouTubeStateManager) DeleteEdgeRecord(_, _ string) error                                  { return nil }

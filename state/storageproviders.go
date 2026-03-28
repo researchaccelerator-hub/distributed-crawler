@@ -241,6 +241,14 @@ func (lsm *LocalStateManager) CountIncompleteBatches(crawlID string) (int, error
 	return 0, fmt.Errorf("CountIncompleteBatches not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) CountPendingEdges() (int, error) {
+	return 0, fmt.Errorf("CountPendingEdges not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CountClaimedPages() (int, error) {
+	return 0, fmt.Errorf("CountClaimedPages not implemented for local state manager")
+}
+
 func (lsm *LocalStateManager) InsertAccessEvent(reason string) error {
 	return fmt.Errorf("InsertAccessEvent not implemented for local state manager")
 }

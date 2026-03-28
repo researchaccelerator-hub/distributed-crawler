@@ -418,17 +418,28 @@ Examples:
 			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
 				return fmt.Errorf("proxy configured but PROXY_USER and/or PROXY_PASS env vars are not set")
 			}
-			addr, err := common.PodProxyAddr(podName, crawlerCfg.ProxyAddrs, crawlerCfg.ProxyOrdinal)
-			if err != nil {
-				return fmt.Errorf("proxy resolution failed: %w", err)
+			if crawlerCfg.ValidateOnly && len(crawlerCfg.ProxyAddrs) > 1 {
+				// Multi-proxy validator: RunValidationLoop fans out across
+				// all proxies with dynamic scaling. Set ProxyAddr to the first
+				// proxy for backward-compat with any code that reads it.
+				crawlerCfg.ProxyAddr = crawlerCfg.ProxyAddrs[0]
+				log.Info().
+					Int("proxy_count", len(crawlerCfg.ProxyAddrs)).
+					Str("pod_name", podName).
+					Msg("Multi-proxy validator mode — dynamic scaling enabled")
+			} else {
+				addr, err := common.PodProxyAddr(podName, crawlerCfg.ProxyAddrs, crawlerCfg.ProxyOrdinal)
+				if err != nil {
+					return fmt.Errorf("proxy resolution failed: %w", err)
+				}
+				crawlerCfg.ProxyAddr = addr
+				log.Info().
+					Str("proxy_addr", crawlerCfg.ProxyAddr).
+					Str("pod_name", podName).
+					Int("proxy_ordinal", crawlerCfg.ProxyOrdinal).
+					Int("proxy_pool_size", len(crawlerCfg.ProxyAddrs)).
+					Msg("SOCKS5 proxy configured for this pod")
 			}
-			crawlerCfg.ProxyAddr = addr
-			log.Info().
-				Str("proxy_addr", crawlerCfg.ProxyAddr).
-				Str("pod_name", podName).
-				Int("proxy_ordinal", crawlerCfg.ProxyOrdinal).
-				Int("proxy_pool_size", len(crawlerCfg.ProxyAddrs)).
-				Msg("SOCKS5 proxy configured for this pod")
 		}
 
 		// Parse min post date from string to time.Time if provided
@@ -863,7 +874,7 @@ func init() {
 	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyCPU, "proxy-cpu", 0.5, "CPU cores per managed proxy ACI")
 	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyMemoryGB, "proxy-memory-gb", 0.5, "Memory in GB per managed proxy ACI")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyPort, "proxy-port", 1080, "SOCKS5 listen port inside managed proxy container")
-	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyCount, "proxy-count", 1, "Number of managed proxy ACIs to create")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyCount, "proxy-count", 1, "Number of managed proxy ACIs (crawler: all created at startup; validator: max proxies the dynamic scaler can use)")
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")

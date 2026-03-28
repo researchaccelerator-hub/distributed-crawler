@@ -390,8 +390,12 @@ func (m *MockStateManager) IsSeedChannel(username string) bool {
 	args := m.Called(username)
 	return args.Bool(0)
 }
-func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)         { return time.Time{}, nil }
-func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error   { return nil }
+func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, int64, error) {
+	return time.Time{}, 0, nil
+}
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time, _ int, _ int, _ int64) error {
+	return nil
+}
 func (m *MockStateManager) LoadInvalidChannels() error {
 	args := m.Called()
 	return args.Error(0)
@@ -539,6 +543,16 @@ func (m *MockStateManager) IsChannelDiscovered(username string) (bool, error) {
 
 func (m *MockStateManager) CountIncompleteBatches(crawlID string) (int, error) {
 	args := m.Called(crawlID)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockStateManager) CountPendingEdges() (int, error) {
+	args := m.Called()
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockStateManager) CountClaimedPages() (int, error) {
+	args := m.Called()
 	return args.Int(0), args.Error(1)
 }
 

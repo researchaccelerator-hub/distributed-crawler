@@ -53,8 +53,12 @@ func (n *noopStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) 
 func (n *noopStateManager) ExecuteDatabaseOperation(_ string, _ []any) error              { return nil }
 func (n *noopStateManager) AddPageToPageBuffer(_ *state.Page) error                       { return nil }
 func (n *noopStateManager) DeletePageBufferPages(_ []string, _ []string) error             { return nil }
-func (n *noopStateManager) GetChannelLastCrawled(_ string) (time.Time, error)             { return time.Time{}, nil }
-func (n *noopStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error       { return nil }
+func (n *noopStateManager) GetChannelLastCrawled(_ string) (time.Time, int64, error) {
+	return time.Time{}, 0, nil
+}
+func (n *noopStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time, _ int, _ int, _ int64) error {
+	return nil
+}
 func (n *noopStateManager) LoadInvalidChannels() error                                    { return nil }
 func (n *noopStateManager) IsInvalidChannel(_ string) bool                                { return false }
 func (n *noopStateManager) MarkChannelInvalid(_ string, _ string) error                   { return nil }
@@ -76,6 +80,8 @@ func (n *noopStateManager) GetRandomSeedChannel() (string, int, error)          
 func (n *noopStateManager) ClaimDiscoveredChannel(_ string, _ string, _ string) (bool, error) { return false, nil }
 func (n *noopStateManager) IsChannelDiscovered(_ string) (bool, error)                    { return false, nil }
 func (n *noopStateManager) CountIncompleteBatches(_ string) (int, error)                  { return 0, nil }
+func (n *noopStateManager) CountPendingEdges() (int, error)                              { return 0, nil }
+func (n *noopStateManager) CountClaimedPages() (int, error)                              { return 0, nil }
 func (n *noopStateManager) InsertAccessEvent(_ string) error                              { return nil }
 func (n *noopStateManager) GetEdgeRecord(_, _ string) (*state.EdgeRecord, error)          { return nil, nil }
 func (n *noopStateManager) DeleteEdgeRecord(_, _ string) error                            { return nil }

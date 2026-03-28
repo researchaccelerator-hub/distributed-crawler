@@ -120,13 +120,15 @@ type StateManagementInterface interface {
 	// Used in tandem mode to avoid wiping pages the validator wrote after the read.
 	DeletePageBufferPages(pageIDs []string, pageURLs []string) error
 
-	// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
-	// for the given username. Returns zero time if the channel has never been crawled.
-	GetChannelLastCrawled(username string) (time.Time, error)
+	// GetChannelLastCrawled returns the last_crawled_at timestamp and the newest
+	// message ID fetched from seed_channels for the given username.  Returns zero
+	// time and 0 message ID if the channel has never been crawled.
+	GetChannelLastCrawled(username string) (time.Time, int64, error)
 	// MarkChannelCrawled upserts the channel into seed_channels, recording the
-	// current time as last_crawled_at, the most recent message date, and caching
-	// the resolved chatID.
-	MarkChannelCrawled(username string, chatID int64, lastMessageDate time.Time) error
+	// current time as last_crawled_at, the most recent message date, caching
+	// the resolved chatID, and updating total_messages_processed (additive)
+	// and member_count (keeps the highest value seen).
+	MarkChannelCrawled(username string, chatID int64, lastMessageDate time.Time, messagesProcessed int, memberCount int, lastMessageID int64) error
 	// MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row
 	// for the given username, if the row exists.  No-ops for channels not in the
 	// seed table.  The 30-day TTL is enforced in LoadSeedChannels and
@@ -209,6 +211,16 @@ type StateManagementInterface interface {
 	// CountIncompleteBatches returns the count of pending_edge_batches with
 	// status != 'completed' for the given crawl_id.
 	CountIncompleteBatches(crawlID string) (int, error)
+
+	// CountPendingEdges returns the number of pending_edges rows with
+	// validation_status = 'pending'. Used by the dynamic proxy scaler to
+	// decide how many validation workers to run.
+	CountPendingEdges() (int, error)
+
+	// CountClaimedPages returns the number of page_buffer rows where
+	// claimed_by != '' for the current crawl. Used by the validator to
+	// determine if any crawler pods are still actively processing channels.
+	CountClaimedPages() (int, error)
 
 	// InsertAccessEvent appends a row to access_events recording that the
 	// validator detected an IP-level block.  An external process polls this

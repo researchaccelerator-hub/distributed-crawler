@@ -175,29 +175,57 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		if cleanupErr := proxyManager.CleanupOrphanedProxies(context.Background()); cleanupErr != nil {
 			log.Warn().Err(cleanupErr).Msg("Failed to clean up orphaned proxy ACIs")
 		}
-		addrs, err := proxyManager.CreateProxies(context.Background())
-		if err != nil {
-			log.Fatal().Err(err).Msg("Failed to create managed proxy ACIs")
-		}
-		if err := proxyManager.WaitForReady(context.Background(), addrs, 2*time.Minute); err != nil {
-			// Best-effort cleanup before aborting
-			_ = proxyManager.DestroyProxies(context.Background())
-			log.Fatal().Err(err).Msg("Managed proxy ACIs not ready in time")
-		}
-		// Inject the first proxy address so the rest of the pipeline uses it transparently.
-		// For multi-proxy, populate ProxyAddrs for pod-ordinal selection.
-		if len(addrs) == 1 {
-			crawlerCfg.ProxyAddr = addrs[0]
-		} else {
-			crawlerCfg.ProxyAddrs = addrs
-			addr, err := common.PodProxyAddr(crawlerCfg.PodName, addrs, crawlerCfg.ProxyOrdinal)
-			if err != nil {
+
+		if crawlerCfg.ValidateOnly && crawlerCfg.ProxyCount > 1 {
+			// --- Validator mode: dynamic proxy scaling ---
+			// Create only one proxy at startup. The dynamic scaler inside
+			// RunValidationLoop creates additional proxies on demand (up to
+			// ProxyCount) based on pending_edges queue depth, and all proxies
+			// are destroyed together when the validator exits.
+			addr, createErr := proxyManager.CreateProxy(context.Background(), 0)
+			if createErr != nil {
+				log.Fatal().Err(createErr).Msg("Failed to create initial managed proxy ACI")
+			}
+			if readyErr := proxyManager.WaitForReady(context.Background(), []string{addr}, 2*time.Minute); readyErr != nil {
 				_ = proxyManager.DestroyProxies(context.Background())
-				log.Fatal().Err(err).Msg("Managed proxy ordinal resolution failed")
+				log.Fatal().Err(readyErr).Msg("Initial managed proxy ACI not ready in time")
 			}
 			crawlerCfg.ProxyAddr = addr
+			// Build a placeholder address list sized to ProxyCount.
+			// Index 0 has the real address; others are empty and will be
+			// populated by the scaler when it creates proxies on demand.
+			crawlerCfg.ProxyAddrs = make([]string, crawlerCfg.ProxyCount)
+			crawlerCfg.ProxyAddrs[0] = addr
+			crawlerCfg.ProxyLifecycle = proxyManager
+			log.Info().Str("proxy_addr", addr).Int("max_proxies", crawlerCfg.ProxyCount).
+				Msg("Managed ACI proxy ready — dynamic scaling enabled for validator")
+		} else {
+			// --- Crawler mode: all proxies created at startup ---
+			// Crawler pods need their proxy available from boot (TDLib connects
+			// immediately). Each pod in the StatefulSet picks one proxy by
+			// ordinal. All proxies live for the duration of the crawl and are
+			// destroyed on exit.
+			addrs, createErr := proxyManager.CreateProxies(context.Background())
+			if createErr != nil {
+				log.Fatal().Err(createErr).Msg("Failed to create managed proxy ACIs")
+			}
+			if readyErr := proxyManager.WaitForReady(context.Background(), addrs, 2*time.Minute); readyErr != nil {
+				_ = proxyManager.DestroyProxies(context.Background())
+				log.Fatal().Err(readyErr).Msg("Managed proxy ACIs not ready in time")
+			}
+			if len(addrs) == 1 {
+				crawlerCfg.ProxyAddr = addrs[0]
+			} else {
+				crawlerCfg.ProxyAddrs = addrs
+				addr, resolveErr := common.PodProxyAddr(crawlerCfg.PodName, addrs, crawlerCfg.ProxyOrdinal)
+				if resolveErr != nil {
+					_ = proxyManager.DestroyProxies(context.Background())
+					log.Fatal().Err(resolveErr).Msg("Managed proxy ordinal resolution failed")
+				}
+				crawlerCfg.ProxyAddr = addr
+			}
+			log.Info().Str("proxy_addr", crawlerCfg.ProxyAddr).Int("proxy_count", len(addrs)).Msg("Managed ACI proxies ready")
 		}
-		log.Info().Str("proxy_addr", crawlerCfg.ProxyAddr).Int("proxy_count", len(addrs)).Msg("Managed ACI proxies ready")
 	}
 	defer func() {
 		if proxyManager != nil {
@@ -375,6 +403,8 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 				log.Info().Str("log_tag", "val_mode").Int("deleted", n).Msg("Recovered orphan edges")
 			}
 		}
+		// cfg.ProxyLifecycle is set by StartDaprStandaloneMode when managed
+		// proxies are enabled with dynamic scaling; RunValidationLoop reads it.
 		if err := crawl.RunValidationLoop(context.Background(), sm, crawlCfg); err != nil {
 			log.Error().Str("log_tag", "val_mode").Err(err).Msg("Validation loop exited with error")
 		}

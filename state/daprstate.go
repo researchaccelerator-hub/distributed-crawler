@@ -3423,15 +3423,16 @@ func (dsm *DaprStateManager) IsSeedChannel(username string) bool {
 	return ok
 }
 
-// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
-// for the given username. Returns zero time if the channel has no recorded crawl.
-func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, error) {
+// GetChannelLastCrawled returns the last_crawled_at timestamp and the newest
+// message ID fetched from seed_channels for the given username.  Returns zero
+// time and 0 message ID if the channel has no recorded crawl.
+func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, int64, error) {
 	dsm.databaseBinding = databaseStorageBinding
 
-	query := "SELECT COALESCE(last_message_date, last_crawled_at) FROM seed_channels WHERE channel_username = $1;"
+	query := "SELECT COALESCE(last_message_date, last_crawled_at), last_message_id FROM seed_channels WHERE channel_username = $1;"
 	paramsJSON, err := json.Marshal([]any{username})
 	if err != nil {
-		return time.Time{}, fmt.Errorf("random-walk-seed: failed to marshal params: %w", err)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to marshal params: %w", err)
 	}
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
@@ -3444,50 +3445,74 @@ func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, 
 	}
 	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("random-walk-seed: failed to query last_crawled_at for %s: %w", username, err)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to query last_crawled_at for %s: %w", username, err)
 	}
 
 	var rows [][]interface{}
 	if err := json.Unmarshal(res.Data, &rows); err != nil {
-		return time.Time{}, fmt.Errorf("random-walk-seed: failed to unmarshal last_crawled_at response: %w", err)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to unmarshal last_crawled_at response: %w", err)
 	}
 
 	if len(rows) == 0 || len(rows[0]) == 0 || rows[0][0] == nil {
-		return time.Time{}, nil
+		return time.Time{}, 0, nil
 	}
 
+	var ts time.Time
 	switch v := rows[0][0].(type) {
 	case string:
-		t, err := time.Parse(time.RFC3339, v)
+		ts, err = time.Parse(time.RFC3339, v)
 		if err != nil {
 			// Try common Postgres format
-			t, err = time.Parse("2006-01-02T15:04:05Z", v)
+			ts, err = time.Parse("2006-01-02T15:04:05Z", v)
 			if err != nil {
-				return time.Time{}, fmt.Errorf("random-walk-seed: failed to parse last_crawled_at %q: %w", v, err)
+				return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to parse last_crawled_at %q: %w", v, err)
 			}
 		}
-		return t, nil
 	case float64:
-		return time.Unix(int64(v), 0), nil
+		ts = time.Unix(int64(v), 0)
 	default:
-		return time.Time{}, fmt.Errorf("random-walk-seed: unexpected type %T for last_crawled_at", v)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: unexpected type %T for last_crawled_at", v)
 	}
+
+	// Parse last_message_id (second column); may be nil if never set.
+	var lastMsgID int64
+	if len(rows[0]) > 1 && rows[0][1] != nil {
+		switch v := rows[0][1].(type) {
+		case float64:
+			lastMsgID = int64(v)
+		}
+	}
+
+	return ts, lastMsgID, nil
 }
 
 // MarkChannelCrawled upserts the channel into seed_channels, setting last_crawled_at
-// to NOW(), last_message_date to the most recent message timestamp, and caching
-// the resolved chatID for future SearchPublicChat avoidance.
-func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64, lastMessageDate time.Time) error {
+// to NOW(), last_message_date to the most recent message timestamp, caching the
+// resolved chatID, adding messagesProcessed to the running total, and keeping
+// the highest member_count ever observed.
+func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64, lastMessageDate time.Time, messagesProcessed int, memberCount int, lastMessageID int64) error {
 	dsm.chatIDCacheMu.Lock()
 	dsm.chatIDCache[username] = chatID
 	dsm.chatIDCacheMu.Unlock()
 
-	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at, last_message_date) VALUES ($1, $2, NOW(), $3) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW(), last_message_date = EXCLUDED.last_message_date;`
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at, last_message_date, total_messages_processed, member_count, last_message_id)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6)
+ON CONFLICT (channel_username) DO UPDATE SET
+  chat_id = EXCLUDED.chat_id,
+  last_crawled_at = NOW(),
+  last_message_date = EXCLUDED.last_message_date,
+  total_messages_processed = COALESCE(seed_channels.total_messages_processed, 0) + EXCLUDED.total_messages_processed,
+  member_count = EXCLUDED.member_count,
+  last_message_id = EXCLUDED.last_message_id;`
 	var msgDate interface{} = nil
 	if !lastMessageDate.IsZero() {
 		msgDate = lastMessageDate
 	}
-	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID, msgDate})
+	var msgID interface{} = nil
+	if lastMessageID > 0 {
+		msgID = lastMessageID
+	}
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID, msgDate, messagesProcessed, memberCount, msgID})
 }
 
 // MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row
@@ -4385,6 +4410,50 @@ func (dsm *DaprStateManager) CountIncompleteBatches(crawlID string) (int, error)
 		return int(v), nil
 	case string:
 		// Some postgres drivers return count as string
+		var count int
+		fmt.Sscanf(v, "%d", &count)
+		return count, nil
+	}
+	return 0, nil
+}
+
+// CountPendingEdges returns the number of pending_edges rows with
+// validation_status = 'pending'. Used by the dynamic proxy scaler.
+func (dsm *DaprStateManager) CountPendingEdges() (int, error) {
+	sqlQuery := `SELECT COUNT(*) FROM pending_edges WHERE validation_status = 'pending';`
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count pending edges: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return 0, nil
+	}
+	switch v := rows[0][0].(type) {
+	case float64:
+		return int(v), nil
+	case string:
+		var count int
+		fmt.Sscanf(v, "%d", &count)
+		return count, nil
+	}
+	return 0, nil
+}
+
+// CountClaimedPages returns the number of page_buffer rows where claimed_by
+// is non-empty for the current crawl. Indicates active crawler pods.
+func (dsm *DaprStateManager) CountClaimedPages() (int, error) {
+	sqlQuery := `SELECT COUNT(*) FROM page_buffer WHERE crawl_id = $1 AND claimed_by != '';`
+	rows, err := dsm.queryDatabase(sqlQuery, dsm.config.CrawlID)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count claimed pages: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return 0, nil
+	}
+	switch v := rows[0][0].(type) {
+	case float64:
+		return int(v), nil
+	case string:
 		var count int
 		fmt.Sscanf(v, "%d", &count)
 		return count, nil

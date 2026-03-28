@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,15 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/null_handler"
 	"github.com/rs/zerolog/log"
 )
+
+// ProxyLifecycleManager abstracts the creation and destruction of proxy
+// infrastructure (e.g. ACI containers) for dynamic scaling. The validator
+// uses this to create/destroy proxies alongside edge-validation workers.
+type ProxyLifecycleManager interface {
+	CreateProxy(ctx context.Context, ordinal int) (string, error)
+	DestroyProxy(ctx context.Context, ordinal int) error
+	DestroyAllProxies(ctx context.Context) error
+}
 
 // TelegramRateLimitConfig configures per-connection rate limiting for Telegram API calls.
 // Rates are in calls per minute; jitter values add a random delay after each rate-limited
@@ -57,6 +67,7 @@ type CrawlerConfig struct {
 	TDLibDatabaseURL   string   // Single database URL (for backward compatibility)
 	TDLibDatabaseURLs  []string // Multiple database URLs for connection pooling
 	MinPostDate        time.Time
+	StopAtMessageID    int64     // TDLib message ID to stop at on re-crawl; 0 = no limit
 	PostRecency        time.Time
 	DateBetweenMin     time.Time // Start date for date-between range
 	DateBetweenMax     time.Time // End date for date-between range
@@ -116,6 +127,11 @@ type CrawlerConfig struct {
 	ProxyPort           int     // SOCKS5 listen port inside the container (default: 1080)
 	ProxyCount          int     // Number of proxy ACIs to create (default: 1)
 	ProxySubscriptionID string  // Azure subscription ID for ACI management
+
+	// ProxyLifecycle is set when managed proxies are used in ValidateOnly mode
+	// with dynamic scaling. The validator's scaler creates/destroys proxies on
+	// demand. Nil when using static proxy lists or non-validator modes.
+	ProxyLifecycle ProxyLifecycleManager
 
 	// Pod identity for multi-pod page claiming (from POD_NAME env var)
 	PodName string
