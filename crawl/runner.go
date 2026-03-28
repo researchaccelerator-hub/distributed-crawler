@@ -7,9 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand/v2"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -112,27 +110,27 @@ func isTDLib400(err error) bool {
 		strings.Contains(s, "no messages found in the chat")
 }
 
-// pickWalkbackChannel selects a random discovered channel to walk back to,
+// pickWalkbackChannel selects a random seed channel to walk back to,
 // skipping sourceURL and any channel present in the exclude map.
 // Returns ErrWalkbackExhausted if no suitable channel is found within maxWalkbackAttempts.
 const maxWalkbackAttempts = 10
 
 func pickWalkbackChannel(sm state.StateManagementInterface, sourceURL string, exclude map[string]bool) (string, error) {
 	for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
-		url, err := sm.GetRandomDiscoveredChannel()
+		url, poolSize, err := sm.GetRandomSeedChannel()
 		if err != nil {
 			return "", fmt.Errorf("random-walk-walkback: unable to get walkback channel from %s: %w", sourceURL, err)
 		}
 		if url == sourceURL || exclude[url] {
-			log.Info().Str("channel", url).Str("source_channel", sourceURL).
-				Msg("random-walk-walkback: candidate skipped, retrying")
+			log.Info().Str("log_tag", "rw_walkback").Str("channel", url).Str("source_channel", sourceURL).
+				Msg("Candidate skipped, retrying")
 			if attempt == maxWalkbackAttempts-1 {
 				return "", fmt.Errorf("random-walk-walkback: channel %s: %w", sourceURL, ErrWalkbackExhausted)
 			}
 			continue
 		}
-		log.Info().Str("walkback_url", url).Str("source_channel", sourceURL).
-			Msg("random-walk-walkback: selected walkback channel")
+		log.Info().Str("log_tag", "rw_walkback").Str("walkback_url", url).Str("source_channel", sourceURL).
+			Int("seed_pool_size", poolSize).Msg("Selected walkback channel")
 		return url, nil
 	}
 	return "", fmt.Errorf("random-walk-walkback: channel %s: %w", sourceURL, ErrWalkbackExhausted)
@@ -153,14 +151,14 @@ func Handle400Replacement(sm state.StateManagementInterface, p *state.Page, cfg 
 	channel := p.URL
 	sequenceID := p.SequenceID
 
-	log.Error().Str("channel", channel).Str("sequence_id", sequenceID).
-		Msg("random-walk-400: TDLib 400 — marking invalid and finding replacement edge")
+	log.Error().Str("log_tag", "rw_400").Str("channel", channel).Str("sequence_id", sequenceID).
+		Msg("TDLib 400 — marking invalid and finding replacement edge")
 
 	if invalidErr := sm.MarkChannelInvalid(channel, "tdlib_400"); invalidErr != nil {
-		log.Warn().Err(invalidErr).Str("channel", channel).Msg("random-walk-400: failed to mark channel invalid")
+		log.Warn().Str("log_tag", "rw_400").Err(invalidErr).Str("channel", channel).Msg("Failed to mark channel invalid")
 	}
 	if seedErr := sm.MarkSeedChannelInvalid(channel); seedErr != nil {
-		log.Warn().Err(seedErr).Str("channel", channel).Msg("random-walk-400: failed to mark seed channel invalid")
+		log.Warn().Str("log_tag", "rw_400").Err(seedErr).Str("channel", channel).Msg("Failed to mark seed channel invalid")
 	}
 
 	edge, err := sm.GetEdgeRecord(sequenceID, channel)
@@ -169,15 +167,15 @@ func Handle400Replacement(sm state.StateManagementInterface, p *state.Page, cfg 
 	}
 
 	if delErr := sm.DeleteEdgeRecord(sequenceID, channel); delErr != nil {
-		log.Warn().Err(delErr).Str("channel", channel).Msg("random-walk-400: failed to delete edge record")
+		log.Warn().Str("log_tag", "rw_400").Err(delErr).Str("channel", channel).Msg("Failed to delete edge record")
 	}
 
 	if edge == nil {
 		if sm.IsSeedChannel(channel) {
-			log.Warn().Str("channel", channel).Msg("random-walk-400: seed channel invalid, picking replacement from seed_channels")
+			log.Warn().Str("log_tag", "rw_400").Str("channel", channel).Msg("Seed channel invalid, picking replacement from seed_channels")
 			return handle400SeedReplacement(sm, p)
 		}
-		log.Warn().Str("channel", channel).Msg("random-walk-400: no edge record found, falling back to walkback")
+		log.Warn().Str("log_tag", "rw_400").Str("channel", channel).Msg("No edge record found, falling back to walkback")
 		return handle400Walkback(sm, p, channel, sequenceID)
 	}
 
@@ -188,17 +186,17 @@ func Handle400Replacement(sm state.StateManagementInterface, p *state.Page, cfg 
 	// Forward edge: try a skipped edge from the same source+sequence.
 	skipped, skippedErr := sm.GetRandomSkippedEdge(sequenceID, edge.SourceChannel)
 	if skippedErr != nil {
-		log.Warn().Err(skippedErr).Str("channel", channel).Msg("random-walk-400: GetRandomSkippedEdge failed, falling back to walkback")
+		log.Warn().Str("log_tag", "rw_400").Err(skippedErr).Str("channel", channel).Msg("GetRandomSkippedEdge failed, falling back to walkback")
 		return handle400Walkback(sm, p, edge.SourceChannel, sequenceID)
 	}
 	if skipped == nil {
-		log.Info().Str("channel", channel).Msg("random-walk-400: no skipped edges remain, falling back to walkback")
+		log.Info().Str("log_tag", "rw_400").Str("channel", channel).Msg("No skipped edges remain, falling back to walkback")
 		return handle400Walkback(sm, p, edge.SourceChannel, sequenceID)
 	}
 
 	// Promote the chosen skipped edge to non-skipped.
 	if promoteErr := sm.PromoteEdge(sequenceID, skipped.DestinationChannel); promoteErr != nil {
-		log.Warn().Err(promoteErr).Str("channel", skipped.DestinationChannel).Msg("random-walk-400: PromoteEdge failed")
+		log.Warn().Str("log_tag", "rw_400").Err(promoteErr).Str("channel", skipped.DestinationChannel).Msg("PromoteEdge failed")
 	}
 
 	replacementPage := &state.Page{
@@ -213,8 +211,8 @@ func Handle400Replacement(sm state.StateManagementInterface, p *state.Page, cfg 
 		return fmt.Errorf("random-walk-400: failed to add replacement page to buffer: %w", addErr)
 	}
 
-	log.Info().Str("failed_channel", channel).Str("replacement_channel", skipped.DestinationChannel).
-		Str("sequence_id", sequenceID).Msg("random-walk-400: replaced with skipped edge")
+	log.Info().Str("log_tag", "rw_400").Str("failed_channel", channel).Str("replacement_channel", skipped.DestinationChannel).
+		Str("sequence_id", sequenceID).Msg("Replaced with skipped edge")
 	return nil
 }
 
@@ -252,8 +250,8 @@ func handle400Walkback(sm state.StateManagementInterface, p *state.Page, sourceC
 		return fmt.Errorf("random-walk-400: failed to save walkback edge record: %w", saveErr)
 	}
 
-	log.Info().Str("failed_channel", p.URL).Str("walkback_channel", walkbackURL).
-		Str("sequence_id", sequenceID).Msg("random-walk-400: replaced with walkback")
+	log.Info().Str("log_tag", "rw_400").Str("failed_channel", p.URL).Str("walkback_channel", walkbackURL).
+		Str("sequence_id", sequenceID).Msg("Replaced with walkback")
 	return nil
 }
 
@@ -261,7 +259,7 @@ func handle400Walkback(sm state.StateManagementInterface, p *state.Page, sourceC
 // (no incoming edge record). It picks a random valid seed channel and adds it
 // to the page buffer without creating an edge record.
 func handle400SeedReplacement(sm state.StateManagementInterface, p *state.Page) error {
-	seedURL, err := sm.GetRandomSeedChannel()
+	seedURL, _, err := sm.GetRandomSeedChannel()
 	if err != nil {
 		return fmt.Errorf("random-walk-400: seed replacement: %w", err)
 	}
@@ -278,8 +276,8 @@ func handle400SeedReplacement(sm state.StateManagementInterface, p *state.Page) 
 		return fmt.Errorf("random-walk-400: failed to add seed replacement page to buffer: %w", addErr)
 	}
 
-	log.Info().Str("failed_channel", p.URL).Str("seed_channel", seedURL).
-		Msg("random-walk-400: replaced invalid seed channel with random seed channel")
+	log.Info().Str("log_tag", "rw_400").Str("failed_channel", p.URL).Str("seed_channel", seedURL).
+		Msg("Replaced invalid seed channel with random seed channel")
 	return nil
 }
 
@@ -314,6 +312,9 @@ func InitConnectionPool(maxSize int, storagePrefix string, cfg common.CrawlerCon
 			Verbosity:         cfg.TDLibVerbosity,
 			StorageRoot:       storagePrefix,
 			RateLimitConfig:   cfg.RateLimitConfig,
+			ProxyAddr:         cfg.ProxyAddr,
+			ProxyUser:         cfg.ProxyUser,
+			ProxyPass:         cfg.ProxyPass,
 		}
 
 		pool, err := telegramhelper.NewConnectionPool(poolConfig)
@@ -531,6 +532,10 @@ func RunForChannelWithPool(ctx context.Context, p *state.Page, storagePrefix str
 
 		p.ConnectionID = connID
 		log.Info().Str("connection_id", p.ConnectionID).Str("channel", p.URL).Str("log_tag", "rw_pool").Msg("Started connection")
+		if rl, ok := tdlibClient.(*telegramhelper.RateLimitedTDLibClient); ok {
+			rl.Stats.Reset()
+			defer rl.Stats.Log(p.URL)
+		}
 		pages, procErr := runForChannelFn(tdlibClient, p, storagePrefix, sm, cfg)
 		if errors.Is(procErr, ErrFloodWaitRetire) {
 			retire = true
@@ -565,6 +570,8 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	// In random-walk mode, use the cached chat ID (from seed_channels) to skip
 	// the expensive SearchPublicChat RPC when we already know the ID.
 	var cachedChatID int64
+	var stopAtMessageID int64
+	originalMinPostDate := cfg.MinPostDate
 	if cfg.SamplingMethod == "random-walk" {
 		if id, ok := sm.GetCachedChatID(p.URL); ok {
 			cachedChatID = id
@@ -572,15 +579,21 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 
 		// If this channel was crawled before, only fetch messages newer than the
 		// last crawl time to avoid re-processing already-seen content.
-		if lastCrawled, err := sm.GetChannelLastCrawled(p.URL); err != nil {
+		// stopAtMessageID is a hard stop: once we hit a message with this ID
+		// (or older), we know everything beyond was already processed.
+		if lastCrawled, lastMsgID, err := sm.GetChannelLastCrawled(p.URL); err != nil {
 			log.Warn().Err(err).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to get last crawled time, fetching full history")
-		} else if !lastCrawled.IsZero() && lastCrawled.After(cfg.MinPostDate) {
-			log.Info().Str("channel", p.URL).Time("since", lastCrawled).Str("log_tag", "rw_channel").Msg("Channel previously crawled, fetching only new messages")
-			cfg.MinPostDate = lastCrawled
+		} else {
+			stopAtMessageID = lastMsgID
+			if !lastCrawled.IsZero() && lastCrawled.After(cfg.MinPostDate) {
+				log.Info().Str("channel", p.URL).Time("since", lastCrawled).Int64("stop_at_msg_id", lastMsgID).Str("log_tag", "rw_channel").Msg("Channel previously crawled, fetching only new messages")
+				cfg.MinPostDate = lastCrawled
+			}
 		}
 	}
 
 	// Get channel information
+	cfg.StopAtMessageID = stopAtMessageID
 	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cachedChatID, cfg)
 	if err != nil {
 		return nil, err
@@ -643,7 +656,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	}
 
 	// Process all messages in the channel
-	discoveredChannels, err := processAllMessages(tdlibClient, channelInfo, messages, cfg.CrawlID, p.URL, sm, p, cfg)
+	discoveredChannels, fetchedCount, err := processAllMessages(tdlibClient, channelInfo, messages, cfg.CrawlID, p.URL, sm, p, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -651,12 +664,47 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	// In random-walk mode, record that this channel has been crawled so future
 	// runs can skip already-seen messages and avoid SearchPublicChat.
 	if cfg.SamplingMethod == "random-walk" {
-		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id); markErr != nil {
+		// Only store last_message_date when the crawl was unfiltered (no
+		// MinPostDate configured). A filtered crawl only sees a window of
+		// messages, so storing the newest date would cause future unfiltered
+		// crawls to skip older messages that were never actually fetched.
+		var lastMsgDate time.Time
+		if originalMinPostDate.IsZero() {
+			lastMsgDate = maxMessageDate(messages)
+		}
+		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id, lastMsgDate, fetchedCount, int(channelInfo.memberCount), maxMessageID(messages)); markErr != nil {
 			log.Warn().Err(markErr).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to mark channel as crawled")
 		}
 	}
 
 	return discoveredChannels, nil
+}
+
+// maxMessageDate returns the newest message date from a slice of TDLib messages.
+// Returns zero time if the slice is empty or contains no valid dates.
+func maxMessageDate(messages []*client.Message) time.Time {
+	var max time.Time
+	for _, msg := range messages {
+		if msg != nil && msg.Date > 0 {
+			t := time.Unix(int64(msg.Date), 0).UTC()
+			if t.After(max) {
+				max = t
+			}
+		}
+	}
+	return max
+}
+
+// maxMessageID returns the highest TDLib message ID from a slice of messages.
+// Returns 0 if the slice is empty.
+func maxMessageID(messages []*client.Message) int64 {
+	var max int64
+	for _, msg := range messages {
+		if msg != nil && msg.Id > max {
+			max = msg.Id
+		}
+	}
+	return max
 }
 
 // getLatestMessageTime retrieves the timestamp of the most recent message in a chat.
@@ -862,8 +910,9 @@ func getChannelInfoWithDeps(
 	cfg common.CrawlerConfig,
 ) (*channelInfo, []*client.Message, error) {
 
-	// TODO: REMOVE THIS AFTER DONE TESTING SPLIT CRAWLER
-	testIP()
+	if err := common.VerifyOutboundIP(cfg.ProxyAddr, cfg.ProxyUser, cfg.ProxyPass); err != nil {
+		return nil, nil, fmt.Errorf("proxy IP verification failed: %w", err)
+	}
 
 	var chat *client.Chat
 	var err error
@@ -907,9 +956,9 @@ func getChannelInfoWithDeps(
 
 	var mess []*client.Message
 	if !cfg.DateBetweenMin.IsZero() && !cfg.DateBetweenMax.IsZero() {
-		mess, err = telegramhelper.FetchChannelMessagesWithSampling(tdlibClient, chat.Id, page, cfg.DateBetweenMin, cfg.DateBetweenMax, cfg.MaxPosts, cfg.SampleSize)
+		mess, err = telegramhelper.FetchChannelMessagesWithSampling(tdlibClient, chat.Id, page, cfg.DateBetweenMin, cfg.DateBetweenMax, cfg.MaxPosts, cfg.SampleSize, 0)
 	} else {
-		mess, err = telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts)
+		mess, err = telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts, cfg.StopAtMessageID)
 	}
 
 	// Get channel stats
@@ -1078,8 +1127,9 @@ func (s *searchLookupStats) log(channel string, tag string) {
 	e.Msg("SearchPublicChat lookup stats")
 }
 
-// processAllMessages retrieves and processes all messages from a channel
-func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, messages []*client.Message, crawlID, channelUsername string, sm state.StateManagementInterface, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, error) {
+// processAllMessages retrieves and processes all messages from a channel.
+// Returns discovered channels, the number of successfully fetched messages, and any error.
+func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, messages []*client.Message, crawlID, channelUsername string, sm state.StateManagementInterface, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, int, error) {
 	processor := &DefaultMessageProcessor{}
 	return processAllMessagesWithProcessor(tdlibClient, info, messages, crawlID, channelUsername, sm, processor, owner, cfg)
 
@@ -1114,7 +1164,7 @@ func processAllMessagesWithProcessor(
 	crawlID,
 	channelUsername string,
 	sm state.StateManagementInterface,
-	processor MessageProcessor, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, error) {
+	processor MessageProcessor, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, int, error) {
 
 	discoveredChannels := make([]*state.Page, 0)
 	discoveredMessages := make([]state.Message, 0)
@@ -1127,6 +1177,13 @@ func processAllMessagesWithProcessor(
 	// tandem-mode: batch created lazily on first valid edge
 	var tandemBatch *state.PendingEdgeBatch
 	seenInBatch := make(map[string]struct{})
+
+	// Grafana dashboard summary fields — set during walkback decision.
+	channelStart := time.Now()
+	var channelWalkback bool
+	var channelNextURL string
+	var newChannelCount int
+	var invalidSkipCount int
 
 	// Process messages
 	for _, message := range messages {
@@ -1146,7 +1203,7 @@ func processAllMessagesWithProcessor(
 	//Now we have a list lets set the ones that need resampling for crawling, leave the others as fetched. If the post doesn't exist any more mark it deleted
 	err := sm.UpdatePage(*owner)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	log.Info().
@@ -1245,7 +1302,7 @@ func processAllMessagesWithProcessor(
 						} else {
 							// check if channel already found as invalid and skip
 							if sm.IsInvalidChannel(o) {
-								log.Info().Str("channel", o).Msg("random-walk-filter: Channel already identified as invalid. Skipping")
+								invalidSkipCount++
 								continue
 							}
 
@@ -1259,14 +1316,19 @@ func processAllMessagesWithProcessor(
 
 								// Pre-filter: reject usernames that can't be valid Telegram channels
 								if filterResult := telegramhelper.FilterUsername(o); !filterResult.Valid {
-									log.Debug().Str("channel", o).Str("reason", filterResult.Reason).
-										Msg("random-walk-tandem: Username failed pre-filter, skipping")
+									log.Debug().Str("log_tag", "rw_tandem").Str("channel", o).Str("reason", filterResult.Reason).
+										Msg("Username failed pre-filter, skipping")
+									continue
+								}
+
+								// Skip channels already known (seed channels are loaded into discovered set at startup)
+								if sm.IsDiscoveredChannel(o) {
 									continue
 								}
 
 								// Dedup: skip if already queued in this batch
 								if _, seen := seenInBatch[o]; seen {
-									log.Debug().Str("channel", o).Msg("random-walk-tandem: Duplicate outlink in batch, skipping")
+									log.Debug().Str("log_tag", "rw_tandem").Str("channel", o).Msg("Duplicate outlink in batch, skipping")
 									continue
 								}
 								seenInBatch[o] = struct{}{}
@@ -1283,11 +1345,11 @@ func processAllMessagesWithProcessor(
 										Status:        "open",
 									}
 									if batchErr := sm.CreatePendingBatch(tandemBatch); batchErr != nil {
-										log.Error().Err(batchErr).Msg("random-walk-tandem: Failed to create pending batch")
-										return nil, batchErr
+										log.Error().Str("log_tag", "rw_tandem").Err(batchErr).Msg("Failed to create pending batch")
+										return nil, 0, batchErr
 									}
-									log.Info().Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
-										Msg("random-walk-tandem: Created pending batch")
+									log.Info().Str("log_tag", "rw_tandem").Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
+										Msg("Created pending batch")
 								}
 
 								edge := &state.PendingEdge{
@@ -1301,7 +1363,7 @@ func processAllMessagesWithProcessor(
 									ValidationStatus:   "pending",
 								}
 								if edgeErr := sm.InsertPendingEdge(edge); edgeErr != nil {
-									log.Error().Err(edgeErr).Str("channel", o).Msg("random-walk-tandem: Failed to insert pending edge")
+									log.Error().Str("log_tag", "rw_tandem").Err(edgeErr).Str("channel", o).Msg("Failed to insert pending edge")
 									// Non-fatal — continue processing other edges
 								}
 							} else {
@@ -1312,7 +1374,7 @@ func processAllMessagesWithProcessor(
 								} else if _, ok := sm.GetCachedChatID(o); ok {
 									// Channel is a seed channel — not a newly discovered channel.
 									// Mark as discovered to avoid future SearchPublicChat calls, but skip edge creation.
-									log.Info().Str("channel", o).Str("source_channel", owner.URL).Msg("random-walk-channel: Seed channel, skipping edge creation")
+									log.Info().Str("log_tag", "rw_channel").Str("channel", o).Str("source_channel", owner.URL).Msg("Seed channel, skipping edge creation")
 									sm.AddDiscoveredChannel(o)
 								} else {
 									srcType, ok := msgSourceMap[o]
@@ -1332,22 +1394,22 @@ func processAllMessagesWithProcessor(
 										}
 										if secs, isFlood := parseFloodWaitSecs(searchErr); isFlood {
 											if secs >= floodWaitRetireThresholdSecs {
-												log.Warn().Int("retry_after_secs", secs).Str("channel", o).
-													Msg("random-walk-channel: FLOOD_WAIT exceeds retire threshold, retiring client")
-												return nil, fmt.Errorf("random-walk-channel: FLOOD_WAIT %ds exceeds retire threshold: %w", secs, ErrFloodWaitRetire)
+												log.Warn().Str("log_tag", "rw_channel").Int("retry_after_secs", secs).Str("channel", o).
+													Msg("FLOOD_WAIT exceeds retire threshold, retiring client")
+												return nil, 0, fmt.Errorf("random-walk-channel: FLOOD_WAIT %ds exceeds retire threshold: %w", secs, ErrFloodWaitRetire)
 											}
-											log.Warn().Int("retry_after_secs", secs).Str("channel", o).
-												Msg("random-walk-channel: FLOOD_WAIT on SearchPublicChat, sleeping and retrying")
+											log.Warn().Str("log_tag", "rw_channel").Int("retry_after_secs", secs).Str("channel", o).
+												Msg("FLOOD_WAIT on SearchPublicChat, sleeping and retrying")
 											time.Sleep(time.Duration(secs) * time.Second)
 											continue
 										}
-										log.Info().Err(searchErr).Str("channel", o).Str("source_type", srcType).Stack().Msg("random-walk-channel: Failed to find channel. Skipping")
+										log.Info().Str("log_tag", "rw_channel").Err(searchErr).Str("channel", o).Str("source_type", srcType).Stack().Msg("Failed to find channel. Skipping")
 										lookupStats.record(srcType, false)
 										if lookupStats.total%100 == 0 {
 											lookupStats.log(owner.URL, "periodic")
 										}
 										if invalidErr := sm.MarkChannelInvalid(o, "not_found"); invalidErr != nil {
-											log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+											log.Warn().Str("log_tag", "rw_channel").Err(invalidErr).Str("channel", o).Msg("Failed to persist invalid channel")
 										}
 										chat = nil
 										break
@@ -1359,13 +1421,13 @@ func processAllMessagesWithProcessor(
 									chatType := string(chat.Type.ChatTypeType())
 
 									if chatType != "chatTypeSupergroup" {
-										log.Info().Str("chat_type", chatType).Str("chat", o).Str("source_type", srcType).Msg("random-walk-channel: Not a valid chat type. Skipping")
+										log.Info().Str("log_tag", "rw_channel").Str("chat_type", chatType).Str("chat", o).Str("source_type", srcType).Msg("Not a valid chat type. Skipping")
 										lookupStats.record(srcType, false)
 										if lookupStats.total%100 == 0 {
 											lookupStats.log(owner.URL, "periodic")
 										}
 										if invalidErr := sm.MarkChannelInvalid(o, "not_supergroup"); invalidErr != nil {
-											log.Warn().Err(invalidErr).Str("channel", o).Msg("random-walk-channel: Failed to persist invalid channel")
+											log.Warn().Str("log_tag", "rw_channel").Err(invalidErr).Str("channel", o).Msg("Failed to persist invalid channel")
 										}
 										continue
 									}
@@ -1373,12 +1435,12 @@ func processAllMessagesWithProcessor(
 									if lookupStats.total%100 == 0 {
 										lookupStats.log(owner.URL, "periodic")
 									}
-									log.Info().Str("channel", o).Str("source_channel", owner.URL).Str("source_type", srcType).Msg("random-walk-channel: Adding channel to discovered channels")
+									log.Info().Str("log_tag", "rw_channel").Str("channel", o).Str("source_channel", owner.URL).Str("source_type", srcType).Msg("Adding channel to discovered channels")
 									sm.AddDiscoveredChannel(o)
 									newChannels[o] = true
 									// Cache the chat ID so future runs can skip SearchPublicChat for this channel
 									if upsertErr := sm.UpsertSeedChannelChatID(o, chat.Id); upsertErr != nil {
-										log.Warn().Err(upsertErr).Str("channel", o).Msg("random-walk-channel: Failed to cache chat ID")
+										log.Warn().Str("log_tag", "rw_channel").Err(upsertErr).Str("channel", o).Msg("Failed to cache chat ID")
 									}
 								}
 							}
@@ -1405,6 +1467,7 @@ func processAllMessagesWithProcessor(
 		Int("messages_deleted", deleted).
 		Int("messages_failed", failed).
 		Int("discovered_channels", discoveredCount).
+		Int("invalid_skipped", invalidSkipCount).
 		Str("page_url", owner.URL).
 		Str("page_id", owner.ID).
 		Msg("Message processing summary")
@@ -1416,19 +1479,22 @@ func processAllMessagesWithProcessor(
 			if tandemBatch != nil {
 				// Close the batch — signals validator that all edges are written.
 				if closeErr := sm.ClosePendingBatch(tandemBatch.BatchID); closeErr != nil {
-					log.Error().Err(closeErr).Msg("random-walk-tandem: Failed to close pending batch")
-					return nil, closeErr
+					log.Error().Str("log_tag", "rw_tandem").Err(closeErr).Msg("Failed to close pending batch")
+					return nil, 0, closeErr
 				}
-				log.Info().Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
-					Msg("random-walk-tandem: Batch closed, validator will handle walkback")
+				log.Info().Str("log_tag", "rw_tandem").Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
+					Msg("Batch closed, validator will handle walkback")
+				newChannelCount = len(seenInBatch)
 				// Do NOT write edge_records, page_buffer, or make walkback decision.
 			} else {
 				// No edges found — crawler handles forced walkback itself.
-				log.Info().Str("source_channel", owner.URL).Msg("random-walk-tandem: No edges found, performing forced walkback")
+				log.Info().Str("log_tag", "rw_tandem").Str("source_channel", owner.URL).Msg("No edges found, performing forced walkback")
+				channelWalkback = true
 				walkbackURL, walkErr := pickWalkbackChannel(sm, owner.URL, nil)
 				if walkErr != nil {
-					return nil, walkErr
+					return nil, 0, walkErr
 				}
+				channelNextURL = walkbackURL
 				page := &state.Page{
 					ID:         uuid.New().String(),
 					ParentID:   owner.ID,
@@ -1446,12 +1512,12 @@ func processAllMessagesWithProcessor(
 					SequenceID:         owner.SequenceID,
 				}
 				if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
-					log.Error().Err(bufErr).Msg("random-walk-tandem: failed to add walkback page to page buffer")
-					return nil, fmt.Errorf("random-walk-tandem: forced walkback page lost: %w", bufErr)
+					log.Error().Str("log_tag", "rw_tandem").Err(bufErr).Msg("Failed to add walkback page to page buffer")
+					return nil, 0, fmt.Errorf("random-walk-tandem: forced walkback page lost: %w", bufErr)
 				}
 				if saveErr := sm.SaveEdgeRecords([]*state.EdgeRecord{edge}); saveErr != nil {
-					log.Err(saveErr).Str("source_channel", owner.URL).Msg("random-walk-tandem: Error saving forced walkback edge")
-					return nil, saveErr
+					log.Err(saveErr).Str("log_tag", "rw_tandem").Str("source_channel", owner.URL).Msg("Error saving forced walkback edge")
+					return nil, 0, saveErr
 				}
 			}
 		} else {
@@ -1470,20 +1536,20 @@ func processAllMessagesWithProcessor(
 
 			walkback := false
 			rndNum := -1
-			newChannelCount := len(newChannels)
+			newChannelCount = len(newChannels)
 			if newChannelCount == 0 {
 				walkback = true
 			} else {
 				rndNum = rand.IntN(100) + 1
 			}
 
-			log.Info().Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
-				Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("random-walk-walkback: Walkback decision data")
+			log.Info().Str("log_tag", "rw_walkback").Int("walkback_rate", cfg.WalkbackRate).Int("random_num", rndNum).Bool("walkback", walkback).
+				Int("new_channels", newChannelCount).Str("source_channel", owner.URL).Msg("Walkback decision data")
 			if walkback || cfg.WalkbackRate >= rndNum {
 				linkToFollow.Walkback = true
 				walkbackURL, walkErr := pickWalkbackChannel(sm, owner.URL, newChannels)
 				if walkErr != nil {
-					return nil, walkErr
+					return nil, 0, walkErr
 				}
 				page.URL = walkbackURL
 				// The walkback edge belongs to the current chain; the next crawl starts a new chain.
@@ -1503,19 +1569,21 @@ func processAllMessagesWithProcessor(
 				page.SequenceID = owner.SequenceID
 			}
 			linkToFollow.DestinationChannel = page.URL
-			log.Info().Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
+			channelWalkback = linkToFollow.Walkback
+			channelNextURL = page.URL
+			log.Info().Str("log_tag", "rw_edge").Str("destination_channel", linkToFollow.DestinationChannel).Time("discovery_time", linkToFollow.DiscoveryTime).
 				Bool("skipped", linkToFollow.Skipped).Str("source_channel", linkToFollow.SourceChannel).Bool("walkback", linkToFollow.Walkback).
-				Msg("random-walk-edge: Adding edge to follow in next layer")
+				Msg("Adding edge to follow in next layer")
 			discoveredEdges = append(discoveredEdges, linkToFollow)
 
 			err := sm.AddPageToPageBuffer(page)
 			if err != nil {
-				log.Error().Err(err).Msg("random-walk-layer: failed to load page to page buffer")
+				log.Error().Str("log_tag", "rw_layer").Err(err).Msg("Failed to load page to page buffer")
 			}
 			// discoveredChannels = append(discoveredChannels, page)
 
 			if len(newChannels) > 0 {
-				log.Info().Int("new_channels", len(newChannels)).Msg("random-walk-edge: New channels found that will be skipped. Adding edge records")
+				log.Info().Str("log_tag", "rw_edge").Int("new_channels", len(newChannels)).Msg("New channels found that will be skipped. Adding edge records")
 				for channel := range newChannels {
 					skippedLink := &state.EdgeRecord{
 						DestinationChannel: channel,
@@ -1525,28 +1593,47 @@ func processAllMessagesWithProcessor(
 						Walkback:           false,
 						SequenceID:         owner.SequenceID,
 					}
-					log.Info().Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
+					log.Info().Str("log_tag", "rw_edge").Str("destination_channel", skippedLink.DestinationChannel).Time("discovery_time", skippedLink.DiscoveryTime).
 						Bool("skipped", skippedLink.Skipped).Str("source_channel", skippedLink.SourceChannel).Bool("walkback", skippedLink.Walkback).
-						Msg("random-walk-edge: Adding skipped edge")
+						Msg("Adding skipped edge")
 					discoveredEdges = append(discoveredEdges, skippedLink)
 				}
 			}
-			log.Info().Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("random-walk-edge: Saving discovered edges")
+			log.Info().Str("log_tag", "rw_edge").Str("source_channel", owner.URL).Int("discovered_edges_count", len(discoveredEdges)).Msg("Saving discovered edges")
 			err = sm.SaveEdgeRecords(discoveredEdges)
 			if err != nil {
-				log.Err(err).Str("source_channel", owner.URL).Msg("random-walk-edge: Error saving discovered edges")
-				return nil, err
+				log.Err(err).Str("log_tag", "rw_edge").Str("source_channel", owner.URL).Msg("Error saving discovered edges")
+				return nil, 0, err
 			}
 		}
+	}
+
+	// Emit a single structured log line
+	if cfg.SamplingMethod == "random-walk" {
+		log.Info().
+			Str("log_tag", "rw_channel_complete").
+			Str("crawl_id", cfg.CrawlID).
+			Str("channel", owner.URL).
+			Str("sequence_id", owner.SequenceID).
+			Int("depth", owner.Depth).
+			Int("messages_processed", processed).
+			Int("messages_fetched", fetched).
+			Int("edges_discovered", discoveredCount).
+			Int("new_channels", newChannelCount).
+			Bool("walkback", channelWalkback).
+			Str("next_channel", channelNextURL).
+			Dur("duration", time.Since(channelStart)).
+			Int("member_count", int(info.memberCount)).
+			Msg("Channel complete")
 	}
 
 	owner.Status = "fetched"
 	err = sm.UpdatePage(*owner)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return discoveredChannels, nil
+	return discoveredChannels, fetched, nil
 }
 
 // resampleMarker updates message statuses by comparing existing messages with
@@ -1806,35 +1893,4 @@ func processMessage(tdlibClient crawler.TDLibClient, message *client.Message, me
 	}
 
 	return post.Outlinks, nil
-}
-
-func testIP() {
-	httpClient := &http.Client{
-		Timeout: 5 * time.Second,
-	}
-
-	req, err := http.NewRequest("GET", "https://ifconfig.me/ip", nil)
-	if err != nil {
-		fmt.Printf("Error creating IP request: %v\n", err)
-		return
-	}
-
-	req.Header.Set("User-Agent", "curl/7.79.1")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		fmt.Printf("Error making IP request: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading IP body: %v\n", err)
-		return
-	}
-
-	ipAddress := strings.TrimSpace(string(body))
-
-	log.Info().Str("ip_address", ipAddress).Msg("Current IP Address")
 }

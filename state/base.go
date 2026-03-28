@@ -77,10 +77,10 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 
 		// Store Seed Urls as discovered Channel
 		if bsm.config.SamplingMethod == "random-walk" {
-			log.Info().Str("url", url).Msg("random-walk-seed: Adding seed url in Base SM Initialize")
+			log.Info().Str("log_tag", "rw_seed").Str("url", url).Msg("Adding seed url in Base SM Initialize")
 			err := bsm.discoveredChannels.Add(url)
 			if err != nil {
-				log.Error().Str("url", url).Msg("random-walk-seed: Unable to add seed url as discovered channel")
+				log.Error().Str("log_tag", "rw_seed").Str("url", url).Msg("Unable to add seed url as discovered channel")
 			}
 		}
 
@@ -94,10 +94,15 @@ func (bsm *BaseStateManager) Initialize(seedURLs []string) error {
 
 func (bsm *BaseStateManager) LoadSeedChannels() error                                { return nil }
 func (bsm *BaseStateManager) UpsertSeedChannelChatID(_ string, _ int64) error       { return nil }
+func (bsm *BaseStateManager) InsertSeedChannelIfNew(_ string) error                     { return nil }
 func (bsm *BaseStateManager) GetCachedChatID(_ string) (int64, bool)                { return 0, false }
 func (bsm *BaseStateManager) IsSeedChannel(_ string) bool                           { return false }
-func (bsm *BaseStateManager) GetChannelLastCrawled(_ string) (time.Time, error)     { return time.Time{}, nil }
-func (bsm *BaseStateManager) MarkChannelCrawled(_ string, _ int64) error            { return nil }
+func (bsm *BaseStateManager) GetChannelLastCrawled(_ string) (time.Time, int64, error) {
+	return time.Time{}, 0, nil
+}
+func (bsm *BaseStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time, _ int, _ int, _ int64) error {
+	return nil
+}
 func (bsm *BaseStateManager) LoadInvalidChannels() error                            { return nil }
 func (bsm *BaseStateManager) IsInvalidChannel(_ string) bool                        { return false }
 func (bsm *BaseStateManager) MarkChannelInvalid(_ string, _ string) error           { return nil }
@@ -534,10 +539,10 @@ func (bsm *BaseStateManager) StoreChannelData(channelID string, channelData *mod
 func (bsm *BaseStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 	bsm.mutex.Lock()
 	defer bsm.mutex.Unlock()
-	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Int("new_edge_count", len(edges)).
-		Msg("random-walk-edge: Adding new edges in base manager")
+	log.Info().Str("log_tag", "rw_edge").Int("edge_record_count", len(bsm.edgeRecords)).Int("new_edge_count", len(edges)).
+		Msg("Adding new edges in base manager")
 	bsm.edgeRecords = append(bsm.edgeRecords, edges...)
-	log.Info().Int("edge_record_count", len(bsm.edgeRecords)).Msg("random-walk-edge: New edges added")
+	log.Info().Str("log_tag", "rw_edge").Int("edge_record_count", len(bsm.edgeRecords)).Msg("New edges added")
 	return nil
 }
 

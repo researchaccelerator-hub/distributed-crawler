@@ -378,6 +378,10 @@ func (m *MockStateManager) UpsertSeedChannelChatID(username string, chatID int64
 	args := m.Called(username, chatID)
 	return args.Error(0)
 }
+func (m *MockStateManager) InsertSeedChannelIfNew(username string) error {
+	args := m.Called(username)
+	return args.Error(0)
+}
 func (m *MockStateManager) GetCachedChatID(username string) (int64, bool) {
 	args := m.Called(username)
 	return args.Get(0).(int64), args.Bool(1)
@@ -386,8 +390,12 @@ func (m *MockStateManager) IsSeedChannel(username string) bool {
 	args := m.Called(username)
 	return args.Bool(0)
 }
-func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, error)         { return time.Time{}, nil }
-func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64) error                { return nil }
+func (m *MockStateManager) GetChannelLastCrawled(_ string) (time.Time, int64, error) {
+	return time.Time{}, 0, nil
+}
+func (m *MockStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time, _ int, _ int, _ int64) error {
+	return nil
+}
 func (m *MockStateManager) LoadInvalidChannels() error {
 	args := m.Called()
 	return args.Error(0)
@@ -416,6 +424,24 @@ func (m *MockStateManager) GetPagesFromPageBuffer(_ int) ([]state.Page, error) {
 	return args.Get(0).([]state.Page), args.Error(1)
 }
 
+func (m *MockStateManager) ClaimPages(_ int) ([]state.Page, error) {
+	args := m.Called()
+	return args.Get(0).([]state.Page), args.Error(1)
+}
+
+func (m *MockStateManager) UnclaimPages(_ []string) error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockStateManager) RefreshPageClaim(_ string) error {
+	return nil
+}
+
+func (m *MockStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) {
+	args := m.Called()
+	return args.Int(0), args.Error(1)
+}
 
 func (m *MockStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	args := m.Called(sqlQuery, params)
@@ -490,18 +516,23 @@ func (m *MockStateManager) RecoverStaleBatchClaims(staleThreshold time.Duration)
 	return args.Int(0), args.Error(1)
 }
 
+func (m *MockStateManager) RecoverStaleValidatingEdges(staleThreshold time.Duration) (int, error) {
+	args := m.Called(staleThreshold)
+	return args.Int(0), args.Error(1)
+}
+
 func (m *MockStateManager) FlushBatchStats(batchID, crawlID string, edges []*state.PendingEdge) error {
 	args := m.Called(batchID, crawlID, edges)
 	return args.Error(0)
 }
 
-func (m *MockStateManager) GetRandomSeedChannel() (string, error) {
+func (m *MockStateManager) GetRandomSeedChannel() (string, int, error) {
 	args := m.Called()
-	return args.String(0), args.Error(1)
+	return args.String(0), args.Int(1), args.Error(2)
 }
 
-func (m *MockStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
-	args := m.Called(username, crawlID)
+func (m *MockStateManager) ClaimDiscoveredChannel(username, crawlID, sourceChannel string) (bool, error) {
+	args := m.Called(username, crawlID, sourceChannel)
 	return args.Bool(0), args.Error(1)
 }
 
@@ -512,6 +543,16 @@ func (m *MockStateManager) IsChannelDiscovered(username string) (bool, error) {
 
 func (m *MockStateManager) CountIncompleteBatches(crawlID string) (int, error) {
 	args := m.Called(crawlID)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockStateManager) CountPendingEdges() (int, error) {
+	args := m.Called()
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockStateManager) CountClaimedPages() (int, error) {
+	args := m.Called()
 	return args.Int(0), args.Error(1)
 }
 

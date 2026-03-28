@@ -3,15 +3,40 @@ package telegramhelper
 import (
 	"context"
 	"fmt"
-	"github.com/researchaccelerator-hub/telegram-scraper/common"
-	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
-	"github.com/rs/zerolog/log"
 	"hash/fnv"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/researchaccelerator-hub/telegram-scraper/common"
+	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
+	"github.com/rs/zerolog/log"
 )
+
+// logConnectionIdentity calls GetMe on the client and logs the account identity.
+// It recovers from panics (e.g. testify mock unexpected calls) so it never crashes.
+func logConnectionIdentity(client crawler.TDLibClient, connID string, extra map[string]string, label string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Warn().Str("connectionID", connID).Interface("panic", r).Msg("Recovered from panic in GetMe identity check")
+		}
+	}()
+	me, err := client.GetMe()
+	if err != nil || me == nil {
+		log.Warn().Err(err).Str("connectionID", connID).Msgf("Failed to get account identity for %s", label)
+		return
+	}
+	evt := log.Info().
+		Str("connectionID", connID).
+		Int64("user_id", int64(me.Id)).
+		Str("first_name", me.FirstName).
+		Str("last_name", me.LastName)
+	for k, v := range extra {
+		evt = evt.Str(k, v)
+	}
+	evt.Msg(label)
+}
 
 // ConnectionPool manages a pool of Telegram client connections to enable
 // efficient concurrent processing of multiple Telegram channels.
@@ -40,6 +65,9 @@ type ConnectionPoolConfig struct {
 	Verbosity         int                            // TDLib verbosity level (0-10, where 10 is most verbose)
 	StorageRoot       string
 	RateLimitConfig   common.TelegramRateLimitConfig // Per-connection Telegram API rate limits
+	ProxyAddr         string                         // SOCKS5 proxy address (host:port)
+	ProxyUser         string                         // SOCKS5 auth username
+	ProxyPass         string                         // SOCKS5 auth password
 }
 
 // NewConnectionPool creates a new connection pool with the specified configuration.
@@ -66,6 +94,9 @@ func NewConnectionPool(config ConnectionPoolConfig) (*ConnectionPool, error) {
 		defaultConfig: common.CrawlerConfig{
 			TDLibDatabaseURLs: config.TDLibDatabaseURLs,
 			TDLibVerbosity:    config.Verbosity,
+			ProxyAddr:         config.ProxyAddr,
+			ProxyUser:         config.ProxyUser,
+			ProxyPass:         config.ProxyPass,
 		},
 		connDirMap:      make(map[string]string),
 		rateLimitConfig: rateLimitCfg,
@@ -139,6 +170,8 @@ func (p *ConnectionPool) PreloadConnections(databaseURLs []string) {
 
 		// Store the mapping
 		p.connDirMap[connID] = dirName
+
+		logConnectionIdentity(client, connID, map[string]string{"databaseURL": databaseURLs[i]}, "Connection identity")
 
 		// Add to available connections (wrapped with per-connection rate limiter)
 		p.availableConns[connID] = NewRateLimitedTDLibClient(client, p.rateLimitConfig)
@@ -225,6 +258,8 @@ func (p *ConnectionPool) GetConnection(ctx context.Context) (crawler.TDLibClient
 		// Use the directory name as the connection ID for perfect matching
 		p.connectionCount++
 		connID := dirName
+
+		logConnectionIdentity(client, connID, nil, "New connection identity")
 
 		// Store the mapping (wrapped with per-connection rate limiter)
 		wrapped := NewRateLimitedTDLibClient(client, p.rateLimitConfig)
@@ -403,6 +438,8 @@ func (p *ConnectionPool) HandleConnectionError(ctx context.Context, connID strin
 		log.Error().Err(err).Str("connectionID", connID).Msg("Failed to create fresh connection after error")
 		return nil, "", fmt.Errorf("failed to create fresh connection after error: %w", err)
 	}
+
+	logConnectionIdentity(newClient, connID, nil, "Fresh connection identity")
 
 	// Put the new connection directly back into in-use (wrapped with per-connection rate limiter)
 	wrapped := NewRateLimitedTDLibClient(newClient, p.rateLimitConfig)

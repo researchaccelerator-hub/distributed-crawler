@@ -64,6 +64,7 @@ func TestTandemMode_WithEdges(t *testing.T) {
 	sm.On("UpdateMessage", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	sm.On("UpdatePage", mock.Anything).Return(nil)
 	sm.On("IsInvalidChannel", mock.Anything).Return(false)
+	sm.On("IsDiscoveredChannel", mock.Anything).Return(false)
 	sm.On("CreatePendingBatch", mock.MatchedBy(func(b *state.PendingEdgeBatch) bool {
 		return b.CrawlID == "crawl-1" && b.SourceChannel == "source_channel" && b.Status == "open"
 	})).Return(nil).Once()
@@ -81,7 +82,7 @@ func TestTandemMode_WithEdges(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"valid_channel", "another_chan"}, nil)
 
-	result, err := processAllMessagesWithProcessor(
+	result, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -130,7 +131,7 @@ func TestTandemMode_NoEdges(t *testing.T) {
 
 	sm.On("UpdateMessage", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	sm.On("UpdatePage", mock.Anything).Return(nil)
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "walkback_target" && p.Depth == 1
 	})).Return(nil)
@@ -144,7 +145,7 @@ func TestTandemMode_NoEdges(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{}, nil)
 
-	result, err := processAllMessagesWithProcessor(
+	result, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -194,7 +195,7 @@ func TestTandemMode_InvalidChannelSkipped(t *testing.T) {
 	sm.On("UpdatePage", mock.Anything).Return(nil)
 	sm.On("IsInvalidChannel", "invalid_chan").Return(true)
 	// Forced walkback since no edges
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
@@ -204,7 +205,7 @@ func TestTandemMode_InvalidChannelSkipped(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"invalid_chan"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -270,7 +271,7 @@ func TestNonTandemMode_Unchanged(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"valid_channel"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 

@@ -371,21 +371,23 @@ func TestFlushBatchStats_EmptySourceTypeMappedToUnknown(t *testing.T) {
 // GetRandomSeedChannel
 // ---------------------------------------------------------------------------
 
-func TestGetRandomSeedChannel_ReturnsChannel(t *testing.T) {
+func TestGetRandomSeedChannel_ReturnsChannelAndPoolSize(t *testing.T) {
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
-			return &daprc.BindingEvent{Data: jsonRows([][]any{{"random_chan"}})}, nil
+			return &daprc.BindingEvent{Data: jsonRows([][]any{{"random_chan", float64(42)}})}, nil
 		},
 	}
 	dsm := newValidatorDSM(mc)
 
-	ch, err := dsm.GetRandomSeedChannel()
+	ch, poolSize, err := dsm.GetRandomSeedChannel()
 	require.NoError(t, err)
 	assert.Equal(t, "random_chan", ch)
+	assert.Equal(t, 42, poolSize)
 
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "ORDER BY RANDOM()")
+	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "COUNT(*) OVER()")
 }
 
 func TestGetRandomSeedChannel_EmptyTable(t *testing.T) {
@@ -396,7 +398,7 @@ func TestGetRandomSeedChannel_EmptyTable(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	_, err := dsm.GetRandomSeedChannel()
+	_, _, err := dsm.GetRandomSeedChannel()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no seed channels found")
 }
@@ -414,7 +416,7 @@ func TestClaimDiscoveredChannel_FirstClaim(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	claimed, err := dsm.ClaimDiscoveredChannel("new_chan", "crawl-1")
+	claimed, err := dsm.ClaimDiscoveredChannel("new_chan", "crawl-1", "source_chan")
 	require.NoError(t, err)
 	assert.True(t, claimed)
 
@@ -433,7 +435,7 @@ func TestClaimDiscoveredChannel_AlreadyClaimed(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	claimed, err := dsm.ClaimDiscoveredChannel("existing_chan", "crawl-1")
+	claimed, err := dsm.ClaimDiscoveredChannel("existing_chan", "crawl-1", "")
 	require.NoError(t, err)
 	assert.False(t, claimed)
 }
@@ -446,7 +448,7 @@ func TestClaimDiscoveredChannel_SQLInjectionSafe(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	_, err := dsm.ClaimDiscoveredChannel("it's_a_test", "crawl-1")
+	_, err := dsm.ClaimDiscoveredChannel("it's_a_test", "crawl-1", "")
 	require.NoError(t, err)
 
 	mc.mu.Lock()
@@ -502,6 +504,41 @@ func TestIsChannelDiscovered_SQLInjectionSafe(t *testing.T) {
 	// Value must appear in params, not interpolated into the SQL string.
 	assert.Contains(t, mc.bindingCalls[0].Metadata["params"], "it's_a_test")
 	assert.NotContains(t, mc.bindingCalls[0].Metadata["sql"], "it's_a_test")
+}
+
+func TestIsChannelDiscovered_InMemoryHit(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			t.Fatal("DB should not be called when channel is in memory")
+			return nil, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	// Simulate seed channel loaded into in-memory discovered set
+	_ = dsm.BaseStateManager.AddDiscoveredChannel("seed_chan")
+
+	found, err := dsm.IsChannelDiscovered("seed_chan")
+	require.NoError(t, err)
+	assert.True(t, found)
+}
+
+func TestIsChannelDiscovered_InMemoryMiss_FallsBackToDB(t *testing.T) {
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(1)}})}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	found, err := dsm.IsChannelDiscovered("db_only_chan")
+	require.NoError(t, err)
+	assert.True(t, found)
+
+	// Verify DB was actually called
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	assert.Len(t, mc.bindingCalls, 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +618,31 @@ func TestClaimPendingEdges_DBError(t *testing.T) {
 	edges, err := dsm.ClaimPendingEdges(5)
 	assert.Error(t, err)
 	assert.Nil(t, edges)
+}
+
+// KeepPendingEdges skips the DELETE so rows are retained for analysis.
+func TestFlushBatchStats_KeepPendingEdges_SkipsDelete(t *testing.T) {
+	mc := &mockDaprClient{}
+	cfg := defaultRWConfig()
+	cfg.KeepPendingEdges = true
+	dsm := newTestDSMRW(mc, cfg)
+
+	edges := []*PendingEdge{
+		{SourceType: "mention", ValidationStatus: "valid"},
+		{SourceType: "mention", ValidationStatus: "duplicate"},
+	}
+
+	err := dsm.FlushBatchStats("batch-1", "crawl-1", edges)
+	require.NoError(t, err)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	// 1 upsert only — DELETE must not have been issued
+	require.Len(t, mc.bindingCalls, 1)
+	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "ON CONFLICT")
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "DELETE FROM pending_edges")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -806,6 +868,81 @@ func TestRecoverStaleBatchClaims_FreshBatchNotTouched(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// RecoverStaleValidatingEdges
+// ---------------------------------------------------------------------------
+
+func TestRecoverStaleValidatingEdges_StaleReturnsCount(t *testing.T) {
+	// Edges stuck in 'validating' with old validated_at → reset to 'pending'.
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			sql := in.Metadata["sql"]
+			if strings.Contains(sql, "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(3)}})}, nil
+			}
+			// UPDATE
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleValidatingEdges(10 * time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 3, n)
+	assert.Equal(t, 2, callCount) // COUNT + UPDATE
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	lastSQL := mc.bindingCalls[callCount-1].Metadata["sql"]
+	assert.Contains(t, lastSQL, "SET validation_status = 'pending'")
+	assert.Contains(t, lastSQL, "validated_at = NULL")
+}
+
+func TestRecoverStaleValidatingEdges_NoneStale(t *testing.T) {
+	// No stale edges → count = 0, no UPDATE issued.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			if strings.Contains(in.Metadata["sql"], "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(0)}})}, nil
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleValidatingEdges(10 * time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "SET validation_status")
+	}
+}
+
+func TestRecoverStaleValidatingEdges_MinThresholdClamped(t *testing.T) {
+	// Threshold < 1 minute should be clamped to 1 minute.
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			sql := in.Metadata["sql"]
+			if strings.Contains(sql, "SELECT COUNT(*)") {
+				// Verify the interval uses 1 minute, not 0
+				assert.Contains(t, sql, "INTERVAL '1 minutes'")
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(0)}})}, nil
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	dsm := newValidatorDSM(mc)
+
+	n, err := dsm.RecoverStaleValidatingEdges(5 * time.Second) // less than 1 minute
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+}
+
+// ---------------------------------------------------------------------------
 // RecoverOrphanEdges
 // ---------------------------------------------------------------------------
 
@@ -878,4 +1015,35 @@ func TestRecoverOrphanEdges_CountQueryError_Propagated(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db connection lost")
 	assert.Equal(t, 0, n)
+}
+
+// KeepPendingEdges causes RecoverOrphanEdges to skip the DELETE even when
+// orphan rows exist.
+func TestRecoverOrphanEdges_KeepPendingEdges_SkipsDelete(t *testing.T) {
+	callCount := 0
+	mc := &mockDaprClient{
+		invokeBindingFn: func(_ context.Context, in *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
+			callCount++
+			if strings.Contains(in.Metadata["sql"], "SELECT COUNT(*)") {
+				return &daprc.BindingEvent{Data: jsonRows([][]any{{float64(5)}})}, nil
+			}
+			return &daprc.BindingEvent{}, nil
+		},
+	}
+	cfg := defaultRWConfig()
+	cfg.KeepPendingEdges = true
+	dsm := newTestDSMRW(mc, cfg)
+
+	n, err := dsm.RecoverOrphanEdges()
+	require.NoError(t, err)
+	// Count is still returned so the caller can log it
+	assert.Equal(t, 5, n)
+	// Only the COUNT query — no DELETE
+	assert.Equal(t, 1, callCount)
+
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	for _, call := range mc.bindingCalls {
+		assert.NotContains(t, call.Metadata["sql"], "DELETE FROM pending_edges")
+	}
 }

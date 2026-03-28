@@ -14,15 +14,15 @@ import (
 	"github.com/zelenin/go-tdlib/client"
 )
 
-func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPosts int) ([]*client.Message, error) {
-	return FetchChannelMessagesWithDateRange(tdlibClient, chatID, page, minPostDate, time.Time{}, maxPosts)
+func FetchChannelMessages(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPosts int, stopAtMessageID int64) ([]*client.Message, error) {
+	return FetchChannelMessagesWithDateRange(tdlibClient, chatID, page, minPostDate, time.Time{}, maxPosts, stopAtMessageID)
 }
 
-func FetchChannelMessagesWithDateRange(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPostDate time.Time, maxPosts int) ([]*client.Message, error) {
-	return FetchChannelMessagesWithSampling(tdlibClient, chatID, page, minPostDate, maxPostDate, maxPosts, 0)
+func FetchChannelMessagesWithDateRange(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPostDate time.Time, maxPosts int, stopAtMessageID int64) ([]*client.Message, error) {
+	return FetchChannelMessagesWithSampling(tdlibClient, chatID, page, minPostDate, maxPostDate, maxPosts, 0, stopAtMessageID)
 }
 
-func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPostDate time.Time, maxPosts int, sampleSize int) ([]*client.Message, error) {
+func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID int64, page *state.Page, minPostDate time.Time, maxPostDate time.Time, maxPosts int, sampleSize int, stopAtMessageID int64) ([]*client.Message, error) {
 	log.Debug().Msgf("Fetching messages for channel %s since %s", page.URL, minPostDate.Format("2006-01-02 15:04:05"))
 	if !maxPostDate.IsZero() {
 		log.Debug().Msgf("Max post date filter: %s", maxPostDate.Format("2006-01-02 15:04:05"))
@@ -71,6 +71,16 @@ func FetchChannelMessagesWithSampling(tdlibClient crawler.TDLibClient, chatID in
 		// Check messages and add only those within the date range
 		reachedOldMessages := false
 		for _, msg := range chatHistory.Messages {
+			// Stop when we reach a message we already processed in a prior crawl.
+			// Messages arrive newest-first, so hitting this ID means everything
+			// from here on is already known.
+			if stopAtMessageID > 0 && msg.Id <= stopAtMessageID {
+				log.Debug().Int64("stop_at_message_id", stopAtMessageID).Int64("current_message_id", msg.Id).
+					Msgf("Reached previously crawled message, stopping fetch")
+				reachedOldMessages = true
+				break
+			}
+
 			msgUnix := int64(msg.Date)
 
 			// Compare message timestamp with minPostDate
@@ -869,7 +879,10 @@ func DetectCacheOrServer(start time.Time, endpoint string) bool {
 		cacheHit = false
 	}
 
-	if cacheHit {
+	if duration >= 2*time.Second {
+		log.Warn().Str("api_endpoint", endpoint).Dur("request_time", duration).
+			Msg("Telegram API call took >2s — likely absorbed FLOOD_WAIT")
+	} else if cacheHit {
 		log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")
 	} else {
 		log.Debug().Str("request_source", source).Str("api_endpoint", endpoint).Dur("request_time", duration).Msg("Telegram API Call Timing")

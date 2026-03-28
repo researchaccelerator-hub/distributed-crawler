@@ -357,7 +357,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 				} else {
 					log.Info().Int("pageCount", len(layerZeroPages)).Msg("Loaded layer 0 pages from previous execution")
 					if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-						log.Info().Msg("random-walk-seed: Adding seed urls for in progress crawl")
+						log.Info().Str("log_tag", "rw_seed").Msg("Adding seed urls for in progress crawl")
 						for _, url := range seedURLs {
 							dsm.BaseStateManager.AddDiscoveredChannel(url)
 						}
@@ -460,7 +460,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 			} else {
 				log.Info().Int("pageCount", len(layerZeroPages)).Msg("Successfully loaded layer 0 pages")
 				if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-					log.Info().Msg("random-walk-seed: Adding seed urls for in progress crawl")
+					log.Info().Str("log_tag", "rw_seed").Msg("Adding seed urls for in progress crawl")
 					for _, url := range seedURLs {
 						dsm.BaseStateManager.AddDiscoveredChannel(url)
 					}
@@ -488,7 +488,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 	uniqueSeedURLs := make([]string, 0)
 	for _, url := range seedURLs {
 		if dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-			log.Info().Str("url", url).Msg("random-walk-seed: Adding seed url in Dapr Initialize")
+			log.Info().Str("log_tag", "rw_seed").Str("url", url).Msg("Adding seed url in Dapr Initialize")
 			dsm.BaseStateManager.AddDiscoveredChannel(url)
 		}
 		if _, exists := dsm.urlCache[url]; !exists {
@@ -528,7 +528,7 @@ func (dsm *DaprStateManager) Initialize(seedURLs []string) error {
 
 	// In case it's a random-walk without seed urls
 	if len(pages) == 0 && dsm.BaseStateManager.config.SamplingMethod == "random-walk" {
-		log.Info().Msg("No seed urls provided for url. Creating layer from discovered channels")
+		log.Info().Msg("No seed URLs provided; random-walk seed will be drawn from the page buffer at crawl start")
 		return nil
 	}
 
@@ -3162,8 +3162,8 @@ func (dsm *DaprStateManager) SaveEdgeRecords(edges []*EdgeRecord) error {
 		log.Error().Err(baseErr).Str("log_tag", "rw_edge").Msg("Failed to add edge records")
 		return baseErr
 	}
-	log.Info().Int("new_edges", len(edges)).Int("total_edges", len(dsm.BaseStateManager.edgeRecords)).Str("source_channel", edges[0].SourceChannel).
-		Str("log_tag", "rw_edge").Msg("Adding new edges")
+	log.Info().Int("forced_walkback_edges", len(edges)).Str("source_channel", edges[0].SourceChannel).
+		Str("log_tag", "rw_edge").Msg("Saving forced-walkback edge records")
 
 	sqlQuery := `INSERT INTO edge_records (destination_channel, source_channel, walkback, skipped, discovery_time, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
@@ -3307,8 +3307,7 @@ func (dsm *DaprStateManager) InitializeDiscoveredChannels() error {
 		log.Info().Int("count", len(discoveredChannels)).Str("log_tag", "rw_init").Msg("Found previously discovered channels")
 		for _, row := range discoveredChannels {
 			for _, channel := range row {
-				err := dsm.BaseStateManager.AddDiscoveredChannel(channel)
-				if err != nil {
+				if err := dsm.BaseStateManager.AddDiscoveredChannel(channel); err != nil && !errors.Is(err, ErrChannelExists) {
 					log.Warn().Err(err).Str("channel", channel).Str("log_tag", "rw_init").Msg("Error adding discovered channel")
 				}
 			}
@@ -3401,6 +3400,14 @@ func (dsm *DaprStateManager) UpsertSeedChannelChatID(username string, chatID int
 	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
 }
 
+// InsertSeedChannelIfNew inserts the username into seed_channels if it does not
+// already exist.  Unlike UpsertSeedChannelChatID this never overwrites
+// chat_id or other columns on an existing row.
+func (dsm *DaprStateManager) InsertSeedChannelIfNew(username string) error {
+	sqlQuery := `INSERT INTO seed_channels (channel_username) VALUES ($1) ON CONFLICT (channel_username) DO NOTHING;`
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username})
+}
+
 // GetCachedChatID returns the TDLib chat ID for username if it is present in
 // the in-memory cache, along with a boolean indicating whether a value was found.
 func (dsm *DaprStateManager) GetCachedChatID(username string) (int64, bool) {
@@ -3416,15 +3423,16 @@ func (dsm *DaprStateManager) IsSeedChannel(username string) bool {
 	return ok
 }
 
-// GetChannelLastCrawled returns the last_crawled_at timestamp from seed_channels
-// for the given username. Returns zero time if the channel has no recorded crawl.
-func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, error) {
+// GetChannelLastCrawled returns the last_crawled_at timestamp and the newest
+// message ID fetched from seed_channels for the given username.  Returns zero
+// time and 0 message ID if the channel has no recorded crawl.
+func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, int64, error) {
 	dsm.databaseBinding = databaseStorageBinding
 
-	query := "SELECT last_crawled_at FROM seed_channels WHERE channel_username = $1;"
+	query := "SELECT COALESCE(last_message_date, last_crawled_at), last_message_id FROM seed_channels WHERE channel_username = $1;"
 	paramsJSON, err := json.Marshal([]any{username})
 	if err != nil {
-		return time.Time{}, fmt.Errorf("random-walk-seed: failed to marshal params: %w", err)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to marshal params: %w", err)
 	}
 	req := &daprc.InvokeBindingRequest{
 		Name:      dsm.databaseBinding,
@@ -3437,45 +3445,74 @@ func (dsm *DaprStateManager) GetChannelLastCrawled(username string) (time.Time, 
 	}
 	res, err := (*dsm.client).InvokeBinding(context.Background(), req)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("random-walk-seed: failed to query last_crawled_at for %s: %w", username, err)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to query last_crawled_at for %s: %w", username, err)
 	}
 
 	var rows [][]interface{}
 	if err := json.Unmarshal(res.Data, &rows); err != nil {
-		return time.Time{}, fmt.Errorf("random-walk-seed: failed to unmarshal last_crawled_at response: %w", err)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to unmarshal last_crawled_at response: %w", err)
 	}
 
 	if len(rows) == 0 || len(rows[0]) == 0 || rows[0][0] == nil {
-		return time.Time{}, nil
+		return time.Time{}, 0, nil
 	}
 
+	var ts time.Time
 	switch v := rows[0][0].(type) {
 	case string:
-		t, err := time.Parse(time.RFC3339, v)
+		ts, err = time.Parse(time.RFC3339, v)
 		if err != nil {
 			// Try common Postgres format
-			t, err = time.Parse("2006-01-02T15:04:05Z", v)
+			ts, err = time.Parse("2006-01-02T15:04:05Z", v)
 			if err != nil {
-				return time.Time{}, fmt.Errorf("random-walk-seed: failed to parse last_crawled_at %q: %w", v, err)
+				return time.Time{}, 0, fmt.Errorf("random-walk-seed: failed to parse last_crawled_at %q: %w", v, err)
 			}
 		}
-		return t, nil
 	case float64:
-		return time.Unix(int64(v), 0), nil
+		ts = time.Unix(int64(v), 0)
 	default:
-		return time.Time{}, fmt.Errorf("random-walk-seed: unexpected type %T for last_crawled_at", v)
+		return time.Time{}, 0, fmt.Errorf("random-walk-seed: unexpected type %T for last_crawled_at", v)
 	}
+
+	// Parse last_message_id (second column); may be nil if never set.
+	var lastMsgID int64
+	if len(rows[0]) > 1 && rows[0][1] != nil {
+		switch v := rows[0][1].(type) {
+		case float64:
+			lastMsgID = int64(v)
+		}
+	}
+
+	return ts, lastMsgID, nil
 }
 
 // MarkChannelCrawled upserts the channel into seed_channels, setting last_crawled_at
-// to NOW() and caching the resolved chatID for future SearchPublicChat avoidance.
-func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64) error {
+// to NOW(), last_message_date to the most recent message timestamp, caching the
+// resolved chatID, adding messagesProcessed to the running total, and keeping
+// the highest member_count ever observed.
+func (dsm *DaprStateManager) MarkChannelCrawled(username string, chatID int64, lastMessageDate time.Time, messagesProcessed int, memberCount int, lastMessageID int64) error {
 	dsm.chatIDCacheMu.Lock()
 	dsm.chatIDCache[username] = chatID
 	dsm.chatIDCacheMu.Unlock()
 
-	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at) VALUES ($1, $2, NOW()) ON CONFLICT (channel_username) DO UPDATE SET chat_id = EXCLUDED.chat_id, last_crawled_at = NOW();`
-	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID})
+	sqlQuery := `INSERT INTO seed_channels (channel_username, chat_id, last_crawled_at, last_message_date, total_messages_processed, member_count, last_message_id)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6)
+ON CONFLICT (channel_username) DO UPDATE SET
+  chat_id = EXCLUDED.chat_id,
+  last_crawled_at = NOW(),
+  last_message_date = EXCLUDED.last_message_date,
+  total_messages_processed = COALESCE(seed_channels.total_messages_processed, 0) + EXCLUDED.total_messages_processed,
+  member_count = EXCLUDED.member_count,
+  last_message_id = EXCLUDED.last_message_id;`
+	var msgDate interface{} = nil
+	if !lastMessageDate.IsZero() {
+		msgDate = lastMessageDate
+	}
+	var msgID interface{} = nil
+	if lastMessageID > 0 {
+		msgID = lastMessageID
+	}
+	return dsm.ExecuteDatabaseOperation(sqlQuery, []any{username, chatID, msgDate, messagesProcessed, memberCount, msgID})
 }
 
 // MarkSeedChannelInvalid sets invalidated_at = NOW() on the seed_channels row
@@ -3617,7 +3654,7 @@ func (dsm *DaprStateManager) InitializeRandomWalkLayer() error {
 
 // TODO: generalize the process of inserting records to function that takes in query and params
 func (dsm *DaprStateManager) AddPageToPageBuffer(page *Page) error {
-	sqlQuery := `INSERT INTO page_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6);`
+	sqlQuery := `INSERT INTO page_buffer (page_id, parent_id, depth, url, crawl_id, sequence_id) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (crawl_id, url) DO NOTHING;`
 
 	crawlID := page.CrawlID
 	if crawlID == "" {
@@ -3701,7 +3738,7 @@ func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 	log.Debug().Str("log_tag", "rw_page_buffer").Msg("Getting pages from page buffer")
 	pages := make([]Page, 0)
 
-	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = $1 LIMIT %d;", limit)
+	query := fmt.Sprintf("SELECT page_id, parent_id, depth, url, crawl_id, sequence_id FROM page_buffer WHERE crawl_id = $1 AND claimed_by = '' LIMIT %d;", limit)
 	pageResults, err := dsm.queryDatabase(query, dsm.config.CrawlID)
 	if err != nil {
 		return pages, fmt.Errorf("random-walk-layer: failed to pull page buffer pages: %w", err)
@@ -3728,6 +3765,115 @@ func (dsm *DaprStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) {
 		log.Error().Str("log_tag", "rw_page_buffer").Msg("No pages found in page buffer")
 	}
 	return pages, nil
+}
+
+// ClaimPages atomically claims up to `limit` unclaimed pages from the page
+// buffer for this pod.  Uses UPDATE ... FOR UPDATE SKIP LOCKED ... RETURNING
+// so that concurrent pods (or workers) never receive the same page.
+func (dsm *DaprStateManager) ClaimPages(limit int) ([]Page, error) {
+	podName := dsm.config.PodName
+	if podName == "" {
+		podName = "unknown"
+	}
+	safePodName := strings.ReplaceAll(podName, "'", "''")
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+
+	sqlQuery := fmt.Sprintf(
+		`UPDATE page_buffer SET claimed_by = '%s', claimed_at = NOW() WHERE page_id IN ( SELECT page_id FROM page_buffer WHERE crawl_id = '%s' AND claimed_by = '' ORDER BY depth, page_id LIMIT %d FOR UPDATE SKIP LOCKED ) RETURNING page_id, parent_id, depth, url, crawl_id, sequence_id;`,
+		safePodName, safeCrawlID, limit)
+
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return nil, fmt.Errorf("claim-pages: failed to claim pages: %w", err)
+	}
+
+	pages := make([]Page, 0, len(rows))
+	for _, row := range rows {
+		if len(row) < 6 {
+			continue
+		}
+		seqID := ""
+		if row[5] != nil {
+			seqID, _ = row[5].(string)
+		}
+		pages = append(pages, Page{
+			ID:         row[0].(string),
+			ParentID:   row[1].(string),
+			Depth:      int(row[2].(float64)),
+			URL:        row[3].(string),
+			Status:     "claimed",
+			Timestamp:  time.Now(),
+			SequenceID: seqID,
+		})
+	}
+
+	if len(pages) > 0 {
+		log.Debug().Int("count", len(pages)).Str("pod", podName).
+			Str("log_tag", "rw_page_buffer").Msg("Claimed pages from page buffer")
+	}
+	return pages, nil
+}
+
+// UnclaimPages releases previously claimed pages back to the queue so they
+// can be picked up by any pod.  Used when processing fails with a retryable
+// error (e.g. walkback exhausted, flood-wait retire).
+func (dsm *DaprStateManager) UnclaimPages(pageIDs []string) error {
+	if len(pageIDs) == 0 {
+		return nil
+	}
+	escaped := make([]string, len(pageIDs))
+	for i, pid := range pageIDs {
+		escaped[i] = "'" + strings.ReplaceAll(pid, "'", "''") + "'"
+	}
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+	sqlQuery := fmt.Sprintf(
+		"UPDATE page_buffer SET claimed_by = '', claimed_at = NULL WHERE crawl_id = '%s' AND page_id IN (%s);",
+		safeCrawlID, strings.Join(escaped, ","))
+	return dsm.ExecuteDatabaseOperation(sqlQuery, nil)
+}
+
+// RefreshPageClaim bumps claimed_at to NOW() for a page that is still being
+// actively processed, preventing RecoverStalePageClaims from reclaiming it.
+func (dsm *DaprStateManager) RefreshPageClaim(pageID string) error {
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+	safePageID := strings.ReplaceAll(pageID, "'", "''")
+	sqlQuery := fmt.Sprintf(
+		"UPDATE page_buffer SET claimed_at = NOW() WHERE crawl_id = '%s' AND page_id = '%s' AND claimed_by != '';",
+		safeCrawlID, safePageID)
+	return dsm.ExecuteDatabaseOperation(sqlQuery, nil)
+}
+
+// RecoverStalePageClaims resets pages that have been claimed longer than
+// staleThreshold, making them available for re-processing.  Returns the
+// number of recovered pages.
+func (dsm *DaprStateManager) RecoverStalePageClaims(staleThreshold time.Duration) (int, error) {
+	minutes := int(staleThreshold.Minutes())
+	if minutes < 1 {
+		minutes = 1
+	}
+	safeCrawlID := strings.ReplaceAll(dsm.config.CrawlID, "'", "''")
+
+	sqlQuery := fmt.Sprintf(
+		`UPDATE page_buffer pb SET claimed_by = '', claimed_at = NULL FROM (SELECT page_id, url, claimed_by FROM page_buffer WHERE crawl_id = '%s' AND claimed_by != '' AND claimed_at < NOW() - INTERVAL '%d minutes') AS stale WHERE pb.page_id = stale.page_id RETURNING pb.page_id, stale.url, stale.claimed_by;`,
+		safeCrawlID, minutes)
+
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return 0, fmt.Errorf("recover-stale-claims: %w", err)
+	}
+	for _, row := range rows {
+		url, claimedBy := "", ""
+		if len(row) > 1 {
+			url, _ = row[1].(string)
+		}
+		if len(row) > 2 {
+			claimedBy, _ = row[2].(string)
+		}
+		log.Warn().Str("url", url).Str("previously_claimed_by", claimedBy).
+			Int("stale_minutes", minutes).Str("log_tag", "rw_page_buffer").
+			Msg("Recovered stale page claim")
+	}
+	return len(rows), nil
 }
 
 // TODO: alot of shared code between StorePost. Generalize a solution that both functions can use
@@ -4166,33 +4312,41 @@ func (dsm *DaprStateManager) FlushBatchStats(batchID, crawlID string, edges []*P
 
 	for st, c := range agg {
 		if err := dsm.ExecuteDatabaseOperation(upsertSQL, []any{crawlID, st, c.total, c.valid, c.notChannel, c.invalid, c.alreadyDiscovered}); err != nil {
-			log.Warn().Err(err).Str("source_type", st).Msg("validator-db: failed to upsert source_type_stats")
+			log.Warn().Str("log_tag", "val_db").Err(err).Str("source_type", st).Msg("Failed to upsert source_type_stats")
 		}
 	}
 
-	// Delete pending_edges for this batch
-	deleteSQL := `DELETE FROM pending_edges WHERE batch_id = $1;`
-	if err := dsm.ExecuteDatabaseOperation(deleteSQL, []any{batchID}); err != nil {
-		return fmt.Errorf("validator-db: failed to delete pending edges for batch %s: %w", batchID, err)
+	// Delete pending_edges for this batch (skipped in debug mode)
+	if !dsm.BaseStateManager.config.KeepPendingEdges {
+		deleteSQL := `DELETE FROM pending_edges WHERE batch_id = $1;`
+		if err := dsm.ExecuteDatabaseOperation(deleteSQL, []any{batchID}); err != nil {
+			return fmt.Errorf("validator-db: failed to delete pending edges for batch %s: %w", batchID, err)
+		}
 	}
 	return nil
 }
 
-// GetRandomSeedChannel returns a random channel_username from seed_channels.
-func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
-	sqlQuery := `SELECT channel_username FROM seed_channels WHERE (invalidated_at IS NULL OR invalidated_at < NOW() - INTERVAL '30 days') ORDER BY RANDOM() LIMIT 1;`
+// GetRandomSeedChannel returns a random channel_username from seed_channels along
+// with the total number of eligible channels in the pool (via a window function,
+// so no extra round-trip is needed).
+func (dsm *DaprStateManager) GetRandomSeedChannel() (string, int, error) {
+	sqlQuery := `SELECT channel_username, COUNT(*) OVER() FROM seed_channels WHERE (invalidated_at IS NULL OR invalidated_at < NOW() - INTERVAL '30 days') ORDER BY RANDOM() LIMIT 1;`
 	rows, err := dsm.queryDatabase(sqlQuery)
 	if err != nil {
-		return "", fmt.Errorf("validator-db: failed to get random seed channel: %w", err)
+		return "", 0, fmt.Errorf("validator-db: failed to get random seed channel: %w", err)
 	}
-	if len(rows) == 0 || len(rows[0]) == 0 {
-		return "", fmt.Errorf("validator-db: no seed channels found")
+	if len(rows) == 0 || len(rows[0]) < 2 {
+		return "", 0, fmt.Errorf("validator-db: no seed channels found")
 	}
 	username, ok := rows[0][0].(string)
 	if !ok {
-		return "", fmt.Errorf("validator-db: unexpected type for channel_username")
+		return "", 0, fmt.Errorf("validator-db: unexpected type for channel_username")
 	}
-	return username, nil
+	poolSize := 0
+	if v, ok := rows[0][1].(float64); ok {
+		poolSize = int(v)
+	}
+	return username, poolSize, nil
 }
 
 // ClaimDiscoveredChannel atomically claims first-discovery of a channel across
@@ -4205,10 +4359,10 @@ func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
 //	SELECT COUNT(*) FROM ins;
 //
 // COUNT = 1 → we inserted (first claim).  COUNT = 0 → conflict (already claimed).
-func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
-	sqlQuery := `WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id) VALUES ($1, $2) ON CONFLICT (channel_username) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`
+func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID, sourceChannel string) (bool, error) {
+	sqlQuery := `WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id, source_channel) VALUES ($1, $2, $3) ON CONFLICT (channel_username) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`
 
-	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID)
+	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID, sourceChannel)
 	if err != nil {
 		return false, fmt.Errorf("validator-db: failed to claim discovered channel: %w", err)
 	}
@@ -4225,8 +4379,13 @@ func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (b
 }
 
 // IsChannelDiscovered checks whether a channel has been discovered by any crawl
-// in the crawler's history, without inserting.
+// in the crawler's history, without inserting.  Checks the in-memory
+// DiscoveredChannels set first (which includes seed channels loaded at startup)
+// before falling back to a DB query.
 func (dsm *DaprStateManager) IsChannelDiscovered(username string) (bool, error) {
+	if dsm.BaseStateManager.IsDiscoveredChannel(username) {
+		return true, nil
+	}
 	sqlQuery := `SELECT 1 FROM discovered_channels WHERE channel_username = $1 LIMIT 1;`
 	rows, err := dsm.queryDatabase(sqlQuery, username)
 	if err != nil {
@@ -4251,6 +4410,50 @@ func (dsm *DaprStateManager) CountIncompleteBatches(crawlID string) (int, error)
 		return int(v), nil
 	case string:
 		// Some postgres drivers return count as string
+		var count int
+		fmt.Sscanf(v, "%d", &count)
+		return count, nil
+	}
+	return 0, nil
+}
+
+// CountPendingEdges returns the number of pending_edges rows with
+// validation_status = 'pending'. Used by the dynamic proxy scaler.
+func (dsm *DaprStateManager) CountPendingEdges() (int, error) {
+	sqlQuery := `SELECT COUNT(*) FROM pending_edges WHERE validation_status = 'pending';`
+	rows, err := dsm.queryDatabase(sqlQuery)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count pending edges: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return 0, nil
+	}
+	switch v := rows[0][0].(type) {
+	case float64:
+		return int(v), nil
+	case string:
+		var count int
+		fmt.Sscanf(v, "%d", &count)
+		return count, nil
+	}
+	return 0, nil
+}
+
+// CountClaimedPages returns the number of page_buffer rows where claimed_by
+// is non-empty for the current crawl. Indicates active crawler pods.
+func (dsm *DaprStateManager) CountClaimedPages() (int, error) {
+	sqlQuery := `SELECT COUNT(*) FROM page_buffer WHERE crawl_id = $1 AND claimed_by != '';`
+	rows, err := dsm.queryDatabase(sqlQuery, dsm.config.CrawlID)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count claimed pages: %w", err)
+	}
+	if len(rows) == 0 || len(rows[0]) == 0 {
+		return 0, nil
+	}
+	switch v := rows[0][0].(type) {
+	case float64:
+		return int(v), nil
+	case string:
 		var count int
 		fmt.Sscanf(v, "%d", &count)
 		return count, nil
@@ -4287,8 +4490,8 @@ func (dsm *DaprStateManager) RecoverStaleEdgeClaims(staleThreshold time.Duration
 		if err := dsm.ExecuteDatabaseOperation(sqlQuery, nil); err != nil {
 			return 0, fmt.Errorf("validator-db: failed to recover stale edge claims: %w", err)
 		}
-		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
-			Msg("validator-db: recovered stale edge claims")
+		log.Info().Str("log_tag", "val_db").Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("Recovered stale edge claims")
 	}
 	return staleCount, nil
 }
@@ -4321,8 +4524,8 @@ func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duratio
 		if v, ok := row[2].(float64); ok {
 			attempts = int(v)
 		}
-		log.Error().Str("batch_id", batchID).Str("source_channel", srcChan).Int("attempt_count", attempts).
-			Msg("validator-db: poison batch detected — stuck in processing after max attempts, manual intervention required")
+		log.Error().Str("log_tag", "val_db").Str("batch_id", batchID).Str("source_channel", srcChan).Int("attempt_count", attempts).
+			Msg("Poison batch detected — stuck in processing after max attempts, manual intervention required")
 	}
 
 	// Recover stale batches that haven't yet reached the attempt limit.
@@ -4347,8 +4550,44 @@ func (dsm *DaprStateManager) RecoverStaleBatchClaims(staleThreshold time.Duratio
 		if err := dsm.ExecuteDatabaseOperation(recoverSQL, nil); err != nil {
 			return 0, fmt.Errorf("validator-db: failed to recover stale batch claims: %w", err)
 		}
-		log.Info().Int("recovered", staleCount).Int("threshold_minutes", minutes).
-			Msg("validator-db: recovered stale batch claims")
+		log.Info().Str("log_tag", "val_db").Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("Recovered stale batch claims")
+	}
+	return staleCount, nil
+}
+
+// RecoverStaleValidatingEdges resets pending_edges stuck in 'validating' for
+// longer than staleThreshold back to 'pending'. This recovers edges orphaned
+// when a validator pod dies mid-validation.
+func (dsm *DaprStateManager) RecoverStaleValidatingEdges(staleThreshold time.Duration) (int, error) {
+	minutes := int(staleThreshold.Minutes())
+	if minutes < 1 {
+		minutes = 1
+	}
+
+	countSQL := fmt.Sprintf(
+		`SELECT COUNT(*) FROM pending_edges WHERE validation_status = 'validating' AND validated_at < NOW() - INTERVAL '%d minutes';`,
+		minutes)
+	rows, err := dsm.queryDatabase(countSQL)
+	if err != nil {
+		return 0, fmt.Errorf("validator-db: failed to count stale validating edges: %w", err)
+	}
+	staleCount := 0
+	if len(rows) > 0 && len(rows[0]) > 0 {
+		if v, ok := rows[0][0].(float64); ok {
+			staleCount = int(v)
+		}
+	}
+
+	if staleCount > 0 {
+		recoverSQL := fmt.Sprintf(
+			`UPDATE pending_edges SET validation_status = 'pending', validated_at = NULL WHERE validation_status = 'validating' AND validated_at < NOW() - INTERVAL '%d minutes';`,
+			minutes)
+		if err := dsm.ExecuteDatabaseOperation(recoverSQL, nil); err != nil {
+			return 0, fmt.Errorf("validator-db: failed to recover stale validating edges: %w", err)
+		}
+		log.Info().Str("log_tag", "val_db").Int("recovered", staleCount).Int("threshold_minutes", minutes).
+			Msg("Recovered stale validating edges")
 	}
 	return staleCount, nil
 }
@@ -4370,11 +4609,15 @@ func (dsm *DaprStateManager) RecoverOrphanEdges() (int, error) {
 		}
 	}
 	if orphanCount > 0 {
-		deleteSQL := `DELETE FROM pending_edges WHERE batch_id IN (SELECT batch_id FROM pending_edge_batches WHERE status = 'completed');`
-		if err := dsm.ExecuteDatabaseOperation(deleteSQL, nil); err != nil {
-			return 0, fmt.Errorf("validator-db: failed to delete orphan edges: %w", err)
+		if dsm.BaseStateManager.config.KeepPendingEdges {
+			log.Info().Str("log_tag", "val_db").Int("count", orphanCount).Msg("Skipping orphan edge deletion (keep-pending-edges mode)")
+		} else {
+			deleteSQL := `DELETE FROM pending_edges WHERE batch_id IN (SELECT batch_id FROM pending_edge_batches WHERE status = 'completed');`
+			if err := dsm.ExecuteDatabaseOperation(deleteSQL, nil); err != nil {
+				return 0, fmt.Errorf("validator-db: failed to delete orphan edges: %w", err)
+			}
+			log.Info().Str("log_tag", "val_db").Int("deleted", orphanCount).Msg("Deleted orphan edges from completed batches")
 		}
-		log.Info().Int("deleted", orphanCount).Msg("validator-db: deleted orphan edges from completed batches")
 	}
 	return orphanCount, nil
 }

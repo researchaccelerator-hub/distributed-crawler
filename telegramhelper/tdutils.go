@@ -911,7 +911,7 @@ func extractLinksFromFormattedText(ft *client.FormattedText, sourceMap map[strin
 		case *client.TextEntityTypeTextUrl:
 			url := entityType.Url
 			if name, ok := channelNameFromMatch(channelLinkRegex.FindStringSubmatch(url)); ok {
-				log.Debug().Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeTextUrl").Msg("random-walk-links: adding")
+				log.Debug().Str("log_tag", "rw_links").Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeTextUrl").Msg("Adding")
 				addIfNew(name, SourceTypeTextURL)
 			}
 		case *client.TextEntityTypeMention:
@@ -920,11 +920,11 @@ func extractLinksFromFormattedText(ft *client.FormattedText, sourceMap map[strin
 				mention := ft.Text[start:end]
 				if matches := usernameRegex.FindStringSubmatch(mention); len(matches) > 0 {
 					channelName := strings.ToLower(matches[1])
-					log.Debug().Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: adding")
+					log.Debug().Str("log_tag", "rw_links").Str("mention", channelName).Str("entity_type", "TextEntityTypeMention").Msg("Adding")
 					addIfNew(channelName, SourceTypeMention)
 				} else {
-					log.Debug().Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
-					log.Debug().Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("random-walk-links: skipping")
+					log.Debug().Str("log_tag", "rw_links").Str("mention", mention).Str("entity_type", "TextEntityTypeMention").Msg("Skipping")
+					log.Debug().Str("log_tag", "rw_links").Str("entity_extra", entity.Extra).Str("entity_type", "TextEntityTypeMention").Msg("Skipping")
 				}
 			}
 		case *client.TextEntityTypeUrl:
@@ -932,7 +932,7 @@ func extractLinksFromFormattedText(ft *client.FormattedText, sourceMap map[strin
 			if start < end && end <= len(ft.Text) {
 				url := ft.Text[start:end]
 				if name, ok := channelNameFromMatch(channelLinkRegex.FindStringSubmatch(url)); ok {
-					log.Debug().Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeUrl").Msg("random-walk-links: adding")
+					log.Debug().Str("log_tag", "rw_links").Str("url", url).Str("channel_name", name).Str("entity_type", "TextEntityTypeUrl").Msg("Adding")
 					addIfNew(name, SourceTypeURL)
 				}
 			}
@@ -942,7 +942,7 @@ func extractLinksFromFormattedText(ft *client.FormattedText, sourceMap map[strin
 	// Also scan plain text for t.me links not captured as entities
 	for _, match := range channelLinkRegex.FindAllStringSubmatch(ft.Text, -1) {
 		if name, ok := channelNameFromMatch(match); ok {
-			log.Debug().Str("channel_name", name).Str("entity_type", "plaintext").Msg("random-walk-links: adding")
+			log.Debug().Str("log_tag", "rw_links").Str("channel_name", name).Str("entity_type", "plaintext").Msg("Adding")
 			addIfNew(name, SourceTypePlainText)
 		}
 	}

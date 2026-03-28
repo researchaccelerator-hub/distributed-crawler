@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -9,6 +10,9 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/model"
 	"github.com/rs/zerolog/log"
 )
+
+// ErrChannelExists is returned by DiscoveredChannels.Add when the channel is already in the set.
+var ErrChannelExists = errors.New("channel already exists")
 
 // StateManager extends StateManagementInterface with additional methods
 // needed for the new crawler architecture
@@ -135,11 +139,11 @@ func (d *DiscoveredChannels) Add(item string) error {
 	if _, exists := d.items[item]; !exists {
 		d.items[item] = true
 		d.keys = append(d.keys, item)
-		log.Debug().Str("added_channel", item).Int("discovered_channels_count", len(d.keys)).
-			Msg("random-walk-channel: Added new channel to discovered channels")
+		log.Debug().Str("log_tag", "rw_channel").Str("added_channel", item).Int("discovered_channels_count", len(d.keys)).
+			Msg("Added new channel to discovered channels")
 		return nil
 	}
-	return fmt.Errorf("%s already exists", item)
+	return fmt.Errorf("%s: %w", item, ErrChannelExists)
 }
 
 func (d *DiscoveredChannels) Contains(item string) bool {
@@ -152,12 +156,12 @@ func (d *DiscoveredChannels) Contains(item string) bool {
 func (d *DiscoveredChannels) Random() (string, error) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
-	log.Info().Int("discovered_channels_count", len(d.keys)).Msg("random-walk-channel: random discovered channels count before selection")
+	log.Info().Str("log_tag", "rw_channel").Int("discovered_channels_count", len(d.keys)).Msg("Random discovered channels count before selection")
 	if len(d.keys) == 0 {
 		return "", fmt.Errorf("random-walk-channel: no discovered channels to pull from at random")
 	}
 	index := rand.Intn(len(d.keys))
-	log.Info().Int("discovered_channels_count", len(d.keys)).Int("random_index", index).Msg("random-walk-channel: selected random number")
+	log.Info().Str("log_tag", "rw_channel").Int("discovered_channels_count", len(d.keys)).Int("random_index", index).Msg("Selected random number")
 	return d.keys[index], nil
 }
 

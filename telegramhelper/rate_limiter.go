@@ -3,6 +3,7 @@ package telegramhelper
 import (
 	"context"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
@@ -11,6 +12,69 @@ import (
 	tdlibclient "github.com/zelenin/go-tdlib/client"
 	"golang.org/x/time/rate"
 )
+
+// endpointStats tracks cache/server/flood-wait counts for a single API endpoint.
+type endpointStats struct {
+	cacheHits     int
+	serverHits    int
+	floodWaits    int
+	totalTime     time.Duration
+	rateLimitTime time.Duration
+}
+
+// APICallStats accumulates per-endpoint timing stats for a single channel processing run.
+type APICallStats struct {
+	mu        sync.Mutex
+	endpoints map[string]*endpointStats
+}
+
+func newAPICallStats() *APICallStats {
+	return &APICallStats{endpoints: make(map[string]*endpointStats)}
+}
+
+func (s *APICallStats) record(endpoint string, callDuration time.Duration, rateLimitWait time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.endpoints[endpoint]
+	if !ok {
+		e = &endpointStats{}
+		s.endpoints[endpoint] = e
+	}
+	e.totalTime += callDuration
+	e.rateLimitTime += rateLimitWait
+	if callDuration >= 2*time.Second {
+		e.floodWaits++
+	} else if callDuration < 5*time.Millisecond {
+		e.cacheHits++
+	} else {
+		e.serverHits++
+	}
+}
+
+// Reset clears all accumulated stats for reuse between channels.
+func (s *APICallStats) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.endpoints = make(map[string]*endpointStats)
+}
+
+// Log emits a single summary line per endpoint.
+func (s *APICallStats) Log(channel string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for endpoint, e := range s.endpoints {
+		log.Info().
+			Str("log_tag", "api_stats").
+			Str("channel", channel).
+			Str("api_endpoint", endpoint).
+			Int("cache_hits", e.cacheHits).
+			Int("server_hits", e.serverHits).
+			Int("flood_waits", e.floodWaits).
+			Dur("total_time", e.totalTime).
+			Dur("rate_limit_time", e.rateLimitTime).
+			Msg("API call stats")
+	}
+}
 
 // RateLimitedTDLibClient wraps a TDLibClient and enforces independent per-method rate limits
 // with configurable jitter. Each instance owns its own limiters, so connections in the pool
@@ -31,6 +95,8 @@ type RateLimitedTDLibClient struct {
 	searchPublicChatJitterMs    int
 	supergroupInfoJitterMs      int
 	getMessageServerHitJitterMs int
+
+	Stats *APICallStats
 }
 
 // callsPerMinuteToRate converts a calls-per-minute value to a rate.Limit.
@@ -54,6 +120,7 @@ func NewRateLimitedTDLibClient(inner crawler.TDLibClient, cfg common.TelegramRat
 		searchPublicChatJitterMs:    cfg.SearchPublicChatJitterMs,
 		supergroupInfoJitterMs:      cfg.GetSupergroupInfoJitterMs,
 		getMessageServerHitJitterMs: cfg.GetMessageServerHitJitterMs,
+		Stats:                       newAPICallStats(),
 	}
 }
 
@@ -90,10 +157,14 @@ func (c *RateLimitedTDLibClient) waitWithJitter(lim *rate.Limiter, jitterMaxMs i
 // callAndDetect waits for the rate limiter, then times only the actual inner call so that
 // DetectCacheOrServer receives an accurate duration (not inflated by the rate limit wait).
 func (c *RateLimitedTDLibClient) callAndDetect(lim *rate.Limiter, jitterMaxMs int, apiCall string, fn func() error) error {
+	waitStart := time.Now()
 	c.waitWithJitter(lim, jitterMaxMs, apiCall)
+	rateLimitWait := time.Since(waitStart)
 	start := time.Now()
 	err := fn()
+	duration := time.Since(start)
 	DetectCacheOrServer(start, apiCall)
+	c.Stats.record(apiCall, duration, rateLimitWait)
 	return err
 }
 
@@ -145,8 +216,9 @@ func (c *RateLimitedTDLibClient) GetBasicGroupFullInfo(req *tdlibclient.GetBasic
 func (c *RateLimitedTDLibClient) GetMessage(req *tdlibclient.GetMessageRequest) (*tdlibclient.Message, error) {
 	start := time.Now()
 	result, err := c.inner.GetMessage(req)
+	duration := time.Since(start)
 	cacheHit := DetectCacheOrServer(start, "GetMessage")
-
+	var rateLimitWait time.Duration
 	if !cacheHit {
 		r := c.getMessageLim.Reserve()
 		delay := r.Delay()
@@ -154,16 +226,17 @@ func (c *RateLimitedTDLibClient) GetMessage(req *tdlibclient.GetMessageRequest) 
 		if c.getMessageServerHitJitterMs > 0 {
 			jitterMs = rand.IntN(c.getMessageServerHitJitterMs + 1)
 		}
-		total := delay + time.Duration(jitterMs)*time.Millisecond
-		if total > 0 {
+		rateLimitWait = delay + time.Duration(jitterMs)*time.Millisecond
+		if rateLimitWait > 0 {
 			log.Debug().
 				Dur("throttle_delay_ms", delay).
 				Int("jitter_ms", jitterMs).
 				Str("api_call", "GetMessage").
 				Msg("Telegram API reactive throttle (server hit)")
-			time.Sleep(total)
+			time.Sleep(rateLimitWait)
 		}
 	}
+	c.Stats.record("GetMessage", duration, rateLimitWait)
 
 	return result, err
 }
@@ -189,11 +262,17 @@ func (c *RateLimitedTDLibClient) DownloadFile(req *tdlibclient.DownloadFileReque
 }
 
 func (c *RateLimitedTDLibClient) GetChat(req *tdlibclient.GetChatRequest) (*tdlibclient.Chat, error) {
-	return c.inner.GetChat(req)
+	start := time.Now()
+	result, err := c.inner.GetChat(req)
+	c.Stats.record("GetChat", time.Since(start), 0)
+	return result, err
 }
 
 func (c *RateLimitedTDLibClient) GetSupergroup(req *tdlibclient.GetSupergroupRequest) (*tdlibclient.Supergroup, error) {
-	return c.inner.GetSupergroup(req)
+	start := time.Now()
+	result, err := c.inner.GetSupergroup(req)
+	c.Stats.record("GetSupergroup", time.Since(start), 0)
+	return result, err
 }
 
 func (c *RateLimitedTDLibClient) Close() (*tdlibclient.Ok, error) {

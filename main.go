@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -39,7 +39,8 @@ var (
 	crawlID           string
 	crawlLabel        string   // User-provided label for the crawl
 	timeAgo           string   // Time ago parameter
-	maxCrawlDuration  string   // Max wall-clock duration for random-walk crawl (e.g., "48h")
+	maxCrawlDuration      string // Max wall-clock duration for random-walk crawl (e.g., "48h")
+	validatorIdleTimeout  string // Shut down validator after idle period (e.g., "10m")
 	dateBetween       string   // Date range in format "YYYY-MM-DD,YYYY-MM-DD"
 	sampleSize        int      // Number of posts to randomly sample when using date-between
 	tdlibDatabaseURLs []string // Multiple TDLib database URLs
@@ -55,29 +56,6 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 
-	// TODO: Remove after identifying memory leak
-
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	log.Info().Msg("Starting server on :6060")
-	log.Info().Msg("Profiling endpoints are available at http://localhost:6060/debug/pprof/")
-
-	server := &http.Server{
-		Addr:    ":6060",
-		Handler: mux,
-	}
-
-	// Start the HTTP server.
-	go func() {
-		if err := server.ListenAndServe(); err != nil {
-			log.Error().Msgf("Could not start server: %s\n", err)
-		}
-	}()
 
 	// Initialize and execute the root command
 	if err := rootCmd.Execute(); err != nil {
@@ -386,6 +364,84 @@ Examples:
 			Bool("skip_media_download", crawlerCfg.SkipMediaDownload).
 			Msg("Crawler limits configured")
 
+		// Pod identity — used for page claiming and proxy resolution.
+		podName := os.Getenv("POD_NAME")
+		if podName == "" {
+			podName, _ = os.Hostname()
+			if podName == "" {
+				podName = "pod-0"
+			}
+		}
+		crawlerCfg.PodName = podName
+
+		// Resolve SOCKS5 proxy address from CLI flags + env vars.
+		// ProxyAddrs is CLI-only (different crawl types share the same manifest).
+		// Credentials come from env only (secrets should not appear in process args).
+		crawlerCfg.ProxyUser = os.Getenv("PROXY_USER")
+		crawlerCfg.ProxyPass = os.Getenv("PROXY_PASS")
+
+		if crawlerCfg.ManagedProxies && len(crawlerCfg.ProxyAddrs) > 0 {
+			return fmt.Errorf("--managed-proxies and --proxy-addrs are mutually exclusive")
+		}
+
+		if crawlerCfg.ManagedProxies {
+			if crawlerCfg.ProxyResourceGroup == "" {
+				return fmt.Errorf("--proxy-resource-group is required when --managed-proxies is set")
+			}
+			if crawlerCfg.ProxySubscriptionID == "" {
+				return fmt.Errorf("--proxy-subscription-id is required when --managed-proxies is set")
+			}
+			if crawlerCfg.ProxyImage == "" {
+				return fmt.Errorf("--proxy-image is required when --managed-proxies is set")
+			}
+			// Auto-generate SOCKS5 credentials for managed proxies when not
+			// explicitly provided. The same credentials are passed to the
+			// microsocks container at creation time, so they only need to match.
+			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
+				var buf [16]byte
+				if _, err := rand.Read(buf[:]); err != nil {
+					return fmt.Errorf("generating proxy credentials: %w", err)
+				}
+				crawlerCfg.ProxyUser = "proxy"
+				crawlerCfg.ProxyPass = hex.EncodeToString(buf[:])
+				log.Info().Msg("Auto-generated SOCKS5 credentials for managed proxies")
+			}
+			log.Info().
+				Str("resource_group", crawlerCfg.ProxyResourceGroup).
+				Str("image", crawlerCfg.ProxyImage).
+				Str("location", crawlerCfg.ProxyLocation).
+				Int("count", crawlerCfg.ProxyCount).
+				Msg("Managed ACI proxies enabled — will create at crawl start")
+		}
+
+		if len(crawlerCfg.ProxyAddrs) > 0 {
+			if crawlerCfg.ProxyUser == "" || crawlerCfg.ProxyPass == "" {
+				return fmt.Errorf("proxy configured but PROXY_USER and/or PROXY_PASS env vars are not set")
+			}
+			if crawlerCfg.ValidateOnly && len(crawlerCfg.ProxyAddrs) > 1 {
+				// Multi-proxy validator: RunValidationLoop fans out across
+				// all proxies with dynamic scaling. Set ProxyAddr to the first
+				// proxy for backward-compat with any code that reads it.
+				crawlerCfg.ProxyAddr = crawlerCfg.ProxyAddrs[0]
+				log.Info().
+					Int("proxy_count", len(crawlerCfg.ProxyAddrs)).
+					Str("pod_name", podName).
+					Msg("Multi-proxy validator mode — dynamic scaling enabled")
+			} else {
+				addr, err := common.PodProxyAddr(podName, crawlerCfg.ProxyAddrs, crawlerCfg.ProxyOrdinal)
+				if err != nil {
+					return fmt.Errorf("proxy resolution failed: %w", err)
+				}
+				crawlerCfg.ProxyAddr = addr
+				log.Info().
+					Str("proxy_addr", crawlerCfg.ProxyAddr).
+					Str("pod_name", podName).
+					Int("proxy_ordinal", crawlerCfg.ProxyOrdinal).
+					Int("proxy_pool_size", len(crawlerCfg.ProxyAddrs)).
+					Msg("SOCKS5 proxy configured for this pod")
+			}
+		}
+
 		// Parse min post date from string to time.Time if provided
 		minPostDateStr := viper.GetString("crawler.minpostdate")
 		if minPostDateStr != "" {
@@ -480,6 +536,17 @@ Examples:
 			}
 			crawlerCfg.MaxCrawlDuration = d
 			log.Info().Dur("max_crawl_duration", d).Msg("Max crawl duration configured")
+		}
+
+		// Parse validator-idle-timeout if provided
+		validatorIdleTimeoutStr := viper.GetString("crawler.validatoridletimeout")
+		if validatorIdleTimeoutStr != "" {
+			d, err := time.ParseDuration(validatorIdleTimeoutStr)
+			if err != nil {
+				return fmt.Errorf("invalid validator-idle-timeout format, must be a Go duration string (e.g., '10m', '1h'): %v", err)
+			}
+			crawlerCfg.ValidatorIdleTimeout = d
+			log.Info().Dur("validator_idle_timeout", d).Msg("Validator idle timeout configured")
 		}
 
 		// Parse sample-size parameter if provided
@@ -788,9 +855,26 @@ func init() {
 	// Validator / tandem-crawl mode flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.TandemCrawl, "tandem-crawl", false, "Tandem mode: write edges to pending_edges for validator (no SearchPublicChat)")
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.ValidateOnly, "validate-only", false, "Run as validator pod: process pending edges via HTTP, no crawl loop")
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.KeepPendingEdges, "keep-pending-edges", false, "Debug: retain pending_edges rows after batch completion instead of deleting them")
 	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ValidatorRequestRate, "validator-request-rate", 6, "HTTP validation calls per minute (default: 6)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorRequestJitterMs, "validator-request-jitter-ms", 200, "Max jitter in ms between validator HTTP requests (default: 200)")
 	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ValidatorClaimBatchSize, "validator-claim-batch-size", 10, "Number of pending edges to claim per DB round-trip (default: 10)")
+	rootCmd.PersistentFlags().StringVar(&validatorIdleTimeout, "validator-idle-timeout", "", "Shut down validator after this long with no pending edges (e.g. '10m', '1h')")
+
+	// SOCKS5 proxy flags
+	rootCmd.PersistentFlags().StringSliceVar(&crawlerCfg.ProxyAddrs, "proxy-addrs", []string{}, "Comma-separated SOCKS5 proxy addresses (ip:port), one per pod ordinal; empty = no proxy")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyOrdinal, "proxy-ordinal", -1, "Override proxy ordinal for local dev (-1 = derive from POD_NAME)")
+
+	// Managed ACI proxy flags — mutually exclusive with --proxy-addrs
+	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.ManagedProxies, "managed-proxies", false, "Create and destroy ACI SOCKS5 proxy containers for this crawl")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyResourceGroup, "proxy-resource-group", "", "Azure resource group for managed proxy ACIs")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxySubscriptionID, "proxy-subscription-id", "", "Azure subscription ID for managed proxy ACIs")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyImage, "proxy-image", "", "Container image for microsocks proxy (e.g. myregistry.azurecr.io/microsocks:latest)")
+	rootCmd.PersistentFlags().StringVar(&crawlerCfg.ProxyLocation, "proxy-location", "eastus2", "Azure region for proxy ACIs")
+	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyCPU, "proxy-cpu", 0.5, "CPU cores per managed proxy ACI")
+	rootCmd.PersistentFlags().Float64Var(&crawlerCfg.ProxyMemoryGB, "proxy-memory-gb", 0.5, "Memory in GB per managed proxy ACI")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyPort, "proxy-port", 1080, "SOCKS5 listen port inside managed proxy container")
+	rootCmd.PersistentFlags().IntVar(&crawlerCfg.ProxyCount, "proxy-count", 1, "Number of managed proxy ACIs (crawler: all created at startup; validator: max proxies the dynamic scaler can use)")
 
 	// Combine files flags
 	rootCmd.PersistentFlags().BoolVar(&crawlerCfg.CombineFiles, "combine-files", false, "Combine crawl files before uploading")
@@ -823,6 +907,7 @@ func init() {
 	viper.BindPFlag("crawler.minpostdate", rootCmd.PersistentFlags().Lookup("min-post-date"))
 	viper.BindPFlag("crawler.timeago", rootCmd.PersistentFlags().Lookup("time-ago"))
 	viper.BindPFlag("crawler.maxcrawlduration", rootCmd.PersistentFlags().Lookup("max-crawl-duration"))
+	viper.BindPFlag("crawler.validatoridletimeout", rootCmd.PersistentFlags().Lookup("validator-idle-timeout"))
 	viper.BindPFlag("crawler.datebetween", rootCmd.PersistentFlags().Lookup("date-between"))
 	viper.BindPFlag("crawler.samplesize", rootCmd.PersistentFlags().Lookup("sample-size"))
 	viper.BindPFlag("tdlib.database_url", rootCmd.PersistentFlags().Lookup("tdlib-database-url"))

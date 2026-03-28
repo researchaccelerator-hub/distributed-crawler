@@ -29,6 +29,13 @@
 
 
 -- =============================================================================
+-- TIMEZONE
+-- Ensure all TIMESTAMPTZ values are stored and compared in UTC.
+-- =============================================================================
+SET timezone = 'UTC';
+
+
+-- =============================================================================
 -- IDENTITY CONFIGURATION
 -- Set these to the display names of your Azure Entra ID managed identities
 -- (exactly as they appear in the Azure portal).  Override at runtime with -v:
@@ -138,7 +145,7 @@ CREATE TABLE IF NOT EXISTS edge_records (
     source_channel      VARCHAR(64)  NOT NULL,
     walkback            BOOLEAN      NOT NULL,
     skipped             BOOLEAN      NOT NULL,
-    discovery_time      TIMESTAMP    NOT NULL,
+    discovery_time      TIMESTAMPTZ  NOT NULL,
     crawl_id            VARCHAR(64)  NOT NULL,
     sequence_id         VARCHAR(36)  NOT NULL DEFAULT ''
     -- sequence_id: UUID shared across all edges in one uninterrupted forward
@@ -177,9 +184,9 @@ GRANT SELECT ON TABLE edge_records                              TO crawler_reado
 
 -- =============================================================================
 -- TABLE: page_buffer
--- Transient queue of pages to process in the next BFS/random-walk layer.
--- Scoped per pod via crawl_id — each pod only reads/writes its own rows.
--- Rows are deleted after a layer completes; this table should stay small.
+-- Shared work queue for random-walk crawling.  Multiple pods with the same
+-- crawl_id claim pages atomically via UPDATE ... FOR UPDATE SKIP LOCKED.
+-- Rows are deleted after processing; stale claims are recovered periodically.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS page_buffer (
@@ -188,12 +195,22 @@ CREATE TABLE IF NOT EXISTS page_buffer (
     depth       INTEGER      NOT NULL,
     url         VARCHAR(64)  NOT NULL,        -- channel username
     crawl_id    VARCHAR(64)  NOT NULL,
-    sequence_id VARCHAR(36)  NOT NULL DEFAULT ''
+    sequence_id VARCHAR(36)  NOT NULL DEFAULT '',
+    claimed_by  VARCHAR(128) NOT NULL DEFAULT '',   -- pod name; empty = unclaimed
+    claimed_at  TIMESTAMPTZ                          -- NULL when unclaimed
 );
 
--- All runtime queries filter on crawl_id (pod isolation)
+-- All runtime queries filter on crawl_id
 CREATE INDEX IF NOT EXISTS idx_page_buffer_crawl_id
     ON page_buffer (crawl_id);
+
+-- Idempotent seeding: multiple pods can insert the same URL without conflict
+CREATE UNIQUE INDEX IF NOT EXISTS idx_page_buffer_crawl_url
+    ON page_buffer (crawl_id, url);
+
+-- Fast path for ClaimPages: find unclaimed rows ordered by depth
+CREATE INDEX IF NOT EXISTS idx_page_buffer_claimable
+    ON page_buffer (crawl_id, depth) WHERE claimed_by = '';
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE page_buffer      TO crawler_app;
 GRANT SELECT ON TABLE page_buffer                              TO crawler_readonly;
@@ -207,12 +224,15 @@ GRANT SELECT ON TABLE page_buffer                              TO crawler_readon
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS seed_channels (
-    channel_username  VARCHAR(64)  PRIMARY KEY,
-    chat_id           BIGINT,                   -- cached TDLib chat ID; NULL = not yet resolved
-    last_crawled_at   TIMESTAMP,                -- NULL = never crawled; set by MarkChannelCrawled()
-    invalidated_at    TIMESTAMP,                -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
-    member_count      INTEGER,
-    inserted_at       TIMESTAMP    NOT NULL DEFAULT NOW()
+    channel_username         VARCHAR(64)  PRIMARY KEY,
+    chat_id                  BIGINT,                   -- cached TDLib chat ID; NULL = not yet resolved
+    last_crawled_at          TIMESTAMPTZ,              -- NULL = never crawled; set by MarkChannelCrawled()
+    last_message_date        TIMESTAMPTZ,              -- date of the most recent message fetched; used as delta-fetch low-water mark
+    invalidated_at           TIMESTAMPTZ,              -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
+    member_count             INTEGER,                  -- latest member count observed; overwritten on each crawl
+    total_messages_processed INTEGER  NOT NULL DEFAULT 0, -- cumulative messages fetched across all crawls (additive)
+    last_message_id          BIGINT,                   -- TDLib message ID of the newest message fetched; used as stop condition on re-crawl
+    inserted_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 -- Seed selection: quickly find channels never crawled (NULL first)
@@ -241,7 +261,7 @@ GRANT SELECT ON TABLE seed_channels                             TO crawler_reado
 CREATE TABLE IF NOT EXISTS invalid_channels (
     channel_username  VARCHAR(64)  PRIMARY KEY,
     reason            VARCHAR(64)  NOT NULL DEFAULT '',   -- e.g. "not_found", "not_supergroup"
-    invalidated_at    TIMESTAMP    NOT NULL DEFAULT NOW()
+    invalidated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 -- TTL query: load only non-expired rows on startup

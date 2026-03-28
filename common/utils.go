@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,15 @@ import (
 	"github.com/researchaccelerator-hub/telegram-scraper/null_handler"
 	"github.com/rs/zerolog/log"
 )
+
+// ProxyLifecycleManager abstracts the creation and destruction of proxy
+// infrastructure (e.g. ACI containers) for dynamic scaling. The validator
+// uses this to create/destroy proxies alongside edge-validation workers.
+type ProxyLifecycleManager interface {
+	CreateProxy(ctx context.Context, ordinal int) (string, error)
+	DestroyProxy(ctx context.Context, ordinal int) error
+	DestroyAllProxies(ctx context.Context) error
+}
 
 // TelegramRateLimitConfig configures per-connection rate limiting for Telegram API calls.
 // Rates are in calls per minute; jitter values add a random delay after each rate-limited
@@ -57,6 +67,7 @@ type CrawlerConfig struct {
 	TDLibDatabaseURL   string   // Single database URL (for backward compatibility)
 	TDLibDatabaseURLs  []string // Multiple database URLs for connection pooling
 	MinPostDate        time.Time
+	StopAtMessageID    int64     // TDLib message ID to stop at on re-crawl; 0 = no limit
 	PostRecency        time.Time
 	DateBetweenMin     time.Time // Start date for date-between range
 	DateBetweenMax     time.Time // End date for date-between range
@@ -92,10 +103,38 @@ type CrawlerConfig struct {
 	// Validator / tandem-crawl mode
 	TandemCrawl              bool    // Crawler writes to pending_edges; no SearchPublicChat
 	ValidateOnly             bool    // Pod runs RunValidationLoop; no crawl loop
+	KeepPendingEdges         bool    // Debug: skip DELETE of pending_edges rows after batch completion
 	ValidatorRequestRate     float64 // HTTP calls per minute for validator (default: 120)
 	ValidatorRequestJitterMs int     // Max jitter in ms for validator requests (default: 200)
 	ValidatorClaimBatchSize  int     // Edges to claim per DB round-trip (default: 10)
 	ValidatorTimeout         time.Duration // Abort crawl if blocked waiting for validator for this long (0 = disabled)
+	ValidatorIdleTimeout    time.Duration // Shut down validator pod after this long with no pending edges (0 = disabled, e.g. "10m")
+
+	// SOCKS5 proxy — all empty by default (direct connection)
+	ProxyAddrs   []string // Ordered list of proxy addresses (ip:port), one per pod ordinal
+	ProxyUser    string   // SOCKS5 auth username (from env PROXY_USER)
+	ProxyPass    string   // SOCKS5 auth password (from env PROXY_PASS)
+	ProxyOrdinal int      // Override ordinal for local dev (-1 = derive from POD_NAME)
+	ProxyAddr    string   // Resolved proxy address for this pod (set at startup)
+
+	// Managed ACI proxy lifecycle — mutually exclusive with ProxyAddrs
+	ManagedProxies     bool    // Create/destroy ACI SOCKS5 proxy containers for this crawl
+	ProxyResourceGroup string  // Azure resource group for ACI containers
+	ProxyImage         string  // Container image for microsocks (e.g. "myregistry.azurecr.io/microsocks:latest")
+	ProxyLocation      string  // Azure region (e.g. "eastus2")
+	ProxyCPU           float64 // CPU cores per proxy container (default: 0.5)
+	ProxyMemoryGB      float64 // Memory in GB per proxy container (default: 0.5)
+	ProxyPort           int     // SOCKS5 listen port inside the container (default: 1080)
+	ProxyCount          int     // Number of proxy ACIs to create (default: 1)
+	ProxySubscriptionID string  // Azure subscription ID for ACI management
+
+	// ProxyLifecycle is set when managed proxies are used in ValidateOnly mode
+	// with dynamic scaling. The validator's scaler creates/destroys proxies on
+	// demand. Nil when using static proxy lists or non-validator modes.
+	ProxyLifecycle ProxyLifecycleManager
+
+	// Pod identity for multi-pod page claiming (from POD_NAME env var)
+	PodName string
 }
 
 // GenerateCrawlID generates a unique identifier based on the current timestamp.

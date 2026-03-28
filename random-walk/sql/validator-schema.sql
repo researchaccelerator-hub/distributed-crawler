@@ -29,10 +29,10 @@ CREATE TABLE pending_edge_batches (
     -- 'processing' = validator claimed for walkback decision
     -- 'completed'  = walkback done, edge_records + page_buffer written
     attempt_count  INTEGER      NOT NULL DEFAULT 0,   -- incremented each time batch is claimed; poison detection
-    created_at     TIMESTAMP    NOT NULL DEFAULT NOW(),
-    closed_at      TIMESTAMP,                         -- set when crawler finishes channel
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    closed_at      TIMESTAMPTZ,                       -- set when crawler finishes channel
     claimed_at     TIMESTAMPTZ,                       -- set/reset each time validator claims batch
-    completed_at   TIMESTAMP                          -- set when validator finishes walkback
+    completed_at   TIMESTAMPTZ                        -- set when validator finishes walkback
 );
 
 -- Validator polls for closed batches ready for walkback (FIFO)
@@ -58,14 +58,14 @@ CREATE TABLE pending_edges (
     destination_channel VARCHAR(64)  NOT NULL,
     source_channel      VARCHAR(64)  NOT NULL,
     sequence_id         VARCHAR(36)  NOT NULL DEFAULT '',
-    discovery_time      TIMESTAMP    NOT NULL DEFAULT NOW(),
+    discovery_time      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     source_type         VARCHAR(16)  NOT NULL DEFAULT '',
     -- 'mention' | 'text_url' | 'url' | 'plaintext' | ''
     validation_status   VARCHAR(16)  NOT NULL DEFAULT 'pending',
     -- 'pending' | 'validating' | 'valid' | 'not_channel' | 'invalid' | 'duplicate'
     validation_reason   VARCHAR(64)  NOT NULL DEFAULT '',
-    -- '' | 'not_supergroup' | 'not_found'
-    validated_at        TIMESTAMP
+    -- '' | 'not_supergroup' | 'bot' | 'not_found'
+    validated_at        TIMESTAMPTZ
 );
 
 -- Validator fetches edges by batch after claiming a walkback batch
@@ -106,7 +106,8 @@ CREATE TABLE source_type_stats (
 CREATE TABLE discovered_channels (
     channel_username VARCHAR(64)  NOT NULL,
     crawl_id         VARCHAR(64)  NOT NULL,
-    discovered_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+    source_channel   VARCHAR(64)  NOT NULL DEFAULT '',
+    discovered_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     PRIMARY KEY (channel_username)
 );
 
@@ -171,7 +172,7 @@ GRANT SELECT ON TABLE access_events        TO crawler_readonly;
 --     destination_channel VARCHAR(64)  NOT NULL,
 --     source_channel      VARCHAR(64)  NOT NULL,
 --     sequence_id         VARCHAR(36)  NOT NULL DEFAULT '',
---     discovery_time      TIMESTAMP    NOT NULL DEFAULT NOW(),
+--     discovery_time      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 --     source_type         VARCHAR(16)  NOT NULL DEFAULT '',
 --     validation_status   VARCHAR(16)  NOT NULL DEFAULT 'pending',
 --     validation_reason   VARCHAR(64)  NOT NULL DEFAULT '',
@@ -192,12 +193,15 @@ GRANT SELECT ON TABLE access_events        TO crawler_readonly;
 -- CREATE TABLE IF NOT EXISTS discovered_channels (
 --     channel_username VARCHAR(64)  NOT NULL,
 --     crawl_id         VARCHAR(64)  NOT NULL,
---     discovered_at    TIMESTAMP    NOT NULL DEFAULT NOW(),
+--     source_channel   VARCHAR(64)  NOT NULL DEFAULT '',
+--     discovered_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 --     PRIMARY KEY (channel_username)
 -- );
 -- Existing deployments: drop composite PK and add single-column PK.
 -- ALTER TABLE discovered_channels DROP CONSTRAINT IF EXISTS discovered_channels_pkey;
 -- ALTER TABLE discovered_channels ADD PRIMARY KEY (channel_username);
+-- Add source_channel column to existing deployments:
+-- ALTER TABLE discovered_channels ADD COLUMN IF NOT EXISTS source_channel VARCHAR(64) NOT NULL DEFAULT '';
 
 -- CREATE INDEX IF NOT EXISTS idx_pending_batches_status ON pending_edge_batches (status, created_at);
 -- CREATE INDEX IF NOT EXISTS idx_pending_batches_crawl_incomplete ON pending_edge_batches (crawl_id) WHERE status <> 'completed';

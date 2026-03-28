@@ -19,6 +19,7 @@ import (
 	clientpkg "github.com/researchaccelerator-hub/telegram-scraper/client"
 	"github.com/researchaccelerator-hub/telegram-scraper/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawl"
+	"github.com/researchaccelerator-hub/telegram-scraper/proxy"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler"
 	crawlercommon "github.com/researchaccelerator-hub/telegram-scraper/crawler/common"
 	"github.com/researchaccelerator-hub/telegram-scraper/crawler/youtube"
@@ -162,6 +163,78 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 		os.Exit(0)
 	}
 
+	// --- Managed ACI proxy creation ---
+	var proxyManager *proxy.ACIProxyManager
+	if crawlerCfg.ManagedProxies {
+		var err error
+		proxyManager, err = proxy.NewACIProxyManager(crawlerCfg, crawlerCfg.ProxySubscriptionID)
+		if err != nil {
+			log.Fatal().Err(err).Msg("Failed to initialize ACI proxy manager")
+		}
+		// Clean up orphaned proxies from a prior crash
+		if cleanupErr := proxyManager.CleanupOrphanedProxies(context.Background()); cleanupErr != nil {
+			log.Warn().Err(cleanupErr).Msg("Failed to clean up orphaned proxy ACIs")
+		}
+
+		if crawlerCfg.ValidateOnly && crawlerCfg.ProxyCount > 1 {
+			// --- Validator mode: dynamic proxy scaling ---
+			// Create only one proxy at startup. The dynamic scaler inside
+			// RunValidationLoop creates additional proxies on demand (up to
+			// ProxyCount) based on pending_edges queue depth, and all proxies
+			// are destroyed together when the validator exits.
+			addr, createErr := proxyManager.CreateProxy(context.Background(), 0)
+			if createErr != nil {
+				log.Fatal().Err(createErr).Msg("Failed to create initial managed proxy ACI")
+			}
+			if readyErr := proxyManager.WaitForReady(context.Background(), []string{addr}, 2*time.Minute); readyErr != nil {
+				_ = proxyManager.DestroyProxies(context.Background())
+				log.Fatal().Err(readyErr).Msg("Initial managed proxy ACI not ready in time")
+			}
+			crawlerCfg.ProxyAddr = addr
+			// Build a placeholder address list sized to ProxyCount.
+			// Index 0 has the real address; others are empty and will be
+			// populated by the scaler when it creates proxies on demand.
+			crawlerCfg.ProxyAddrs = make([]string, crawlerCfg.ProxyCount)
+			crawlerCfg.ProxyAddrs[0] = addr
+			crawlerCfg.ProxyLifecycle = proxyManager
+			log.Info().Str("proxy_addr", addr).Int("max_proxies", crawlerCfg.ProxyCount).
+				Msg("Managed ACI proxy ready — dynamic scaling enabled for validator")
+		} else {
+			// --- Crawler mode: all proxies created at startup ---
+			// Crawler pods need their proxy available from boot (TDLib connects
+			// immediately). Each pod in the StatefulSet picks one proxy by
+			// ordinal. All proxies live for the duration of the crawl and are
+			// destroyed on exit.
+			addrs, createErr := proxyManager.CreateProxies(context.Background())
+			if createErr != nil {
+				log.Fatal().Err(createErr).Msg("Failed to create managed proxy ACIs")
+			}
+			if readyErr := proxyManager.WaitForReady(context.Background(), addrs, 2*time.Minute); readyErr != nil {
+				_ = proxyManager.DestroyProxies(context.Background())
+				log.Fatal().Err(readyErr).Msg("Managed proxy ACIs not ready in time")
+			}
+			if len(addrs) == 1 {
+				crawlerCfg.ProxyAddr = addrs[0]
+			} else {
+				crawlerCfg.ProxyAddrs = addrs
+				addr, resolveErr := common.PodProxyAddr(crawlerCfg.PodName, addrs, crawlerCfg.ProxyOrdinal)
+				if resolveErr != nil {
+					_ = proxyManager.DestroyProxies(context.Background())
+					log.Fatal().Err(resolveErr).Msg("Managed proxy ordinal resolution failed")
+				}
+				crawlerCfg.ProxyAddr = addr
+			}
+			log.Info().Str("proxy_addr", crawlerCfg.ProxyAddr).Int("proxy_count", len(addrs)).Msg("Managed ACI proxies ready")
+		}
+	}
+	defer func() {
+		if proxyManager != nil {
+			if err := proxyManager.DestroyProxies(context.Background()); err != nil {
+				log.Warn().Err(err).Msg("Failed to destroy managed proxy ACIs on exit")
+			}
+		}
+	}()
+
 	// Platform-specific initialization
 	if crawlerCfg.Platform == "youtube" {
 		// For YouTube platform, we need to validate the API key
@@ -172,6 +245,16 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 
 		log.Info().Msg("Using YouTube platform with the provided API key")
 	} else {
+		// Pre-flight: verify proxy is reachable before spending 30s in TDLib init
+		if crawlerCfg.ProxyAddr != "" {
+			if err := common.CheckProxyTCP(crawlerCfg.ProxyAddr, 5*time.Second); err != nil {
+				log.Fatal().Err(err).Msg("Proxy is not reachable — aborting before TDLib init")
+			}
+			if err := common.VerifyOutboundIP(crawlerCfg.ProxyAddr, crawlerCfg.ProxyUser, crawlerCfg.ProxyPass); err != nil {
+				log.Fatal().Err(err).Msg("Proxy IP verification failed — aborting before TDLib init")
+			}
+		}
+
 		baseDir := filepath.Join(crawlerCfg.StorageRoot, "state") // Same base path where connection folders are created
 		cleaner := telegramhelper.NewFileCleaner(
 			baseDir, // Base directory where conn_* folders are located (matches InitializeClientWithConfig)
@@ -213,11 +296,22 @@ func StartDaprStandaloneMode(urlList []string, urlFile string, crawlerCfg common
 	launch(urls, crawlerCfg)
 
 	log.Info().Msg("Crawling completed")
+
+	// Tear down TDLib clients now that the crawl is finished.  The deferred
+	// CloseConnectionPool will no-op since we nil the pool here.
+	crawl.CloseConnectionPool()
+
 	if crawlerCfg.ExitOnComplete {
 		log.Info().Msg("Crawl complete, exiting with code 0 (--exit-on-complete)")
+		if proxyManager != nil {
+			if err := proxyManager.DestroyProxies(context.Background()); err != nil {
+				log.Warn().Err(err).Msg("Failed to destroy managed proxy ACIs on exit")
+			}
+		}
 		shutdownDaprSidecar()
 		os.Exit(0)
 	}
+	// Keep the pod alive so the StatefulSet doesn't restart it.
 	select {}
 }
 
@@ -274,41 +368,48 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	// Validator-only mode: run the validation loop and exit.
 	if crawlCfg.ValidateOnly {
-		log.Info().Msg("validator-mode: starting validation-only loop")
+		log.Info().Str("log_tag", "val_mode").Msg("Starting validation-only loop")
 		// Load shared caches used by the validator (same order as random-walk init).
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Err(seedErr).Msg("validator-mode: failed to load seed channels (continuing)")
+			log.Fatal().Str("log_tag", "val_mode").Err(seedErr).Msg("Failed to load seed channels")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
-			log.Warn().Err(invalidErr).Msg("validator-mode: failed to load invalid channels (continuing)")
+			log.Warn().Str("log_tag", "val_mode").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")
 		}
 		if discErr := sm.InitializeDiscoveredChannels(); discErr != nil {
-			log.Fatal().Err(discErr).Msg("validator-mode: failed to initialize discovered channels")
+			log.Fatal().Str("log_tag", "val_mode").Err(discErr).Msg("Failed to initialize discovered channels")
 		}
 		// Recover edges/batches stuck in intermediate states from prior crashes.
 		const staleThreshold = 10 * time.Minute
 		if dsm, ok := sm.(*state.DaprStateManager); ok {
 			if n, recErr := dsm.RecoverStaleEdgeClaims(staleThreshold); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale edge claims")
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover stale edge claims")
 			} else if n > 0 {
-				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale edge claims")
+				log.Info().Str("log_tag", "val_mode").Int("recovered", n).Msg("Recovered stale edge claims")
 			}
 			if n, recErr := sm.RecoverStaleBatchClaims(staleThreshold); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-mode: failed to recover stale batch claims")
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover stale batch claims")
 			} else if n > 0 {
-				log.Info().Int("recovered", n).Msg("validator-mode: recovered stale batch claims")
+				log.Info().Str("log_tag", "val_mode").Int("recovered", n).Msg("Recovered stale batch claims")
+			}
+			if n, recErr := sm.RecoverStaleValidatingEdges(staleThreshold); recErr != nil {
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover stale validating edges")
+			} else if n > 0 {
+				log.Info().Str("log_tag", "val_mode").Int("recovered", n).Msg("Recovered stale validating edges")
 			}
 			if n, recErr := dsm.RecoverOrphanEdges(); recErr != nil {
-				log.Warn().Err(recErr).Msg("validator-mode: failed to recover orphan edges")
+				log.Warn().Str("log_tag", "val_mode").Err(recErr).Msg("Failed to recover orphan edges")
 			} else if n > 0 {
-				log.Info().Int("deleted", n).Msg("validator-mode: recovered orphan edges")
+				log.Info().Str("log_tag", "val_mode").Int("deleted", n).Msg("Recovered orphan edges")
 			}
 		}
+		// cfg.ProxyLifecycle is set by StartDaprStandaloneMode when managed
+		// proxies are enabled with dynamic scaling; RunValidationLoop reads it.
 		if err := crawl.RunValidationLoop(context.Background(), sm, crawlCfg); err != nil {
-			log.Error().Err(err).Msg("validator-mode: validation loop exited with error")
+			log.Error().Str("log_tag", "val_mode").Err(err).Msg("Validation loop exited with error")
 		}
 		if closeErr := sm.Close(); closeErr != nil {
-			log.Error().Err(closeErr).Msg("validator-mode: failed to close state manager")
+			log.Error().Str("log_tag", "val_mode").Err(closeErr).Msg("Failed to close state manager")
 		}
 		return
 	}
@@ -332,48 +433,25 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		// Initialize with an empty seed list so the state manager sets up its DB
 		// binding without creating a layer-map entry for the seed URLs.
 		if err = sm.Initialize([]string{}); err != nil {
-			log.Error().Err(err).Msg("random-walk-init: failed to initialize state manager")
+			log.Error().Str("log_tag", "rw_init").Err(err).Msg("Failed to initialize state manager")
 			return
 		}
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Err(seedErr).Msg("random-walk-init: failed to load seed channels (continuing)")
+			log.Fatal().Str("log_tag", "rw_init").Err(seedErr).Msg("Failed to load seed channels")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
-			log.Warn().Err(invalidErr).Msg("random-walk-init: failed to load invalid channels (continuing)")
+			log.Warn().Str("log_tag", "rw_init").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")
 		}
 		if err = sm.InitializeDiscoveredChannels(); err != nil {
-			log.Fatal().Err(err).Msg("random-walk-init: failed to pull discovered channels")
+			log.Fatal().Str("log_tag", "rw_init").Err(err).Msg("Failed to pull discovered channels")
 		}
 
-		// Seed the page_buffer only on a fresh start (empty buffer = not resuming).
-		existingPages, _ := sm.GetPagesFromPageBuffer(1)
-		if len(existingPages) == 0 {
-			if len(stringList) > 0 {
-				log.Info().Int("count", len(stringList)).Msg("random-walk-init: seeding page buffer from URL list")
-				for _, url := range stringList {
-					page := &state.Page{
-						ID:         uuid.New().String(),
-						URL:        url,
-						Depth:      0,
-						Status:     "unfetched",
-						Timestamp:  time.Now(),
-						SequenceID: uuid.New().String(),
-					}
-					if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
-						log.Error().Err(bufErr).Str("url", url).Msg("random-walk-init: failed to seed URL into page buffer")
-					}
-				}
-			} else {
-				if initErr := sm.InitializeRandomWalkLayer(); initErr != nil {
-					log.Fatal().Err(initErr).Msg("random-walk-init: failed to initialize page buffer from discovered channels")
-				}
-			}
-		} else {
-			log.Info().Int("count", len(existingPages)).Msg("random-walk-init: resuming from existing page buffer")
+		if err := seedPageBufferIfNeeded(sm, crawlCfg, stringList); err != nil {
+			log.Fatal().Str("log_tag", "rw_init").Err(err).Msg("Failed to seed page buffer")
 		}
 
 		if err := RunRandomWalkLayerless(sm, crawlCfg); err != nil {
-			log.Error().Err(err).Msg("random-walk-layerless: crawl aborted")
+			log.Error().Str("log_tag", "rw_layerless").Err(err).Msg("Crawl aborted")
 		}
 	} else {
 		// All other modes (snowball, channel, youtube-channel, etc.)
@@ -693,15 +771,17 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 	if crawlexecid == "" {
 		// Create a temporary state manager to check for incomplete crawls
 		cfg = state.Config{
-			StorageRoot:     crawlCfg.StorageRoot,
-			CrawlID:         crawlCfg.CrawlID,
-			CrawlLabel:      crawlCfg.CrawlLabel,
-			Platform:        crawlCfg.Platform, // Pass the platform information
-			SamplingMethod:  crawlCfg.SamplingMethod,
-			SeedSize:        crawlCfg.SeedSize,
-			CombineFiles:    crawlCfg.CombineFiles,
-			CombineTempDir:  crawlCfg.CombineTempDir,
-			CombineWatchDir: crawlCfg.CombineWatchDir,
+			StorageRoot:      crawlCfg.StorageRoot,
+			CrawlID:          crawlCfg.CrawlID,
+			CrawlLabel:       crawlCfg.CrawlLabel,
+			Platform:         crawlCfg.Platform, // Pass the platform information
+			SamplingMethod:   crawlCfg.SamplingMethod,
+			SeedSize:         crawlCfg.SeedSize,
+			CombineFiles:     crawlCfg.CombineFiles,
+			CombineTempDir:   crawlCfg.CombineTempDir,
+			CombineWatchDir:  crawlCfg.CombineWatchDir,
+			PodName:          crawlCfg.PodName,
+			KeepPendingEdges: crawlCfg.KeepPendingEdges,
 		}
 	} else {
 		cfg = state.Config{
@@ -715,6 +795,8 @@ func CreateStateManager(smfact state.StateManagerFactory, crawlCfg common.Crawle
 			CombineFiles:     crawlCfg.CombineFiles,
 			CombineTempDir:   crawlCfg.CombineTempDir,
 			CombineWatchDir:  crawlCfg.CombineWatchDir,
+			PodName:          crawlCfg.PodName,
+			KeepPendingEdges: crawlCfg.KeepPendingEdges,
 			// Add the MaxPages config
 			MaxPagesConfig: &state.MaxPagesConfig{
 				MaxPages: crawlCfg.MaxPages,
@@ -787,10 +869,57 @@ var layerlessPollInterval = 5 * time.Second
 //   - No depth counter or layer-map state to maintain
 //   - Crash-restart is safe: unprocessed pages remain in the buffer
 //   - No convoy effect: workers operate independently, not in lock-step batches
+// seedPageBufferIfNeeded checks whether the page buffer already has work or
+// whether pending validator batches exist before deciding to seed fresh pages.
+// Returns nil when seeding is skipped (resume) or succeeds.
+func seedPageBufferIfNeeded(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig, seedURLs []string) error {
+	existingPages, _ := sm.GetPagesFromPageBuffer(1)
+	if len(existingPages) > 0 {
+		log.Info().Str("log_tag", "rw_init").Int("count", len(existingPages)).Msg("Resuming from existing page buffer")
+		return nil
+	}
+
+	// In tandem mode, the validator may still have edges from a previous run
+	// that will produce new pages.  Don't re-seed if so.
+	if crawlCfg.TandemCrawl {
+		pendingBatches, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
+		if countErr != nil {
+			log.Warn().Str("log_tag", "rw_init").Err(countErr).Msg("Could not check incomplete batches")
+		}
+		if countErr == nil && pendingBatches > 0 {
+			log.Info().Str("log_tag", "rw_init").Int("incomplete_batches", pendingBatches).
+				Msg("Page buffer empty but pending edges exist, resuming without re-seeding")
+			return nil
+		}
+	}
+
+	// Fresh start — seed from CLI URLs or discovered channels.
+	if len(seedURLs) > 0 {
+		log.Info().Str("log_tag", "rw_init").Int("count", len(seedURLs)).Msg("Seeding page buffer from URL list")
+		for _, url := range seedURLs {
+			page := &state.Page{
+				ID:         uuid.New().String(),
+				URL:        url,
+				Depth:      0,
+				Status:     "unfetched",
+				Timestamp:  time.Now(),
+				SequenceID: uuid.New().String(),
+			}
+			if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
+				log.Error().Str("log_tag", "rw_init").Err(bufErr).Str("url", url).Msg("Failed to seed URL into page buffer")
+			}
+		}
+		return nil
+	}
+
+	return sm.InitializeRandomWalkLayer()
+}
+
 //   - Tandem mode works naturally: the validator writes to page_buffer and this
 //     loop picks up the results without any special batching logic
 func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.CrawlerConfig) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	crawlStart := time.Now()
 	var shouldStop atomic.Bool
 
@@ -803,48 +932,111 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 	sem := make(chan struct{}, maxWorkers)
 
 	var (
-		wg                 sync.WaitGroup
-		inFlight           sync.Map
-		inFlightCount      atomic.Int32
-		validatorWaitSince time.Time // non-zero when crawler is fully blocked waiting for validator
+		wg                  sync.WaitGroup
+		inFlightCount       atomic.Int32
+		validatorWaitSince  time.Time // non-zero when crawler is fully blocked waiting for validator
+		crawlerStarvedPolls int
 	)
+
+	// Periodically recover pages claimed by crashed pods.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				recovered, recErr := sm.RecoverStalePageClaims(30 * time.Minute)
+				if recErr != nil {
+					log.Error().Str("log_tag", "rw_layerless").Err(recErr).Msg("Failed to recover stale page claims")
+				} else if recovered > 0 {
+					log.Info().Str("log_tag", "rw_layerless").Int("recovered", recovered).Msg("Recovered stale page claims")
+				}
+			}
+		}
+	}()
+
+	// Periodic stats emitter for Grafana dashboard.
+	var totalChannelsCrawled atomic.Int64
+	podName, _ := os.Hostname()
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				poolStats := crawl.GetConnectionPoolStats()
+
+				// Unclaimed page count (best-effort — ignore errors).
+				// GetPagesFromPageBuffer returns only unclaimed pages; pass a high
+				// limit to approximate the full queue depth.
+				unclaimedPages, _ := sm.GetPagesFromPageBuffer(10000)
+
+				pendingBatches := 0
+				if crawlCfg.TandemCrawl {
+					pendingBatches, _ = sm.CountIncompleteBatches(crawlCfg.CrawlID)
+				}
+
+				log.Info().
+					Str("log_tag", "rw_stats").
+					Str("crawl_id", crawlCfg.CrawlID).
+					Str("pod", podName).
+					Int("pages_in_buffer", len(unclaimedPages)+int(inFlightCount.Load())).
+					Int("pages_unclaimed", len(unclaimedPages)).
+					Int("in_flight", int(inFlightCount.Load())).
+					Int64("channels_crawled_this_pod", totalChannelsCrawled.Load()).
+					Int("pool_active", poolStats["inUse"]).
+					Int("pool_available", poolStats["available"]).
+					Int("pool_max", poolStats["maxSize"]).
+					Int("pending_batches", pendingBatches).
+					Dur("elapsed", time.Since(crawlStart)).
+					Msg("Crawler periodic stats")
+			}
+		}
+	}()
 
 	for !shouldStop.Load() {
 		if crawlCfg.MaxCrawlDuration > 0 && time.Since(crawlStart) >= crawlCfg.MaxCrawlDuration {
-			log.Info().
+			log.Info().Str("log_tag", "rw_layerless").
 				Dur("elapsed", time.Since(crawlStart)).
 				Dur("max_crawl_duration", crawlCfg.MaxCrawlDuration).
-				Msg("random-walk-layerless: max crawl duration reached, stopping")
+				Msg("Max crawl duration reached, stopping")
 			break
 		}
 
-		// Don't poll the DB when all worker slots are occupied — any pages
-		// returned would be deduplicated by inFlight and wasted round-trips.
-		// Wait until at least one worker finishes and frees capacity.
-		if int(inFlightCount.Load()) >= maxWorkers {
+		// Only claim as many pages as we have available worker slots.
+		// This prevents the convoy problem: we never claim more pages than
+		// we can immediately dispatch, so no claimed page sits idle while
+		// a slow worker blocks the dispatch loop.
+		available := maxWorkers - int(inFlightCount.Load())
+		if available <= 0 {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
-		pages, err := sm.GetPagesFromPageBuffer(maxWorkers)
+		pages, err := sm.ClaimPages(available)
 		if err != nil {
-			log.Error().Err(err).Msg("random-walk-layerless: failed to get pages from page buffer")
+			log.Error().Str("log_tag", "rw_layerless").Err(err).Msg("Failed to claim pages from page buffer")
 			time.Sleep(layerlessPollInterval)
 			continue
 		}
 
 		if len(pages) == 0 {
+			crawlerStarvedPolls++
 			if crawlCfg.TandemCrawl {
 				// Only declare completion when no workers are in-flight either —
 				// a running worker may be about to write the next page.
 				if inFlightCount.Load() == 0 {
 					pending, countErr := sm.CountIncompleteBatches(crawlCfg.CrawlID)
 					if countErr != nil {
-						log.Warn().Err(countErr).Msg("random-walk-layerless: tandem: could not check incomplete batches")
+						log.Warn().Str("log_tag", "rw_layerless").Err(countErr).Msg("Tandem: could not check incomplete batches")
 						validatorWaitSince = time.Time{} // reset on error — don't time out on DB errors
 					} else if pending == 0 {
-						log.Info().Str("crawl_id", crawlCfg.CrawlID).
-							Msg("random-walk-layerless: tandem: buffer empty and no pending batches, crawl complete")
+						log.Info().Str("log_tag", "rw_layerless").Str("crawl_id", crawlCfg.CrawlID).
+							Msg("Tandem: buffer empty and no pending batches, crawl complete")
 						break
 					} else {
 						// Crawler is fully blocked: no pages, no in-flight workers, validator has outstanding batches.
@@ -857,74 +1049,104 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 									waited.Round(time.Second), pending)
 							}
 						}
-						log.Info().Int("incomplete_batches", pending).
-							Dur("waiting_for", time.Since(validatorWaitSince).Round(time.Second)).
-							Msg("random-walk-layerless: tandem: buffer empty, waiting for validator")
+						log.Info().Str("log_tag", "rw_layerless").Int("incomplete_batches", pending).
+							Int("empty_polls", crawlerStarvedPolls).
+							Dur("starved_for", time.Since(validatorWaitSince).Round(time.Second)).
+							Msg("Crawler starved — waiting for validator")
 					}
 				} else {
 					// Workers still in-flight — not fully blocked yet, reset the timer.
 					validatorWaitSince = time.Time{}
 				}
 			} else {
-				log.Debug().Msg("random-walk-layerless: buffer empty, waiting")
+				log.Debug().Str("log_tag", "rw_layerless").Msg("Buffer empty, waiting")
 			}
 			time.Sleep(layerlessPollInterval)
 			continue
 		}
 
+		// Reset crawler starvation tracking when pages are available
+		if crawlerStarvedPolls > 0 {
+			log.Info().Str("log_tag", "rw_layerless").
+				Int("empty_polls", crawlerStarvedPolls).
+				Int("claimed", len(pages)).
+				Msg("Crawler starvation ended — pages available")
+			crawlerStarvedPolls = 0
+			validatorWaitSince = time.Time{}
+		}
+
 		validatorWaitSince = time.Time{} // pages found — no longer waiting
 
-		dispatched := 0
 		for _, page := range pages {
-			// Skip pages already being processed by another goroutine.
-			if _, loaded := inFlight.LoadOrStore(page.ID, true); loaded {
-				continue
-			}
-
-			// Acquire a worker slot.  Blocks until a running worker finishes
-			// and releases its slot, so the producer naturally back-pressures
-			// when all maxWorkers slots are taken.
+			// Acquire a worker slot. Should not block since we only claimed
+			// as many pages as there are available slots.
 			sem <- struct{}{}
 
 			inFlightCount.Add(1)
 			wg.Add(1)
-			dispatched++
 
 			go func(p state.Page) {
 				defer wg.Done()
 				defer func() {
-					inFlight.Delete(p.ID)
 					inFlightCount.Add(-1)
 					<-sem
 				}()
 
+				// Heartbeat: refresh claimed_at while the worker is active so
+				// RecoverStalePageClaims does not reclaim this page.
+				hbCtx, hbCancel := context.WithCancel(ctx)
+				defer hbCancel()
+				go func() {
+					ticker := time.NewTicker(3 * time.Minute)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-hbCtx.Done():
+							return
+						case <-ticker.C:
+							if err := sm.RefreshPageClaim(p.ID); err != nil {
+								log.Warn().Str("log_tag", "rw_layerless").Err(err).Str("page_id", p.ID).Str("url", p.URL).
+									Msg("Failed to refresh page claim heartbeat")
+							}
+						}
+					}
+				}()
+
 				_, procErr := crawl.RunForChannelWithPool(ctx, &p, crawlCfg.StorageRoot, sm, crawlCfg)
 				if errors.Is(procErr, crawl.ErrWalkbackExhausted) {
-					// Leave page in buffer — will be re-processed on restart.
-					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: walkback exhausted, page left in buffer for restart")
+					// Unclaim so another pod (or this pod on restart) can retry.
+					log.Error().Str("log_tag", "rw_layerless").Err(procErr).Str("url", p.URL).Msg("Walkback exhausted, unclaiming page")
+					if ucErr := sm.UnclaimPages([]string{p.ID}); ucErr != nil {
+						log.Error().Str("log_tag", "rw_layerless").Err(ucErr).Str("url", p.URL).Msg("Failed to unclaim walkback-exhausted page")
+					}
 				} else if errors.Is(procErr, crawl.ErrFloodWaitRetire) {
-					// Connection was retired; leave page in buffer for retry by a remaining connection.
-					log.Warn().Str("url", p.URL).Msg("random-walk-layerless: connection retired due to FLOOD_WAIT, page left in buffer")
+					// Connection was retired; unclaim so a remaining connection can pick it up.
+					log.Warn().Str("log_tag", "rw_layerless").Str("url", p.URL).Msg("Connection retired due to FLOOD_WAIT, unclaiming page")
+					if ucErr := sm.UnclaimPages([]string{p.ID}); ucErr != nil {
+						log.Error().Str("log_tag", "rw_layerless").Err(ucErr).Str("url", p.URL).Msg("Failed to unclaim flood-wait page")
+					}
 					if crawl.ConnectionPoolTotalSize() == 0 {
-						log.Error().Msg("random-walk-layerless: all connections retired due to FLOOD_WAIT, aborting crawl")
+						log.Error().Str("log_tag", "rw_layerless").Msg("All connections retired due to FLOOD_WAIT, aborting crawl")
 						shouldStop.Store(true)
 					}
 				} else if errors.Is(procErr, crawl.ErrTDLib400) {
 					// Channel is permanently invalid — find a replacement edge, then
 					// remove the failed page from the buffer.
-					log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: TDLib 400, finding replacement edge")
+					log.Error().Str("log_tag", "rw_layerless").Err(procErr).Str("url", p.URL).Msg("TDLib 400, finding replacement edge")
 					if replErr := crawl.Handle400Replacement(sm, &p, crawlCfg); replErr != nil {
-						log.Error().Err(replErr).Str("url", p.URL).Msg("random-walk-layerless: failed to find 400 replacement")
+						log.Error().Str("log_tag", "rw_layerless").Err(replErr).Str("url", p.URL).Msg("Failed to find 400 replacement")
 					}
 					if delErr := sm.DeletePageBufferPages([]string{p.ID}, []string{p.URL}); delErr != nil {
-						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete 400 page from buffer")
+						log.Error().Str("log_tag", "rw_layerless").Err(delErr).Str("url", p.URL).Msg("Failed to delete 400 page from buffer")
 					}
 				} else {
 					if procErr != nil {
-						log.Error().Err(procErr).Str("url", p.URL).Msg("random-walk-layerless: error processing channel")
+						log.Error().Str("log_tag", "rw_layerless").Err(procErr).Str("url", p.URL).Msg("Error processing channel")
+					} else {
+						totalChannelsCrawled.Add(1)
 					}
 					if delErr := sm.DeletePageBufferPages([]string{p.ID}, []string{p.URL}); delErr != nil {
-						log.Error().Err(delErr).Str("url", p.URL).Msg("random-walk-layerless: failed to delete page from buffer")
+						log.Error().Str("log_tag", "rw_layerless").Err(delErr).Str("url", p.URL).Msg("Failed to delete page from buffer")
 					}
 				}
 
@@ -932,11 +1154,6 @@ func RunRandomWalkLayerless(sm state.StateManagementInterface, crawlCfg common.C
 					shouldStop.Store(true)
 				}
 			}(page)
-		}
-
-		if dispatched == 0 {
-			// All fetched pages are already in-flight; wait briefly before re-polling.
-			time.Sleep(500 * time.Millisecond)
 		}
 	}
 

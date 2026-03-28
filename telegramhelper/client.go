@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -223,9 +224,9 @@ func maskPhoneNumber(phoneNumber string) string {
 // Connection timeouts ensure the process doesn't hang indefinitely if authentication
 // or connection problems occur. If authentication requires user interaction for phone code,
 // the function will prompt for input through the CLI interactor.
-func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
-	authorizer := client.ClientAuthorizer()
 
+
+func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, cfg common.CrawlerConfig) (crawler.TDLibClient, error) {
 	// We'll use the default CLI interactor but prepare environment variables
 	// so we need to track the phoneCode for later
 
@@ -316,7 +317,7 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 
 	log.Info().Msgf("Using TDLib database directory: %s", dbDir)
 
-	authorizer.TdlibParameters <- &client.SetTdlibParametersRequest{
+	authorizer := client.ClientAuthorizer(&client.SetTdlibParametersRequest{
 		UseTestDc:           false,
 		DatabaseDirectory:   dbDir,
 		FilesDirectory:      filesDir,
@@ -330,13 +331,41 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 		DeviceModel:         "Server",
 		SystemVersion:       "1.0.0",
 		ApplicationVersion:  "1.0.0",
-	}
+	})
 
 	log.Warn().Msg("ABOUT TO CONNECT TO TELEGRAM. IF YOUR PHONE CODE IS INVALID, YOU MUST RE-RUN WITH A VALID CODE.")
 
 	// Set up authentication environment variables
 	// The phone number will be picked up by the default CLI interactor
 	SetupAuth(phoneNumber, phoneCode)
+
+	// Build proxy option if configured. Using WithProxy passes AddProxy as a
+	// NewClient Option, which go-tdlib runs in a goroutine. The request is sent
+	// to TDLib immediately (fire-and-forget at the C level) so the proxy IS
+	// configured before SetTdlibParameters, but the auth flow is not blocked
+	// waiting for TDLib's addProxy response (which hangs in some environments).
+	var clientOpts []client.Option
+	if cfg.ProxyAddr != "" {
+		host, portStr, splitErr := net.SplitHostPort(cfg.ProxyAddr)
+		if splitErr != nil {
+			return nil, fmt.Errorf("invalid proxy address %q: %w", cfg.ProxyAddr, splitErr)
+		}
+		port, convErr := strconv.Atoi(portStr)
+		if convErr != nil {
+			return nil, fmt.Errorf("invalid proxy port %q: %w", portStr, convErr)
+		}
+		proxyReq := &client.AddProxyRequest{
+			Server: host,
+			Port:   int32(port),
+			Enable: true,
+			Type: &client.ProxyTypeSocks5{
+				Username: cfg.ProxyUser,
+				Password: cfg.ProxyPass,
+			},
+		}
+		clientOpts = append(clientOpts, client.WithProxy(proxyReq))
+		log.Info().Str("proxy", cfg.ProxyAddr).Msg("Proxy will be injected via WithProxy option (non-blocking)")
+	}
 
 	// Use the default CLI interactor which will read the environment variables
 	go client.CliInteractor(authorizer)
@@ -345,24 +374,25 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	errChan := make(chan error)
 
 	go func() {
-		tdlibClient, err := client.NewClient(authorizer)
-		// Set verbosity level from config (default is 1, lower values increase verbosity)
-		verbosityLevel := 1 // Default value if not configured
-		if cfg.TDLibVerbosity > 0 {
-			verbosityLevel = cfg.TDLibVerbosity
-		}
-
-		log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level")
-		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: int32(verbosityLevel)}
-		tdlibClient.SetLogVerbosityLevel(&verb)
-
+		tdlibClient, err := client.NewClient(authorizer, clientOpts...)
 		if err != nil {
 			errChan <- fmt.Errorf("failed to initialize TDLib client: %w", err)
 			return
 		}
+
+		// Set verbosity level from config (default is 1, lower values increase verbosity)
+		verbosityLevel := 1
+		if cfg.TDLibVerbosity > 0 {
+			verbosityLevel = cfg.TDLibVerbosity
+		}
+		log.Debug().Int("verbosity_level", verbosityLevel).Msg("Setting TDLib verbosity level")
+		verb := client.SetLogVerbosityLevelRequest{NewVerbosityLevel: int32(verbosityLevel)}
+		tdlibClient.SetLogVerbosityLevel(&verb)
+
 		clientReady <- tdlibClient
 	}()
 
+	log.Info().Msg("Waiting for TDLib client initialization (timeout: 60s)...")
 	select {
 	case tdlibClient := <-clientReady:
 		log.Info().Msg("Client initialized successfully")
@@ -370,9 +400,9 @@ func (s *RealTelegramService) InitializeClientWithConfig(storagePrefix string, c
 	case err := <-errChan:
 		log.Fatal().Err(err).Msg("Error initializing client")
 		return nil, err
-	case <-time.After(30 * time.Second):
-		log.Warn().Msg("Timeout reached. Exiting application.")
-		return nil, fmt.Errorf("timeout initializing TDLib client")
+	case <-time.After(60 * time.Second):
+		log.Warn().Str("proxy", cfg.ProxyAddr).Msg("Timeout reached after 60s — TDLib auth did not complete. Check proxy connectivity and credentials.")
+		return nil, fmt.Errorf("timeout initializing TDLib client (proxy=%s)", cfg.ProxyAddr)
 	}
 
 }

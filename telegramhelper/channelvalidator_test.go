@@ -109,6 +109,12 @@ func TestParseChannelHTML_InlineHTML(t *testing.T) {
 			expectedStatus: "invalid",
 			expectedReason: "not_found",
 		},
+		{
+			name:           "launch title means bot",
+			html:           `<html><head><title>Telegram: Launch @wallet</title></head></html>`,
+			expectedStatus: "not_channel",
+			expectedReason: "bot",
+		},
 	}
 
 	for _, tc := range tests {

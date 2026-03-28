@@ -109,7 +109,7 @@ func TestStandardMode_ShortFloodWait(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"flood_chan"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -167,7 +167,7 @@ func TestStandardMode_LongFloodWait(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"target_chan"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -216,7 +216,7 @@ func TestStandardMode_NotFoundError(t *testing.T) {
 	sm.On("MarkChannelInvalid", "ghost_chan", "not_found").Return(nil)
 
 	// Walkback triggered — no valid channels discovered.
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
@@ -226,7 +226,7 @@ func TestStandardMode_NotFoundError(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"ghost_chan"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -279,7 +279,7 @@ func TestStandardMode_ShortFloodWait_RetryFailsWithNotFound(t *testing.T) {
 	sm.On("MarkChannelInvalid", "retry_chan", "not_found").Return(nil)
 
 	// Walkback triggered since no channels were discovered.
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
@@ -289,7 +289,7 @@ func TestStandardMode_ShortFloodWait_RetryFailsWithNotFound(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"retry_chan"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 

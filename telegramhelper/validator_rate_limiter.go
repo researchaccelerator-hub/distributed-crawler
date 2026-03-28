@@ -43,7 +43,7 @@ func (v *ValidatorRateLimiter) Wait(ctx context.Context) error {
 	if v.jitterMaxMs > 0 {
 		jitterMs = rand.IntN(v.jitterMaxMs + 1)
 	}
-	log.Debug().Int("jitter_ms", jitterMs).Msg("validator-rate-limit: wait complete")
+	log.Debug().Str("log_tag", "val_rate_limit").Int("jitter_ms", jitterMs).Msg("Wait complete")
 	if jitterMs > 0 {
 		select {
 		case <-time.After(time.Duration(jitterMs) * time.Millisecond):

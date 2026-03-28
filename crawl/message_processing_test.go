@@ -330,7 +330,7 @@ func TestProcessAllMessages(t *testing.T) {
 		cfg := common.CrawlerConfig{}
 
 		// Execute
-		discoveredChannels, err := processAllMessagesWithProcessor(
+		discoveredChannels, _, err := processAllMessagesWithProcessor(
 			mockClient,
 			info,
 			batch1, // Just pass in the messages directly

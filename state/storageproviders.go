@@ -153,6 +153,21 @@ func (lsm *LocalStateManager) GetPagesFromPageBuffer(limit int) ([]Page, error) 
 	return []Page{}, fmt.Errorf("GetPagesFromPageBuffer not implemented for local state manager")
 }
 
+func (lsm *LocalStateManager) ClaimPages(_ int) ([]Page, error) {
+	return nil, fmt.Errorf("ClaimPages not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) UnclaimPages(_ []string) error {
+	return fmt.Errorf("UnclaimPages not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) RefreshPageClaim(_ string) error {
+	return fmt.Errorf("RefreshPageClaim not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) RecoverStalePageClaims(_ time.Duration) (int, error) {
+	return 0, fmt.Errorf("RecoverStalePageClaims not implemented for local state manager")
+}
 
 func (lsm *LocalStateManager) ExecuteDatabaseOperation(sqlQuery string, params []any) error {
 	return fmt.Errorf("ExecuteDatabaseOperation not implemented for local state manager")
@@ -198,19 +213,23 @@ func (lsm *LocalStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, err
 	return 0, nil
 }
 
+func (lsm *LocalStateManager) RecoverStaleValidatingEdges(_ time.Duration) (int, error) {
+	return 0, nil
+}
+
 func (lsm *LocalStateManager) FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error {
 	return fmt.Errorf("FlushBatchStats not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) GetRandomSeedChannel() (string, error) {
-	return "", fmt.Errorf("GetRandomSeedChannel not implemented for local state manager")
+func (lsm *LocalStateManager) GetRandomSeedChannel() (string, int, error) {
+	return "", 0, fmt.Errorf("GetRandomSeedChannel not implemented for local state manager")
 }
 
 func (lsm *LocalStateManager) MarkSeedChannelInvalid(username string) error {
 	return fmt.Errorf("MarkSeedChannelInvalid not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
+func (lsm *LocalStateManager) ClaimDiscoveredChannel(username, crawlID, sourceChannel string) (bool, error) {
 	return false, fmt.Errorf("ClaimDiscoveredChannel not implemented for local state manager")
 }
 
@@ -220,6 +239,14 @@ func (lsm *LocalStateManager) IsChannelDiscovered(username string) (bool, error)
 
 func (lsm *LocalStateManager) CountIncompleteBatches(crawlID string) (int, error) {
 	return 0, fmt.Errorf("CountIncompleteBatches not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CountPendingEdges() (int, error) {
+	return 0, fmt.Errorf("CountPendingEdges not implemented for local state manager")
+}
+
+func (lsm *LocalStateManager) CountClaimedPages() (int, error) {
+	return 0, fmt.Errorf("CountClaimedPages not implemented for local state manager")
 }
 
 func (lsm *LocalStateManager) InsertAccessEvent(reason string) error {
