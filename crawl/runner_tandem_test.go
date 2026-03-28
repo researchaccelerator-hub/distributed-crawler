@@ -82,7 +82,7 @@ func TestTandemMode_WithEdges(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"valid_channel", "another_chan"}, nil)
 
-	result, err := processAllMessagesWithProcessor(
+	result, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -145,7 +145,7 @@ func TestTandemMode_NoEdges(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{}, nil)
 
-	result, err := processAllMessagesWithProcessor(
+	result, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -205,7 +205,7 @@ func TestTandemMode_InvalidChannelSkipped(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"invalid_chan"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 
@@ -271,7 +271,7 @@ func TestNonTandemMode_Unchanged(t *testing.T) {
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
 	).Return([]string{"valid_channel"}, nil)
 
-	_, err := processAllMessagesWithProcessor(
+	_, _, err := processAllMessagesWithProcessor(
 		tdlib, info, messages, "crawl-1", "source_channel", sm, processor, owner, cfg,
 	)
 

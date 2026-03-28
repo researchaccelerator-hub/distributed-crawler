@@ -224,13 +224,15 @@ GRANT SELECT ON TABLE page_buffer                              TO crawler_readon
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS seed_channels (
-    channel_username  VARCHAR(64)  PRIMARY KEY,
-    chat_id           BIGINT,                   -- cached TDLib chat ID; NULL = not yet resolved
-    last_crawled_at   TIMESTAMPTZ,              -- NULL = never crawled; set by MarkChannelCrawled()
-    last_message_date TIMESTAMPTZ,              -- date of the most recent message fetched; used as delta-fetch low-water mark
-    invalidated_at    TIMESTAMPTZ,              -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
-    member_count      INTEGER,
-    inserted_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    channel_username         VARCHAR(64)  PRIMARY KEY,
+    chat_id                  BIGINT,                   -- cached TDLib chat ID; NULL = not yet resolved
+    last_crawled_at          TIMESTAMPTZ,              -- NULL = never crawled; set by MarkChannelCrawled()
+    last_message_date        TIMESTAMPTZ,              -- date of the most recent message fetched; used as delta-fetch low-water mark
+    invalidated_at           TIMESTAMPTZ,              -- NULL = valid; set by MarkSeedChannelInvalid(); 30-day TTL
+    member_count             INTEGER,                  -- latest member count observed; overwritten on each crawl
+    total_messages_processed INTEGER  NOT NULL DEFAULT 0, -- cumulative messages fetched across all crawls (additive)
+    last_message_id          BIGINT,                   -- TDLib message ID of the newest message fetched; used as stop condition on re-crawl
+    inserted_at              TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 -- Seed selection: quickly find channels never crawled (NULL first)

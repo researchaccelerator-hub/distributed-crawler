@@ -328,7 +328,7 @@ func TestProcessAllMessagesWithFetcher(t *testing.T) {
 			mock.AnythingOfType("common.CrawlerConfig")).Return([]string{"newchannel1"}, nil)
 		
 		// Execute
-		discoveredChannels, err := processAllMessagesWithProcessor(
+		discoveredChannels, _, err := processAllMessagesWithProcessor(
 			mockClient,
 			chatInfo,
 			messages,

@@ -570,6 +570,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	// In random-walk mode, use the cached chat ID (from seed_channels) to skip
 	// the expensive SearchPublicChat RPC when we already know the ID.
 	var cachedChatID int64
+	var stopAtMessageID int64
 	originalMinPostDate := cfg.MinPostDate
 	if cfg.SamplingMethod == "random-walk" {
 		if id, ok := sm.GetCachedChatID(p.URL); ok {
@@ -578,15 +579,21 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 
 		// If this channel was crawled before, only fetch messages newer than the
 		// last crawl time to avoid re-processing already-seen content.
-		if lastCrawled, err := sm.GetChannelLastCrawled(p.URL); err != nil {
+		// stopAtMessageID is a hard stop: once we hit a message with this ID
+		// (or older), we know everything beyond was already processed.
+		if lastCrawled, lastMsgID, err := sm.GetChannelLastCrawled(p.URL); err != nil {
 			log.Warn().Err(err).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to get last crawled time, fetching full history")
-		} else if !lastCrawled.IsZero() && lastCrawled.After(cfg.MinPostDate) {
-			log.Info().Str("channel", p.URL).Time("since", lastCrawled).Str("log_tag", "rw_channel").Msg("Channel previously crawled, fetching only new messages")
-			cfg.MinPostDate = lastCrawled
+		} else {
+			stopAtMessageID = lastMsgID
+			if !lastCrawled.IsZero() && lastCrawled.After(cfg.MinPostDate) {
+				log.Info().Str("channel", p.URL).Time("since", lastCrawled).Int64("stop_at_msg_id", lastMsgID).Str("log_tag", "rw_channel").Msg("Channel previously crawled, fetching only new messages")
+				cfg.MinPostDate = lastCrawled
+			}
 		}
 	}
 
 	// Get channel information
+	cfg.StopAtMessageID = stopAtMessageID
 	channelInfo, messages, err := getChannelInfo(tdlibClient, p, cachedChatID, cfg)
 	if err != nil {
 		return nil, err
@@ -649,7 +656,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 	}
 
 	// Process all messages in the channel
-	discoveredChannels, err := processAllMessages(tdlibClient, channelInfo, messages, cfg.CrawlID, p.URL, sm, p, cfg)
+	discoveredChannels, fetchedCount, err := processAllMessages(tdlibClient, channelInfo, messages, cfg.CrawlID, p.URL, sm, p, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -665,7 +672,7 @@ func RunForChannel(tdlibClient crawler.TDLibClient, p *state.Page, storagePrefix
 		if originalMinPostDate.IsZero() {
 			lastMsgDate = maxMessageDate(messages)
 		}
-		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id, lastMsgDate); markErr != nil {
+		if markErr := sm.MarkChannelCrawled(p.URL, channelInfo.chat.Id, lastMsgDate, fetchedCount, int(channelInfo.memberCount), maxMessageID(messages)); markErr != nil {
 			log.Warn().Err(markErr).Str("channel", p.URL).Str("log_tag", "rw_channel").Msg("Failed to mark channel as crawled")
 		}
 	}
@@ -683,6 +690,18 @@ func maxMessageDate(messages []*client.Message) time.Time {
 			if t.After(max) {
 				max = t
 			}
+		}
+	}
+	return max
+}
+
+// maxMessageID returns the highest TDLib message ID from a slice of messages.
+// Returns 0 if the slice is empty.
+func maxMessageID(messages []*client.Message) int64 {
+	var max int64
+	for _, msg := range messages {
+		if msg != nil && msg.Id > max {
+			max = msg.Id
 		}
 	}
 	return max
@@ -937,9 +956,9 @@ func getChannelInfoWithDeps(
 
 	var mess []*client.Message
 	if !cfg.DateBetweenMin.IsZero() && !cfg.DateBetweenMax.IsZero() {
-		mess, err = telegramhelper.FetchChannelMessagesWithSampling(tdlibClient, chat.Id, page, cfg.DateBetweenMin, cfg.DateBetweenMax, cfg.MaxPosts, cfg.SampleSize)
+		mess, err = telegramhelper.FetchChannelMessagesWithSampling(tdlibClient, chat.Id, page, cfg.DateBetweenMin, cfg.DateBetweenMax, cfg.MaxPosts, cfg.SampleSize, 0)
 	} else {
-		mess, err = telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts)
+		mess, err = telegramhelper.FetchChannelMessages(tdlibClient, chat.Id, page, cfg.MinPostDate, cfg.MaxPosts, cfg.StopAtMessageID)
 	}
 
 	// Get channel stats
@@ -1108,8 +1127,9 @@ func (s *searchLookupStats) log(channel string, tag string) {
 	e.Msg("SearchPublicChat lookup stats")
 }
 
-// processAllMessages retrieves and processes all messages from a channel
-func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, messages []*client.Message, crawlID, channelUsername string, sm state.StateManagementInterface, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, error) {
+// processAllMessages retrieves and processes all messages from a channel.
+// Returns discovered channels, the number of successfully fetched messages, and any error.
+func processAllMessages(tdlibClient crawler.TDLibClient, info *channelInfo, messages []*client.Message, crawlID, channelUsername string, sm state.StateManagementInterface, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, int, error) {
 	processor := &DefaultMessageProcessor{}
 	return processAllMessagesWithProcessor(tdlibClient, info, messages, crawlID, channelUsername, sm, processor, owner, cfg)
 
@@ -1144,7 +1164,7 @@ func processAllMessagesWithProcessor(
 	crawlID,
 	channelUsername string,
 	sm state.StateManagementInterface,
-	processor MessageProcessor, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, error) {
+	processor MessageProcessor, owner *state.Page, cfg common.CrawlerConfig) ([]*state.Page, int, error) {
 
 	discoveredChannels := make([]*state.Page, 0)
 	discoveredMessages := make([]state.Message, 0)
@@ -1183,7 +1203,7 @@ func processAllMessagesWithProcessor(
 	//Now we have a list lets set the ones that need resampling for crawling, leave the others as fetched. If the post doesn't exist any more mark it deleted
 	err := sm.UpdatePage(*owner)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	log.Info().
@@ -1326,7 +1346,7 @@ func processAllMessagesWithProcessor(
 									}
 									if batchErr := sm.CreatePendingBatch(tandemBatch); batchErr != nil {
 										log.Error().Str("log_tag", "rw_tandem").Err(batchErr).Msg("Failed to create pending batch")
-										return nil, batchErr
+										return nil, 0, batchErr
 									}
 									log.Info().Str("log_tag", "rw_tandem").Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
 										Msg("Created pending batch")
@@ -1376,7 +1396,7 @@ func processAllMessagesWithProcessor(
 											if secs >= floodWaitRetireThresholdSecs {
 												log.Warn().Str("log_tag", "rw_channel").Int("retry_after_secs", secs).Str("channel", o).
 													Msg("FLOOD_WAIT exceeds retire threshold, retiring client")
-												return nil, fmt.Errorf("random-walk-channel: FLOOD_WAIT %ds exceeds retire threshold: %w", secs, ErrFloodWaitRetire)
+												return nil, 0, fmt.Errorf("random-walk-channel: FLOOD_WAIT %ds exceeds retire threshold: %w", secs, ErrFloodWaitRetire)
 											}
 											log.Warn().Str("log_tag", "rw_channel").Int("retry_after_secs", secs).Str("channel", o).
 												Msg("FLOOD_WAIT on SearchPublicChat, sleeping and retrying")
@@ -1460,7 +1480,7 @@ func processAllMessagesWithProcessor(
 				// Close the batch — signals validator that all edges are written.
 				if closeErr := sm.ClosePendingBatch(tandemBatch.BatchID); closeErr != nil {
 					log.Error().Str("log_tag", "rw_tandem").Err(closeErr).Msg("Failed to close pending batch")
-					return nil, closeErr
+					return nil, 0, closeErr
 				}
 				log.Info().Str("log_tag", "rw_tandem").Str("batch_id", tandemBatch.BatchID).Str("source_channel", owner.URL).
 					Msg("Batch closed, validator will handle walkback")
@@ -1472,7 +1492,7 @@ func processAllMessagesWithProcessor(
 				channelWalkback = true
 				walkbackURL, walkErr := pickWalkbackChannel(sm, owner.URL, nil)
 				if walkErr != nil {
-					return nil, walkErr
+					return nil, 0, walkErr
 				}
 				channelNextURL = walkbackURL
 				page := &state.Page{
@@ -1493,11 +1513,11 @@ func processAllMessagesWithProcessor(
 				}
 				if bufErr := sm.AddPageToPageBuffer(page); bufErr != nil {
 					log.Error().Str("log_tag", "rw_tandem").Err(bufErr).Msg("Failed to add walkback page to page buffer")
-					return nil, fmt.Errorf("random-walk-tandem: forced walkback page lost: %w", bufErr)
+					return nil, 0, fmt.Errorf("random-walk-tandem: forced walkback page lost: %w", bufErr)
 				}
 				if saveErr := sm.SaveEdgeRecords([]*state.EdgeRecord{edge}); saveErr != nil {
 					log.Err(saveErr).Str("log_tag", "rw_tandem").Str("source_channel", owner.URL).Msg("Error saving forced walkback edge")
-					return nil, saveErr
+					return nil, 0, saveErr
 				}
 			}
 		} else {
@@ -1529,7 +1549,7 @@ func processAllMessagesWithProcessor(
 				linkToFollow.Walkback = true
 				walkbackURL, walkErr := pickWalkbackChannel(sm, owner.URL, newChannels)
 				if walkErr != nil {
-					return nil, walkErr
+					return nil, 0, walkErr
 				}
 				page.URL = walkbackURL
 				// The walkback edge belongs to the current chain; the next crawl starts a new chain.
@@ -1583,7 +1603,7 @@ func processAllMessagesWithProcessor(
 			err = sm.SaveEdgeRecords(discoveredEdges)
 			if err != nil {
 				log.Err(err).Str("log_tag", "rw_edge").Str("source_channel", owner.URL).Msg("Error saving discovered edges")
-				return nil, err
+				return nil, 0, err
 			}
 		}
 	}
@@ -1610,10 +1630,10 @@ func processAllMessagesWithProcessor(
 	owner.Status = "fetched"
 	err = sm.UpdatePage(*owner)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return discoveredChannels, nil
+	return discoveredChannels, fetched, nil
 }
 
 // resampleMarker updates message statuses by comparing existing messages with

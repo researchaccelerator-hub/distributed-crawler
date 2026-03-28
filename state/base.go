@@ -97,8 +97,12 @@ func (bsm *BaseStateManager) UpsertSeedChannelChatID(_ string, _ int64) error   
 func (bsm *BaseStateManager) InsertSeedChannelIfNew(_ string) error                     { return nil }
 func (bsm *BaseStateManager) GetCachedChatID(_ string) (int64, bool)                { return 0, false }
 func (bsm *BaseStateManager) IsSeedChannel(_ string) bool                           { return false }
-func (bsm *BaseStateManager) GetChannelLastCrawled(_ string) (time.Time, error)     { return time.Time{}, nil }
-func (bsm *BaseStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time) error { return nil }
+func (bsm *BaseStateManager) GetChannelLastCrawled(_ string) (time.Time, int64, error) {
+	return time.Time{}, 0, nil
+}
+func (bsm *BaseStateManager) MarkChannelCrawled(_ string, _ int64, _ time.Time, _ int, _ int, _ int64) error {
+	return nil
+}
 func (bsm *BaseStateManager) LoadInvalidChannels() error                            { return nil }
 func (bsm *BaseStateManager) IsInvalidChannel(_ string) bool                        { return false }
 func (bsm *BaseStateManager) MarkChannelInvalid(_ string, _ string) error           { return nil }

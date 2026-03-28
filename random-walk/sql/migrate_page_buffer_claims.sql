@@ -8,7 +8,7 @@ BEGIN;
 
 -- 1. Add claim tracking columns (no-op if they already exist).
 ALTER TABLE page_buffer ADD COLUMN IF NOT EXISTS claimed_by  VARCHAR(128) NOT NULL DEFAULT '';
-ALTER TABLE page_buffer ADD COLUMN IF NOT EXISTS claimed_at  TIMESTAMP;
+ALTER TABLE page_buffer ADD COLUMN IF NOT EXISTS claimed_at  TIMESTAMPTZ;
 
 -- 2. Idempotent seeding: prevents duplicate seeds when multiple pods race.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_page_buffer_crawl_url

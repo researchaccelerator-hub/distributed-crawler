@@ -239,7 +239,7 @@ func TestGetChannelLastCrawled_ParameterizedSQL(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	_, err := dsm.GetChannelLastCrawled("' OR '1'='1")
+	_, _, err := dsm.GetChannelLastCrawled("' OR '1'='1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestGetChannelLastCrawled_NullResult(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	ts, err := dsm.GetChannelLastCrawled("nocrawl")
+	ts, _, err := dsm.GetChannelLastCrawled("nocrawl")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestGetChannelLastCrawled_RFC3339Timestamp(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	got, err := dsm.GetChannelLastCrawled("chan1")
+	got, _, err := dsm.GetChannelLastCrawled("chan1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestGetChannelLastCrawled_Float64Unix(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	got, err := dsm.GetChannelLastCrawled("chan2")
+	got, _, err := dsm.GetChannelLastCrawled("chan2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestGetChannelLastCrawled_BindingError(t *testing.T) {
 		},
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
-	_, err := dsm.GetChannelLastCrawled("anychan")
+	_, _, err := dsm.GetChannelLastCrawled("anychan")
 	if err == nil {
 		t.Fatal("expected error from binding failure")
 	}
@@ -321,7 +321,7 @@ func TestMarkChannelCrawled_UpdatesCacheAndCallsDB(t *testing.T) {
 	mc := &mockDaprClient{}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
-	if err := dsm.MarkChannelCrawled("crawled1", 777, time.Now()); err != nil {
+	if err := dsm.MarkChannelCrawled("crawled1", 777, time.Now(), 100, 5000, 12345678); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -342,7 +342,7 @@ func TestMarkChannelCrawled_StoresLastMessageDate(t *testing.T) {
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
 	msgDate := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
-	if err := dsm.MarkChannelCrawled("chan1", 111, msgDate); err != nil {
+	if err := dsm.MarkChannelCrawled("chan1", 111, msgDate, 50, 2000, 99887766); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -363,7 +363,7 @@ func TestMarkChannelCrawled_ZeroTimePassesNilForMessageDate(t *testing.T) {
 	mc := &mockDaprClient{}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
-	if err := dsm.MarkChannelCrawled("chan2", 222, time.Time{}); err != nil {
+	if err := dsm.MarkChannelCrawled("chan2", 222, time.Time{}, 0, 0, 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -392,7 +392,7 @@ func TestGetChannelLastCrawled_CoalescesPrefersMessageDate(t *testing.T) {
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
-	got, err := dsm.GetChannelLastCrawled("chan1")
+	got, _, err := dsm.GetChannelLastCrawled("chan1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestGetChannelLastCrawled_FallsBackToLastCrawledAt(t *testing.T) {
 	}
 	dsm := newTestDSMRW(mc, defaultRWConfig())
 
-	got, err := dsm.GetChannelLastCrawled("chan2")
+	got, _, err := dsm.GetChannelLastCrawled("chan2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
