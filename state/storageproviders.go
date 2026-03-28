@@ -229,7 +229,7 @@ func (lsm *LocalStateManager) MarkSeedChannelInvalid(username string) error {
 	return fmt.Errorf("MarkSeedChannelInvalid not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
+func (lsm *LocalStateManager) ClaimDiscoveredChannel(username, crawlID, sourceChannel string) (bool, error) {
 	return false, fmt.Errorf("ClaimDiscoveredChannel not implemented for local state manager")
 }
 

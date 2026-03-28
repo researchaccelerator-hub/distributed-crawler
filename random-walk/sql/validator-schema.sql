@@ -106,6 +106,7 @@ CREATE TABLE source_type_stats (
 CREATE TABLE discovered_channels (
     channel_username VARCHAR(64)  NOT NULL,
     crawl_id         VARCHAR(64)  NOT NULL,
+    source_channel   VARCHAR(64)  NOT NULL DEFAULT '',
     discovered_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     PRIMARY KEY (channel_username)
 );
@@ -192,12 +193,15 @@ GRANT SELECT ON TABLE access_events        TO crawler_readonly;
 -- CREATE TABLE IF NOT EXISTS discovered_channels (
 --     channel_username VARCHAR(64)  NOT NULL,
 --     crawl_id         VARCHAR(64)  NOT NULL,
+--     source_channel   VARCHAR(64)  NOT NULL DEFAULT '',
 --     discovered_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 --     PRIMARY KEY (channel_username)
 -- );
 -- Existing deployments: drop composite PK and add single-column PK.
 -- ALTER TABLE discovered_channels DROP CONSTRAINT IF EXISTS discovered_channels_pkey;
 -- ALTER TABLE discovered_channels ADD PRIMARY KEY (channel_username);
+-- Add source_channel column to existing deployments:
+-- ALTER TABLE discovered_channels ADD COLUMN IF NOT EXISTS source_channel VARCHAR(64) NOT NULL DEFAULT '';
 
 -- CREATE INDEX IF NOT EXISTS idx_pending_batches_status ON pending_edge_batches (status, created_at);
 -- CREATE INDEX IF NOT EXISTS idx_pending_batches_crawl_incomplete ON pending_edge_batches (crawl_id) WHERE status <> 'completed';

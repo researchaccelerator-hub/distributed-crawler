@@ -4334,10 +4334,10 @@ func (dsm *DaprStateManager) GetRandomSeedChannel() (string, int, error) {
 //	SELECT COUNT(*) FROM ins;
 //
 // COUNT = 1 → we inserted (first claim).  COUNT = 0 → conflict (already claimed).
-func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
-	sqlQuery := `WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id) VALUES ($1, $2) ON CONFLICT (channel_username) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`
+func (dsm *DaprStateManager) ClaimDiscoveredChannel(username, crawlID, sourceChannel string) (bool, error) {
+	sqlQuery := `WITH ins AS ( INSERT INTO discovered_channels (channel_username, crawl_id, source_channel) VALUES ($1, $2, $3) ON CONFLICT (channel_username) DO NOTHING RETURNING 1 ) SELECT COUNT(*) FROM ins;`
 
-	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID)
+	rows, err := dsm.queryDatabase(sqlQuery, username, crawlID, sourceChannel)
 	if err != nil {
 		return false, fmt.Errorf("validator-db: failed to claim discovered channel: %w", err)
 	}

@@ -342,7 +342,7 @@ func validateSingleEdge(
 	switch result.Status {
 	case "valid":
 		// Claim first-discovery
-		claimed, claimErr := sm.ClaimDiscoveredChannel(channel, edge.CrawlID)
+		claimed, claimErr := sm.ClaimDiscoveredChannel(channel, edge.CrawlID, edge.SourceChannel)
 		if claimErr != nil {
 			log.Warn().Str("log_tag", "val_edge").Err(claimErr).Str("channel", channel).Msg("ClaimDiscoveredChannel failed")
 		}

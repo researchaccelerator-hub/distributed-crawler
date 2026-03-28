@@ -416,7 +416,7 @@ func TestClaimDiscoveredChannel_FirstClaim(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	claimed, err := dsm.ClaimDiscoveredChannel("new_chan", "crawl-1")
+	claimed, err := dsm.ClaimDiscoveredChannel("new_chan", "crawl-1", "source_chan")
 	require.NoError(t, err)
 	assert.True(t, claimed)
 
@@ -435,7 +435,7 @@ func TestClaimDiscoveredChannel_AlreadyClaimed(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	claimed, err := dsm.ClaimDiscoveredChannel("existing_chan", "crawl-1")
+	claimed, err := dsm.ClaimDiscoveredChannel("existing_chan", "crawl-1", "")
 	require.NoError(t, err)
 	assert.False(t, claimed)
 }
@@ -448,7 +448,7 @@ func TestClaimDiscoveredChannel_SQLInjectionSafe(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	_, err := dsm.ClaimDiscoveredChannel("it's_a_test", "crawl-1")
+	_, err := dsm.ClaimDiscoveredChannel("it's_a_test", "crawl-1", "")
 	require.NoError(t, err)
 
 	mc.mu.Lock()

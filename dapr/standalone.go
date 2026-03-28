@@ -343,7 +343,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 		log.Info().Str("log_tag", "val_mode").Msg("Starting validation-only loop")
 		// Load shared caches used by the validator (same order as random-walk init).
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Str("log_tag", "val_mode").Err(seedErr).Msg("Failed to load seed channels (continuing)")
+			log.Fatal().Str("log_tag", "val_mode").Err(seedErr).Msg("Failed to load seed channels")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
 			log.Warn().Str("log_tag", "val_mode").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")
@@ -407,7 +407,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 			return
 		}
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Str("log_tag", "rw_init").Err(seedErr).Msg("Failed to load seed channels (continuing)")
+			log.Fatal().Str("log_tag", "rw_init").Err(seedErr).Msg("Failed to load seed channels")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
 			log.Warn().Str("log_tag", "rw_init").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")

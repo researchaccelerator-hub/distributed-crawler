@@ -385,7 +385,7 @@ func launch(stringList []string, crawlCfg common.CrawlerConfig) {
 
 	if crawlCfg.SamplingMethod == "random-walk" {
 		if seedErr := sm.LoadSeedChannels(); seedErr != nil {
-			log.Warn().Str("log_tag", "rw_init").Err(seedErr).Msg("Failed to load seed channels (continuing)")
+			log.Fatal().Str("log_tag", "rw_init").Err(seedErr).Msg("Failed to load seed channels")
 		}
 		if invalidErr := sm.LoadInvalidChannels(); invalidErr != nil {
 			log.Warn().Str("log_tag", "rw_init").Err(invalidErr).Msg("Failed to load invalid channels (continuing)")

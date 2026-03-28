@@ -31,7 +31,7 @@ func TestValidateSingleEdge_Valid(t *testing.T) {
 
 	sm.On("IsInvalidChannel", "testchan").Return(false)
 	sm.On("IsChannelDiscovered", "testchan").Return(false, nil)
-	sm.On("ClaimDiscoveredChannel", "testchan", "crawl-1").Return(true, nil)
+	sm.On("ClaimDiscoveredChannel", "testchan", "crawl-1", "").Return(true, nil)
 	sm.On("InsertSeedChannelIfNew", "testchan").Return(nil)
 
 	edge := &state.PendingEdge{
@@ -51,7 +51,7 @@ func TestValidateSingleEdge_Valid(t *testing.T) {
 
 	assert.Equal(t, 1, update.PendingID)
 	assert.Equal(t, "valid", update.ValidationStatus)
-	sm.AssertCalled(t, "ClaimDiscoveredChannel", "testchan", "crawl-1")
+	sm.AssertCalled(t, "ClaimDiscoveredChannel", "testchan", "crawl-1", "")
 	sm.AssertCalled(t, "InsertSeedChannelIfNew", "testchan")
 }
 
@@ -190,7 +190,7 @@ func TestValidateSingleEdge_ValidButRaceLost(t *testing.T) {
 
 	sm.On("IsInvalidChannel", "raced_chan").Return(false)
 	sm.On("IsChannelDiscovered", "raced_chan").Return(false, nil)
-	sm.On("ClaimDiscoveredChannel", "raced_chan", "crawl-1").Return(false, nil) // another validator won
+	sm.On("ClaimDiscoveredChannel", "raced_chan", "crawl-1", "").Return(false, nil) // another validator won
 
 	edge := &state.PendingEdge{
 		PendingID:          4,
@@ -504,7 +504,7 @@ func TestRunEdgeValidation_IdleTimeoutResetsOnActivity(t *testing.T) {
 
 	sm.On("IsInvalidChannel", "testchan").Return(false)
 	sm.On("IsChannelDiscovered", "testchan").Return(false, nil)
-	sm.On("ClaimDiscoveredChannel", "testchan", "crawl-1").Return(true, nil)
+	sm.On("ClaimDiscoveredChannel", "testchan", "crawl-1", "").Return(true, nil)
 	sm.On("InsertSeedChannelIfNew", "testchan").Return(nil)
 	sm.On("UpdatePendingEdge", mock.Anything).Return(nil)
 
@@ -566,7 +566,7 @@ func TestRunEdgeValidation_ProbeResumesValidation(t *testing.T) {
 	}
 	sm.On("IsInvalidChannel", "goodchan").Return(false)
 	sm.On("IsChannelDiscovered", "goodchan").Return(false, nil)
-	sm.On("ClaimDiscoveredChannel", "goodchan", "crawl-1").Return(true, nil)
+	sm.On("ClaimDiscoveredChannel", "goodchan", "crawl-1", "").Return(true, nil)
 	sm.On("InsertSeedChannelIfNew", "goodchan").Return(nil)
 	sm.On("UpdatePendingEdge", state.PendingEdgeUpdate{
 		PendingID:        100,

@@ -527,8 +527,8 @@ func (m *MockStateManager) GetRandomSeedChannel() (string, int, error) {
 	return args.String(0), args.Int(1), args.Error(2)
 }
 
-func (m *MockStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {
-	args := m.Called(username, crawlID)
+func (m *MockStateManager) ClaimDiscoveredChannel(username, crawlID, sourceChannel string) (bool, error) {
+	args := m.Called(username, crawlID, sourceChannel)
 	return args.Bool(0), args.Error(1)
 }
 

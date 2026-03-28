@@ -198,8 +198,8 @@ type StateManagementInterface interface {
 
 	// ClaimDiscoveredChannel atomically claims first-discovery of a channel.
 	// Returns true if this call inserted (first claim), false if already claimed
-	// by any crawl.  crawlID is stored for audit only.
-	ClaimDiscoveredChannel(username, crawlID string) (bool, error)
+	// by any crawl.  crawlID and sourceChannel are stored for audit only.
+	ClaimDiscoveredChannel(username, crawlID, sourceChannel string) (bool, error)
 
 	// IsChannelDiscovered checks whether a channel has been discovered by any
 	// crawl in the crawler's history, without inserting. Used by validators to

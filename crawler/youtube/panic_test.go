@@ -128,7 +128,7 @@ func (m *MockStateManager) RecoverStaleBatchClaims(_ time.Duration) (int, error)
 func (m *MockStateManager) RecoverStaleValidatingEdges(_ time.Duration) (int, error)          { return 0, nil }
 func (m *MockStateManager) FlushBatchStats(_ string, _ string, _ []*state.PendingEdge) error   { return nil }
 func (m *MockStateManager) GetRandomSeedChannel() (string, int, error)                              { return "", 0, nil }
-func (m *MockStateManager) ClaimDiscoveredChannel(_ string, _ string) (bool, error)            { return false, nil }
+func (m *MockStateManager) ClaimDiscoveredChannel(_ string, _ string, _ string) (bool, error)  { return false, nil }
 func (m *MockStateManager) IsChannelDiscovered(_ string) (bool, error)                         { return false, nil }
 func (m *MockStateManager) CountIncompleteBatches(_ string) (int, error)                       { return 0, nil }
 func (m *MockStateManager) InsertAccessEvent(_ string) error                                   { return nil }
