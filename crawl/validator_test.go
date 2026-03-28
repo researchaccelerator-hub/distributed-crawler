@@ -230,7 +230,7 @@ func TestProcessWalkbackBatch_ForcedWalkback(t *testing.T) {
 		{PendingID: 2, ValidationStatus: "not_channel", SourceType: "url"},
 	}
 
-	sm.On("GetRandomSeedChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "walkback_target" && p.Depth == 1
 	})).Return(nil)
@@ -317,7 +317,7 @@ func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
 	}
 
 	var callOrder []string
-	sm.On("GetRandomSeedChannel").Return("walkback_url", nil).Run(func(args mock.Arguments) {
+	sm.On("GetRandomSeedChannel").Return("walkback_url", 100, nil).Run(func(args mock.Arguments) {
 		callOrder = append(callOrder, "GetRandomSeedChannel")
 	})
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil).Run(func(args mock.Arguments) {

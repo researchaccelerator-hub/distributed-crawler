@@ -192,8 +192,9 @@ type StateManagementInterface interface {
 	// all pending_edges rows for that batch.
 	FlushBatchStats(batchID, crawlID string, edges []*PendingEdge) error
 
-	// GetRandomSeedChannel returns a random channel_username from seed_channels.
-	GetRandomSeedChannel() (string, error)
+	// GetRandomSeedChannel returns a random channel_username from seed_channels
+	// along with the total pool size (via window function, single query).
+	GetRandomSeedChannel() (string, int, error)
 
 	// ClaimDiscoveredChannel atomically claims first-discovery of a channel.
 	// Returns true if this call inserted (first claim), false if already claimed

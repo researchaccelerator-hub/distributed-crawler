@@ -522,9 +522,9 @@ func (m *MockStateManager) FlushBatchStats(batchID, crawlID string, edges []*sta
 	return args.Error(0)
 }
 
-func (m *MockStateManager) GetRandomSeedChannel() (string, error) {
+func (m *MockStateManager) GetRandomSeedChannel() (string, int, error) {
 	args := m.Called()
-	return args.String(0), args.Error(1)
+	return args.String(0), args.Int(1), args.Error(2)
 }
 
 func (m *MockStateManager) ClaimDiscoveredChannel(username, crawlID string) (bool, error) {

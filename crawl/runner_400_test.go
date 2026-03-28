@@ -225,7 +225,7 @@ func TestHandle400Replacement_ForwardEdge_NoSkippedEdges_FallsBackToWalkback(t *
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return((*state.EdgeRecord)(nil), nil)
-	sm.On("GetRandomSeedChannel").Return("walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_chan", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "walkback_chan"
 	})).Return(nil)
@@ -262,7 +262,7 @@ func TestHandle400Replacement_ForwardEdge_GetSkippedEdgeErrors_FallsBackToWalkba
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return((*state.EdgeRecord)(nil), fmt.Errorf("db timeout"))
-	sm.On("GetRandomSeedChannel").Return("walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_chan", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
@@ -295,7 +295,7 @@ func TestHandle400Replacement_WalkbackEdge_MakesAnotherWalkback(t *testing.T) {
 	sm.On("MarkSeedChannelInvalid", "bad_walkback_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_walkback_channel").Return(walkbackEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_walkback_channel").Return(nil)
-	sm.On("GetRandomSeedChannel").Return("new_walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("new_walkback_chan", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "new_walkback_chan"
 	})).Return(nil)
@@ -330,7 +330,7 @@ func TestHandle400Replacement_NoEdgeRecord_FallsBackToWalkback(t *testing.T) {
 	sm.On("GetEdgeRecord", "seq-1", "orphan_channel").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "orphan_channel").Return(nil)
 	sm.On("IsSeedChannel", "orphan_channel").Return(false)
-	sm.On("GetRandomSeedChannel").Return("walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_chan", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
@@ -356,7 +356,7 @@ func TestHandle400Replacement_SeedChannel_PicksFromSeedTable(t *testing.T) {
 	sm.On("GetEdgeRecord", "seq-1", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "seed_chan").Return(nil)
 	sm.On("IsSeedChannel", "seed_chan").Return(true)
-	sm.On("GetRandomSeedChannel").Return("replacement_seed", nil)
+	sm.On("GetRandomSeedChannel").Return("replacement_seed", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 
 	err := Handle400Replacement(sm, page, cfg)
@@ -604,7 +604,7 @@ func TestHandle400Walkback_SequenceIDSemantics(t *testing.T) {
 	var capturedEdges []*state.EdgeRecord
 	var capturedPage *state.Page
 
-	sm.On("GetRandomSeedChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		capturedPage = p
 		return true
@@ -642,7 +642,7 @@ func TestHandle400Walkback_AllCandidatesExcluded_ReturnsErrWalkbackExhausted(t *
 	}
 
 	// Always returns the excluded channel — exhausts all maxWalkbackAttempts.
-	sm.On("GetRandomSeedChannel").Return("bad_channel", nil)
+	sm.On("GetRandomSeedChannel").Return("bad_channel", 100, nil)
 
 	err := handle400Walkback(sm, page, "source_chan", "seq-1")
 
@@ -662,8 +662,8 @@ func TestHandle400Walkback_ExcludedCandidatesThenSuccess(t *testing.T) {
 	}
 
 	// First two calls return the excluded channel; third returns a valid one.
-	sm.On("GetRandomSeedChannel").Return("bad_channel", nil).Times(2)
-	sm.On("GetRandomSeedChannel").Return("good_walkback", nil).Once()
+	sm.On("GetRandomSeedChannel").Return("bad_channel", 100, nil).Times(2)
+	sm.On("GetRandomSeedChannel").Return("good_walkback", 100, nil).Once()
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
@@ -769,7 +769,7 @@ func TestHandle400SeedReplacement_GetRandomSeedChannelError_Propagated(t *testin
 	sm.On("GetEdgeRecord", "seq-1", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "seed_chan").Return(nil)
 	sm.On("IsSeedChannel", "seed_chan").Return(true)
-	sm.On("GetRandomSeedChannel").Return("", fmt.Errorf("seed table empty"))
+	sm.On("GetRandomSeedChannel").Return("", 0, fmt.Errorf("seed table empty"))
 
 	err := Handle400Replacement(sm, page, cfg)
 
@@ -793,7 +793,7 @@ func TestHandle400SeedReplacement_AddPageToBufferFails_ReturnsError(t *testing.T
 	sm.On("GetEdgeRecord", "seq-1", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "seed_chan").Return(nil)
 	sm.On("IsSeedChannel", "seed_chan").Return(true)
-	sm.On("GetRandomSeedChannel").Return("replacement_seed", nil)
+	sm.On("GetRandomSeedChannel").Return("replacement_seed", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(fmt.Errorf("buffer write failed"))
 
 	err := Handle400Replacement(sm, page, cfg)
@@ -820,7 +820,7 @@ func TestHandle400SeedReplacement_ReplacementPageHasFreshSequenceID(t *testing.T
 	sm.On("GetEdgeRecord", "original-seq", "seed_chan").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "original-seq", "seed_chan").Return(nil)
 	sm.On("IsSeedChannel", "seed_chan").Return(true)
-	sm.On("GetRandomSeedChannel").Return("replacement_seed", nil)
+	sm.On("GetRandomSeedChannel").Return("replacement_seed", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		capturedPage = p
 		return true

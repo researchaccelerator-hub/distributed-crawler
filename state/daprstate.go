@@ -4301,21 +4301,27 @@ func (dsm *DaprStateManager) FlushBatchStats(batchID, crawlID string, edges []*P
 	return nil
 }
 
-// GetRandomSeedChannel returns a random channel_username from seed_channels.
-func (dsm *DaprStateManager) GetRandomSeedChannel() (string, error) {
-	sqlQuery := `SELECT channel_username FROM seed_channels WHERE (invalidated_at IS NULL OR invalidated_at < NOW() - INTERVAL '30 days') ORDER BY RANDOM() LIMIT 1;`
+// GetRandomSeedChannel returns a random channel_username from seed_channels along
+// with the total number of eligible channels in the pool (via a window function,
+// so no extra round-trip is needed).
+func (dsm *DaprStateManager) GetRandomSeedChannel() (string, int, error) {
+	sqlQuery := `SELECT channel_username, COUNT(*) OVER() FROM seed_channels WHERE (invalidated_at IS NULL OR invalidated_at < NOW() - INTERVAL '30 days') ORDER BY RANDOM() LIMIT 1;`
 	rows, err := dsm.queryDatabase(sqlQuery)
 	if err != nil {
-		return "", fmt.Errorf("validator-db: failed to get random seed channel: %w", err)
+		return "", 0, fmt.Errorf("validator-db: failed to get random seed channel: %w", err)
 	}
-	if len(rows) == 0 || len(rows[0]) == 0 {
-		return "", fmt.Errorf("validator-db: no seed channels found")
+	if len(rows) == 0 || len(rows[0]) < 2 {
+		return "", 0, fmt.Errorf("validator-db: no seed channels found")
 	}
 	username, ok := rows[0][0].(string)
 	if !ok {
-		return "", fmt.Errorf("validator-db: unexpected type for channel_username")
+		return "", 0, fmt.Errorf("validator-db: unexpected type for channel_username")
 	}
-	return username, nil
+	poolSize := 0
+	if v, ok := rows[0][1].(float64); ok {
+		poolSize = int(v)
+	}
+	return username, poolSize, nil
 }
 
 // ClaimDiscoveredChannel atomically claims first-discovery of a channel across

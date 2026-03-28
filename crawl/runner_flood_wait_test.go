@@ -216,7 +216,7 @@ func TestStandardMode_NotFoundError(t *testing.T) {
 	sm.On("MarkChannelInvalid", "ghost_chan", "not_found").Return(nil)
 
 	// Walkback triggered — no valid channels discovered.
-	sm.On("GetRandomSeedChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
@@ -279,7 +279,7 @@ func TestStandardMode_ShortFloodWait_RetryFailsWithNotFound(t *testing.T) {
 	sm.On("MarkChannelInvalid", "retry_chan", "not_found").Return(nil)
 
 	// Walkback triggered since no channels were discovered.
-	sm.On("GetRandomSeedChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", 100, nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 

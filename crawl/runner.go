@@ -117,7 +117,7 @@ const maxWalkbackAttempts = 10
 
 func pickWalkbackChannel(sm state.StateManagementInterface, sourceURL string, exclude map[string]bool) (string, error) {
 	for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
-		url, err := sm.GetRandomSeedChannel()
+		url, poolSize, err := sm.GetRandomSeedChannel()
 		if err != nil {
 			return "", fmt.Errorf("random-walk-walkback: unable to get walkback channel from %s: %w", sourceURL, err)
 		}
@@ -130,7 +130,7 @@ func pickWalkbackChannel(sm state.StateManagementInterface, sourceURL string, ex
 			continue
 		}
 		log.Info().Str("log_tag", "rw_walkback").Str("walkback_url", url).Str("source_channel", sourceURL).
-			Msg("Selected walkback channel")
+			Int("seed_pool_size", poolSize).Msg("Selected walkback channel")
 		return url, nil
 	}
 	return "", fmt.Errorf("random-walk-walkback: channel %s: %w", sourceURL, ErrWalkbackExhausted)
@@ -259,7 +259,7 @@ func handle400Walkback(sm state.StateManagementInterface, p *state.Page, sourceC
 // (no incoming edge record). It picks a random valid seed channel and adds it
 // to the page buffer without creating an edge record.
 func handle400SeedReplacement(sm state.StateManagementInterface, p *state.Page) error {
-	seedURL, err := sm.GetRandomSeedChannel()
+	seedURL, _, err := sm.GetRandomSeedChannel()
 	if err != nil {
 		return fmt.Errorf("random-walk-400: seed replacement: %w", err)
 	}

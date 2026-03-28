@@ -221,8 +221,8 @@ func (lsm *LocalStateManager) FlushBatchStats(batchID, crawlID string, edges []*
 	return fmt.Errorf("FlushBatchStats not implemented for local state manager")
 }
 
-func (lsm *LocalStateManager) GetRandomSeedChannel() (string, error) {
-	return "", fmt.Errorf("GetRandomSeedChannel not implemented for local state manager")
+func (lsm *LocalStateManager) GetRandomSeedChannel() (string, int, error) {
+	return "", 0, fmt.Errorf("GetRandomSeedChannel not implemented for local state manager")
 }
 
 func (lsm *LocalStateManager) MarkSeedChannelInvalid(username string) error {

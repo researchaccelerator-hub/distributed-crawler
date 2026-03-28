@@ -371,21 +371,23 @@ func TestFlushBatchStats_EmptySourceTypeMappedToUnknown(t *testing.T) {
 // GetRandomSeedChannel
 // ---------------------------------------------------------------------------
 
-func TestGetRandomSeedChannel_ReturnsChannel(t *testing.T) {
+func TestGetRandomSeedChannel_ReturnsChannelAndPoolSize(t *testing.T) {
 	mc := &mockDaprClient{
 		invokeBindingFn: func(_ context.Context, _ *daprc.InvokeBindingRequest) (*daprc.BindingEvent, error) {
-			return &daprc.BindingEvent{Data: jsonRows([][]any{{"random_chan"}})}, nil
+			return &daprc.BindingEvent{Data: jsonRows([][]any{{"random_chan", float64(42)}})}, nil
 		},
 	}
 	dsm := newValidatorDSM(mc)
 
-	ch, err := dsm.GetRandomSeedChannel()
+	ch, poolSize, err := dsm.GetRandomSeedChannel()
 	require.NoError(t, err)
 	assert.Equal(t, "random_chan", ch)
+	assert.Equal(t, 42, poolSize)
 
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "ORDER BY RANDOM()")
+	assert.Contains(t, mc.bindingCalls[0].Metadata["sql"], "COUNT(*) OVER()")
 }
 
 func TestGetRandomSeedChannel_EmptyTable(t *testing.T) {
@@ -396,7 +398,7 @@ func TestGetRandomSeedChannel_EmptyTable(t *testing.T) {
 	}
 	dsm := newValidatorDSM(mc)
 
-	_, err := dsm.GetRandomSeedChannel()
+	_, _, err := dsm.GetRandomSeedChannel()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no seed channels found")
 }
