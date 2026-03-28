@@ -110,14 +110,14 @@ func isTDLib400(err error) bool {
 		strings.Contains(s, "no messages found in the chat")
 }
 
-// pickWalkbackChannel selects a random discovered channel to walk back to,
+// pickWalkbackChannel selects a random seed channel to walk back to,
 // skipping sourceURL and any channel present in the exclude map.
 // Returns ErrWalkbackExhausted if no suitable channel is found within maxWalkbackAttempts.
 const maxWalkbackAttempts = 10
 
 func pickWalkbackChannel(sm state.StateManagementInterface, sourceURL string, exclude map[string]bool) (string, error) {
 	for attempt := 0; attempt < maxWalkbackAttempts; attempt++ {
-		url, err := sm.GetRandomDiscoveredChannel()
+		url, err := sm.GetRandomSeedChannel()
 		if err != nil {
 			return "", fmt.Errorf("random-walk-walkback: unable to get walkback channel from %s: %w", sourceURL, err)
 		}

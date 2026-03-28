@@ -230,7 +230,7 @@ func TestProcessWalkbackBatch_ForcedWalkback(t *testing.T) {
 		{PendingID: 2, ValidationStatus: "not_channel", SourceType: "url"},
 	}
 
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "walkback_target" && p.Depth == 1
 	})).Return(nil)
@@ -294,8 +294,8 @@ func TestProcessWalkbackBatch_Forward(t *testing.T) {
 
 	assert.NoError(t, err)
 	sm.AssertExpectations(t)
-	// GetRandomDiscoveredChannel should NOT be called in forward mode
-	sm.AssertNotCalled(t, "GetRandomDiscoveredChannel")
+	// GetRandomSeedChannel should NOT be called in forward mode
+	sm.AssertNotCalled(t, "GetRandomSeedChannel")
 }
 
 func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
@@ -317,8 +317,8 @@ func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
 	}
 
 	var callOrder []string
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_url", nil).Run(func(args mock.Arguments) {
-		callOrder = append(callOrder, "GetRandomDiscoveredChannel")
+	sm.On("GetRandomSeedChannel").Return("walkback_url", nil).Run(func(args mock.Arguments) {
+		callOrder = append(callOrder, "GetRandomSeedChannel")
 	})
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		callOrder = append(callOrder, "AddPageToPageBuffer")
@@ -338,7 +338,7 @@ func TestProcessWalkbackBatch_CompletionOrder(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, []string{
-		"GetRandomDiscoveredChannel",
+		"GetRandomSeedChannel",
 		"AddPageToPageBuffer",
 		"SaveEdgeRecords",
 		"CompletePendingBatch",

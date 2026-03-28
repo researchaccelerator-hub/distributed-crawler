@@ -197,7 +197,7 @@ func TestHandle400Replacement_ForwardEdge_SkippedEdgeAvailable(t *testing.T) {
 	sm.AssertCalled(t, "PromoteEdge", "seq-1", "skipped_chan")
 	sm.AssertCalled(t, "AddPageToPageBuffer", mock.Anything)
 	// Walkback must NOT fire when a skipped edge is available.
-	sm.AssertNotCalled(t, "GetRandomDiscoveredChannel")
+	sm.AssertNotCalled(t, "GetRandomSeedChannel")
 	sm.AssertNotCalled(t, "SaveEdgeRecords", mock.Anything)
 }
 
@@ -225,7 +225,7 @@ func TestHandle400Replacement_ForwardEdge_NoSkippedEdges_FallsBackToWalkback(t *
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return((*state.EdgeRecord)(nil), nil)
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_chan", nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "walkback_chan"
 	})).Return(nil)
@@ -234,7 +234,7 @@ func TestHandle400Replacement_ForwardEdge_NoSkippedEdges_FallsBackToWalkback(t *
 	err := Handle400Replacement(sm, page, cfg)
 
 	assert.NoError(t, err)
-	sm.AssertCalled(t, "GetRandomDiscoveredChannel")
+	sm.AssertCalled(t, "GetRandomSeedChannel")
 	sm.AssertNotCalled(t, "PromoteEdge", mock.Anything, mock.Anything)
 }
 
@@ -262,14 +262,14 @@ func TestHandle400Replacement_ForwardEdge_GetSkippedEdgeErrors_FallsBackToWalkba
 	sm.On("GetEdgeRecord", "seq-1", "bad_channel").Return(forwardEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_channel").Return(nil)
 	sm.On("GetRandomSkippedEdge", "seq-1", "source_chan").Return((*state.EdgeRecord)(nil), fmt.Errorf("db timeout"))
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_chan", nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
 	err := Handle400Replacement(sm, page, cfg)
 
 	assert.NoError(t, err)
-	sm.AssertCalled(t, "GetRandomDiscoveredChannel")
+	sm.AssertCalled(t, "GetRandomSeedChannel")
 }
 
 // Original edge was a walkback → make another walkback decision.
@@ -295,7 +295,7 @@ func TestHandle400Replacement_WalkbackEdge_MakesAnotherWalkback(t *testing.T) {
 	sm.On("MarkSeedChannelInvalid", "bad_walkback_channel").Return(nil)
 	sm.On("GetEdgeRecord", "seq-1", "bad_walkback_channel").Return(walkbackEdge, nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "bad_walkback_channel").Return(nil)
-	sm.On("GetRandomDiscoveredChannel").Return("new_walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("new_walkback_chan", nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		return p.URL == "new_walkback_chan"
 	})).Return(nil)
@@ -308,7 +308,7 @@ func TestHandle400Replacement_WalkbackEdge_MakesAnotherWalkback(t *testing.T) {
 	assert.NoError(t, err)
 	// Skipped-edge path must NOT be tried when the original was a walkback.
 	sm.AssertNotCalled(t, "GetRandomSkippedEdge", mock.Anything, mock.Anything)
-	sm.AssertCalled(t, "GetRandomDiscoveredChannel")
+	sm.AssertCalled(t, "GetRandomSeedChannel")
 	sm.AssertCalled(t, "SaveEdgeRecords", mock.Anything)
 }
 
@@ -330,14 +330,14 @@ func TestHandle400Replacement_NoEdgeRecord_FallsBackToWalkback(t *testing.T) {
 	sm.On("GetEdgeRecord", "seq-1", "orphan_channel").Return((*state.EdgeRecord)(nil), nil)
 	sm.On("DeleteEdgeRecord", "seq-1", "orphan_channel").Return(nil)
 	sm.On("IsSeedChannel", "orphan_channel").Return(false)
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_chan", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_chan", nil)
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
 	err := Handle400Replacement(sm, page, cfg)
 
 	assert.NoError(t, err)
-	sm.AssertCalled(t, "GetRandomDiscoveredChannel")
+	sm.AssertCalled(t, "GetRandomSeedChannel")
 }
 
 // No edge record + IsSeedChannel = true → picks from seed_channels, no edge written.
@@ -604,7 +604,7 @@ func TestHandle400Walkback_SequenceIDSemantics(t *testing.T) {
 	var capturedEdges []*state.EdgeRecord
 	var capturedPage *state.Page
 
-	sm.On("GetRandomDiscoveredChannel").Return("walkback_target", nil)
+	sm.On("GetRandomSeedChannel").Return("walkback_target", nil)
 	sm.On("AddPageToPageBuffer", mock.MatchedBy(func(p *state.Page) bool {
 		capturedPage = p
 		return true
@@ -631,7 +631,7 @@ func TestHandle400Walkback_SequenceIDSemantics(t *testing.T) {
 	assert.Equal(t, 2, capturedPage.Depth)
 }
 
-// Walkback exhaustion: all GetRandomDiscoveredChannel attempts return the
+// Walkback exhaustion: all GetRandomSeedChannel attempts return the
 // excluded channel → must return ErrWalkbackExhausted.
 func TestHandle400Walkback_AllCandidatesExcluded_ReturnsErrWalkbackExhausted(t *testing.T) {
 	sm := new(MockStateManager)
@@ -642,7 +642,7 @@ func TestHandle400Walkback_AllCandidatesExcluded_ReturnsErrWalkbackExhausted(t *
 	}
 
 	// Always returns the excluded channel — exhausts all maxWalkbackAttempts.
-	sm.On("GetRandomDiscoveredChannel").Return("bad_channel", nil)
+	sm.On("GetRandomSeedChannel").Return("bad_channel", nil)
 
 	err := handle400Walkback(sm, page, "source_chan", "seq-1")
 
@@ -662,15 +662,15 @@ func TestHandle400Walkback_ExcludedCandidatesThenSuccess(t *testing.T) {
 	}
 
 	// First two calls return the excluded channel; third returns a valid one.
-	sm.On("GetRandomDiscoveredChannel").Return("bad_channel", nil).Times(2)
-	sm.On("GetRandomDiscoveredChannel").Return("good_walkback", nil).Once()
+	sm.On("GetRandomSeedChannel").Return("bad_channel", nil).Times(2)
+	sm.On("GetRandomSeedChannel").Return("good_walkback", nil).Once()
 	sm.On("AddPageToPageBuffer", mock.Anything).Return(nil)
 	sm.On("SaveEdgeRecords", mock.Anything).Return(nil)
 
 	err := handle400Walkback(sm, page, "source_chan", "seq-1")
 
 	assert.NoError(t, err)
-	sm.AssertNumberOfCalls(t, "GetRandomDiscoveredChannel", 3)
+	sm.AssertNumberOfCalls(t, "GetRandomSeedChannel", 3)
 }
 
 // ── RunForChannelWithPool: ErrTDLib400 propagation ─────────────────────────
